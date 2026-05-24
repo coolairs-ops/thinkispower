@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.next/
+.env
+*.log
+.claude/
+demo_response.json
+internal/
+graphify-out/
+project_status.json

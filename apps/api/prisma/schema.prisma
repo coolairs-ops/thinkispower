@@ -1,0 +1,332 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ 用户与认证 ============
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  name         String?
+  hashedPassword String
+  avatarUrl    String?  @map("avatar_url")
+  plan         String   @default("free") // free | pro | enterprise
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  projects Project[]
+
+  @@map("users")
+}
+
+// ============ 项目 ============
+
+model Project {
+  id                     String   @id @default(uuid()) @db.Uuid
+  userId                 String   @map("user_id") @db.Uuid
+  name                   String
+  description            String?
+  appType                String?  @map("app_type")
+  status                 String   @default("needs_input") // 内部状态
+  publicStatusLabel      String?  @map("public_status_label") // 用户可见状态
+  structuredRequirement  Json?    @map("structured_requirement")
+  planSummary            Json?    @map("plan_summary")
+  moduleMap              Json?    @map("module_map")
+  acceptanceChecklist    Json?    @map("acceptance_checklist")
+  demoUrl                String?  @map("demo_url")
+  demoHtml               String?  @map("demo_html")
+  productionUrl          String?  @map("production_url")
+  latestBuildId          String?  @map("latest_build_id") @db.Uuid
+  sourceExportEnabled    Boolean  @default(false) @map("source_export_enabled")
+  packageExportEnabled   Boolean  @default(false) @map("package_export_enabled")
+  repositoryExportEnabled Boolean @default(false) @map("repository_export_enabled")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user                     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages                 ProjectMessage[]
+  modules                  Module[]
+  tasks                    Task[]
+  feedbackItems            FeedbackItem[]
+  builds                   Build[]
+  deliveryOptions          DeliveryOption?
+  decisionLogs             DecisionLog[]
+  errorEvents              ErrorEvent[]
+  caseReviews              CaseReview[]
+  experienceRecommendations ExperienceRecommendation[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+// ============ 项目消息 ============
+
+model ProjectMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  role      String   // user | assistant | system_internal
+  content   String
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("project_messages")
+}
+
+// ============ 模块 ============
+
+model Module {
+  id           String   @id @default(uuid()) @db.Uuid
+  projectId    String   @map("project_id") @db.Uuid
+  moduleKey    String   @map("module_key")
+  name         String
+  description  String?
+  pageKeys     Json?    @map("page_keys")
+  apiKeys      Json?    @map("api_keys")
+  dataKeys     Json?    @map("data_keys")
+  dependencies Json?
+  status       String   @default("planned")
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks         Task[]
+  feedbackItems FeedbackItem[]
+
+  @@unique([projectId, moduleKey])
+  @@map("modules")
+}
+
+// ============ 任务 ============
+
+model Task {
+  id            String   @id @default(uuid()) @db.Uuid
+  projectId     String   @map("project_id") @db.Uuid
+  moduleId      String?  @map("module_id") @db.Uuid
+  type          String   // frontend | backend | database | test | fix | deploy | export_source | export_package | export_repository | export_database_schema | export_deployment_config | case_review | experience_recommendation
+  title         String
+  description   String
+  priority      Int      @default(100)
+  dependencies  Json?
+  status        String   @default("pending") // pending | running | completed | failed | blocked
+  inputPayload  Json?    @map("input_payload")
+  resultPayload Json?    @map("result_payload")
+  retryCount    Int      @default(0) @map("retry_count")
+  maxRetries    Int      @default(3) @map("max_retries")
+  errorMessage  String?  @map("error_message")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  module       Module?        @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  decisionLogs DecisionLog[]
+  errorEvents  ErrorEvent[]
+  generatedTaskFeedback FeedbackItem[] @relation("GeneratedTask")
+
+  @@index([projectId])
+  @@map("tasks")
+}
+
+// ============ 批注反馈 ============
+
+model FeedbackItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  moduleId       String?  @map("module_id") @db.Uuid
+  moduleKey      String?  @map("module_key")
+  elementPath    String?  @map("element_path")
+  pageUrl        String?  @map("page_url")
+  screenshotUrl  String?  @map("screenshot_url")
+  comment        String
+  status         String   @default("new") // new | processing | resolved
+  generatedTaskId String? @map("generated_task_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  module       Module? @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  generatedTask Task?  @relation("GeneratedTask", fields: [generatedTaskId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@map("feedback_items")
+}
+
+// ============ 构建记录 ============
+
+model Build {
+  id                  String   @id @default(uuid()) @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  version             Int
+  commitHash          String?  @map("commit_hash")
+  artifactUrl         String?  @map("artifact_url")
+  demoUrl             String?  @map("demo_url")
+  productionUrl       String?  @map("production_url")
+  sourceZipUrl        String?  @map("source_zip_url")
+  packageZipUrl       String?  @map("package_zip_url")
+  repositoryUrl       String?  @map("repository_url")
+  databaseSchemaUrl   String?  @map("database_schema_url")
+  deploymentConfigUrl String?  @map("deployment_config_url")
+  readmeUrl           String?  @map("readme_url")
+  envExampleUrl       String?  @map("env_example_url")
+  testReport          Json?    @map("test_report")
+  status              String   @default("created") // created | building | success | failed
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("builds")
+}
+
+// ============ 交付选项 ============
+
+model DeliveryOption {
+  id                      String   @id @default(uuid()) @db.Uuid
+  projectId               String   @unique @map("project_id") @db.Uuid
+  onlineUrlEnabled        Boolean  @default(true) @map("online_url_enabled")
+  sourceZipEnabled        Boolean  @default(false) @map("source_zip_enabled")
+  packageExportEnabled    Boolean  @default(false) @map("package_export_enabled")
+  gitRepositoryEnabled    Boolean  @default(false) @map("git_repository_enabled")
+  databaseExportEnabled   Boolean  @default(false) @map("database_export_enabled")
+  deploymentConfigEnabled Boolean  @default(false) @map("deployment_config_enabled")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("delivery_options")
+}
+
+// ============ 决策规则（内部） ============
+
+model DecisionRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  ruleKey     String   @unique @map("rule_key")
+  name        String
+  stage       String
+  description String?
+  conditions  Json
+  actions     Json
+  priority    Int      @default(100)
+  isActive    Boolean  @default(true) @map("is_active")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("decision_rules")
+}
+
+// ============ 决策日志（内部） ============
+
+model DecisionLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  projectId      String?  @map("project_id") @db.Uuid
+  taskId         String?  @map("task_id") @db.Uuid
+  ruleKey        String?  @map("rule_key")
+  stage          String
+  inputContext   Json     @map("input_context")
+  decisionResult Json     @map("decision_result")
+  actionTaken    String?  @map("action_taken")
+  outcome        String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task    Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@map("decision_logs")
+}
+
+// ============ 错误模式（内部） ============
+
+model ErrorPattern {
+  id                String   @id @default(uuid()) @db.Uuid
+  patternKey        String   @unique @map("pattern_key")
+  name              String
+  publicName        String?  @map("public_name")
+  stage             String?
+  signals           Json?
+  commonCauses      Json?    @map("common_causes")
+  recommendedActions Json?   @map("recommended_actions")
+  autoFixable       Boolean  @default(false) @map("auto_fixable")
+  severity          String   @default("medium")
+  successRate       Decimal? @default(0) @map("success_rate")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  errorEvents ErrorEvent[]
+
+  @@map("error_patterns")
+}
+
+// ============ 错误事件（内部） ============
+
+model ErrorEvent {
+  id               String   @id @default(uuid()) @db.Uuid
+  projectId        String?  @map("project_id") @db.Uuid
+  taskId           String?  @map("task_id") @db.Uuid
+  patternId        String?  @map("pattern_id") @db.Uuid
+  rawError         String?  @map("raw_error")
+  sanitizedError   String?  @map("sanitized_error")
+  stage            String?
+  matchedConfidence Decimal? @map("matched_confidence")
+  actionTaken      String?  @map("action_taken")
+  resolved         Boolean  @default(false)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  project Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task    Task?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  pattern ErrorPattern? @relation(fields: [patternId], references: [id], onDelete: SetNull)
+
+  @@map("error_events")
+}
+
+// ============ 项目复盘（内部） ============
+
+model CaseReview {
+  id                  String   @id @default(uuid()) @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  appType             String?  @map("app_type")
+  summary             String?
+  originalRequirement Json?    @map("original_requirement")
+  finalPlan           Json?    @map("final_plan")
+  feedbackCount       Int      @default(0) @map("feedback_count")
+  mainErrors          Json?    @map("main_errors")
+  fixStrategies       Json?    @map("fix_strategies")
+  deliveryType        String?  @map("delivery_type")
+  userAcceptanceResult String? @map("user_acceptance_result")
+  reusableLessons     Json?    @map("reusable_lessons")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("case_reviews")
+}
+
+// ============ 经验推荐（内部） ============
+
+model ExperienceRecommendation {
+  id                  String   @id @default(uuid()) @db.Uuid
+  projectId           String?  @map("project_id") @db.Uuid
+  stage               String
+  recommendationType  String   @map("recommendation_type") // question | module_template | test_case | fix_strategy | delivery_check | risk_warning
+  sourceType          String?  @map("source_type")
+  sourceId            String?  @map("source_id") @db.Uuid
+  recommendation      Json
+  accepted            Boolean?
+  outcome             String?
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@map("experience_recommendations")
+}
