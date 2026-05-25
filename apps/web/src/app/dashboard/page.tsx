@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api';
 
 interface Project {
   id: string;
@@ -14,27 +16,23 @@ interface Project {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { token, isLoading } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      router.push('/');
-      return;
-    }
-    fetch('/api/projects', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.json())
+    if (isLoading) return;
+    if (!token) { router.push('/'); return; }
+
+    api.get('/api/projects')
       .then((data) => {
         setProjects(Array.isArray(data) ? data : []);
         setLoading(false);
       })
-      .catch(() => {
-        setLoading(false);
-      });
-  }, [router]);
+      .catch(() => setLoading(false));
+  }, [token, isLoading, router]);
+
+  if (isLoading || loading) return <div className="p-8 text-gray-500">加载中...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -53,9 +51,7 @@ export default function DashboardPage() {
       <main className="mx-auto max-w-5xl px-6 py-8">
         <h2 className="mb-6 text-xl font-semibold text-gray-800">我的项目</h2>
 
-        {loading ? (
-          <p className="text-gray-500">加载中...</p>
-        ) : projects.length === 0 ? (
+        {projects.length === 0 ? (
           <div className="rounded-xl border-2 border-dashed border-gray-300 p-12 text-center">
             <p className="mb-4 text-gray-500">还没有项目</p>
             <Link

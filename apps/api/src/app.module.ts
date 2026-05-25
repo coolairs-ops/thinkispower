@@ -15,6 +15,7 @@ import { OpenClawModule } from './integrations/openclaw/openclaw.module';
 import { CloudecodeModule } from './integrations/cloudecode/cloudecode.module';
 import { PipelineModule } from './integrations/pipeline/pipeline.module';
 import { MinioModule } from './integrations/minio/minio.module';
+import { N8nModule } from './integrations/n8n/n8n.module';
 import { N8nWebhookModule } from './modules/n8n-webhook/n8n-webhook.module';
 import { HealthController } from './modules/health/health.controller';
 import { SanitizeService } from './services/sanitize.service';
@@ -48,6 +49,7 @@ import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
     CloudecodeModule,
     PipelineModule,
     MinioModule,
+    N8nModule,
     N8nWebhookModule,
   ],
   controllers: [HealthController],

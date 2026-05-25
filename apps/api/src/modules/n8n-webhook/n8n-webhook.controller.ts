@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { TaskService } from '../task/task.service';
 import { PrismaService } from '../../database/prisma.service';
+import { StatusMapperService } from '../../services/status-mapper.service';
 import { EVENTS } from '../../events/event-types';
 import { Public } from '../../common/decorators/public.decorator';
 
@@ -15,6 +16,7 @@ export class N8nWebhookController {
     private taskService: TaskService,
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
+    private statusMapper: StatusMapperService,
   ) {}
 
   @Public()
@@ -46,6 +48,86 @@ export class N8nWebhookController {
       await this.taskService.updateStatus(taskId, 'failed', {
         errorMessage: summary || 'N8N workflow reported failure',
       });
+    }
+
+    return { received: true };
+  }
+
+  @Public()
+  @Post('delivery-complete')
+  async deliveryComplete(@Body() body: {
+    projectId: string;
+    success: boolean;
+    productionUrl?: string;
+    error?: string;
+    metrics?: { duration: number; tasksCompleted: number; tasksFailed: number };
+  }) {
+    const { projectId, success, productionUrl, error, metrics } = body;
+    this.logger.log(`[反馈信道] 交付完成回调: project=${projectId} success=${success}`);
+
+    if (success) {
+      // 正向通道：交付成功
+      const updateData: any = {
+        status: 'completed',
+        publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('completed'),
+      };
+      if (productionUrl) {
+        updateData.productionUrl = productionUrl;
+      }
+
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: updateData,
+      });
+
+      // 记录指标到最新的 Build（状态观测器数据）
+      if (metrics) {
+        const latestBuild = await this.prisma.build.findFirst({
+          where: { projectId },
+          orderBy: { version: 'desc' },
+          select: { id: true },
+        });
+        if (latestBuild) {
+          await this.prisma.build.update({
+            where: { id: latestBuild.id },
+            data: {
+              status: 'success',
+              productionUrl: productionUrl || undefined,
+              testReport: metrics as any,
+            },
+          });
+        }
+      }
+
+      this.logger.log(`[反馈信道] 交付完成: ${productionUrl || '无 URL'}`);
+    } else {
+      // 异常通道：交付失败
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'build_failed',
+          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('build_failed'),
+        },
+      });
+
+      if (metrics) {
+        const latestBuild = await this.prisma.build.findFirst({
+          where: { projectId },
+          orderBy: { version: 'desc' },
+          select: { id: true },
+        });
+        if (latestBuild) {
+          await this.prisma.build.update({
+            where: { id: latestBuild.id },
+            data: {
+              status: 'failed',
+              testReport: { error, ...metrics } as any,
+            },
+          });
+        }
+      }
+
+      this.logger.error(`[反馈信道] 交付失败: ${error || '未知错误'}`);
     }
 
     return { received: true };

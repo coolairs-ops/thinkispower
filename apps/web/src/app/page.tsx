@@ -2,33 +2,36 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth-context';
+import { useToast } from '@/lib/toast';
 
 export default function HomePage() {
   const router = useRouter();
+  const { login, register } = useAuth();
+  const { toast } = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-    const body = isLogin ? { email, password } : { email, password, name };
+    if (submitting) return;
+    setSubmitting(true);
 
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      localStorage.setItem('token', data.token);
+    try {
+      if (isLogin) {
+        await login(email, password);
+      } else {
+        await register(name, email, password);
+      }
       router.push('/dashboard');
-    } else {
-      const err = await res.json();
-      alert(err.message || '操作失败，请重试');
+    } catch (err: any) {
+      toast(err.message || '操作失败，请重试', 'error');
     }
+
+    setSubmitting(false);
   };
 
   return (

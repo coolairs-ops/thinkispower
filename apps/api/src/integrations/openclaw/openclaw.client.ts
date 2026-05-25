@@ -3,6 +3,29 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
 
+const DELIVERY_DECOMPOSITION_PROMPT = `你是一个软件项目技术负责人（总工），负责项目的交付评估和任务分解。
+
+你需要：
+1. 分析项目的完整性 — 评估 Demo 对原始需求的覆盖程度
+2. 识别风险点 — 哪些功能还不完整、不够健壮或有潜在问题
+3. 生成交付任务清单 — 确保项目可以顺利交付
+
+请用 JSON 格式输出，严格遵循以下结构（不要 markdown 包裹，纯 JSON）：
+{
+  "completeness": 0-100之间的整数（评估完成度百分比），
+  "risks": [{"severity": "high|medium|low", "description": "风险描述"}],
+  "recommendations": ["建议1", "建议2"],
+  "tasks": [
+    {
+      "type": "deploy|export_source|export_package|export_repository|export_database_schema|export_deployment_config",
+      "title": "任务标题",
+      "description": "任务详细描述",
+      "moduleKey": "对应的模块key（如适用）",
+      "priority": 100
+    }
+  ]
+}`;
+
 const TASK_DECOMPOSITION_PROMPT = `你是一个软件项目技术负责人（总工）。用户对 Demo 页面提出了修改意见。你需要：
 1. 分析意见，判断用户想改什么
 2. 参考当前 Demo HTML，确认改动位置
@@ -100,6 +123,117 @@ export class OpenClawClient {
     }
 
     return taskIds;
+  }
+
+  async handleDeliveryExport(projectId: string): Promise<{
+    taskIds: string[];
+    analysis: { completeness: number; risks: Array<{ severity: string; description: string }>; recommendations: string[] };
+  }> {
+    this.logger.log(`OpenClaw analyzing delivery readiness for project ${projectId}`);
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { demoHtml: true, planSummary: true, moduleMap: true, description: true },
+    });
+
+    if (!project) {
+      this.logger.error(`Project ${projectId} not found`);
+      return { taskIds: [], analysis: { completeness: 0, risks: [{ severity: 'high', description: '项目不存在' }], recommendations: [] } };
+    }
+
+    const userMessage = [
+      `## 项目描述`,
+      project.description || '（未提供）',
+      ``,
+      `## 项目计划`,
+      typeof project.planSummary === 'object' ? JSON.stringify(project.planSummary, null, 2) : (project.planSummary || '（未提供）'),
+      ``,
+      `## 模块映射`,
+      typeof project.moduleMap === 'object' ? JSON.stringify(project.moduleMap, null, 2) : (project.moduleMap || '（未提供）'),
+      ``,
+      `## 当前 Demo HTML（前 5000 字符）`,
+      project.demoHtml ? project.demoHtml.slice(0, 5000) : '（暂无 Demo）',
+    ].join('\n');
+
+    const response = await this.deepseek.chat(
+      [
+        { role: 'system', content: DELIVERY_DECOMPOSITION_PROMPT },
+        { role: 'user', content: userMessage },
+      ],
+      { temperature: 0.3, maxTokens: 4096 },
+    );
+
+    const parsed = this.parseDeliveryResponse(response);
+    this.logger.log(`OpenClaw delivery analysis: ${parsed.completeness}% complete, ${parsed.tasks.length} tasks, ${parsed.risks.length} risks`);
+
+    // Create Task records
+    const taskIds: string[] = [];
+    for (const task of parsed.tasks) {
+      const created = await this.prisma.task.create({
+        data: {
+          projectId,
+          type: task.type,
+          title: task.title,
+          description: task.description,
+          priority: task.priority ?? 100,
+          inputPayload: { moduleKey: task.moduleKey || undefined, source: 'delivery-export' },
+        },
+      });
+      taskIds.push(created.id);
+    }
+
+    // Store analysis in project structuredRequirement for frontend consumption
+    const analysis = {
+      completeness: parsed.completeness,
+      risks: parsed.risks,
+      recommendations: parsed.recommendations,
+    };
+
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        structuredRequirement: {
+          ...(typeof project.planSummary === 'object' ? project.planSummary : {}),
+          deliveryAnalysis: analysis,
+        } as any,
+      },
+    });
+
+    return { taskIds, analysis };
+  }
+
+  private parseDeliveryResponse(response: string): {
+    completeness: number;
+    risks: Array<{ severity: string; description: string }>;
+    recommendations: string[];
+    tasks: Array<{ type: string; title: string; description: string; moduleKey?: string; priority?: number }>;
+  } {
+    const fallback = {
+      completeness: 50,
+      risks: [{ severity: 'medium' as const, description: 'AI 分析失败，请人工检查项目完整性' }],
+      recommendations: ['人工检查交付物'],
+      tasks: [{
+        type: 'deploy' as const,
+        title: '最终部署',
+        description: 'AI 自动分析失败，执行标准部署流程',
+        priority: 100,
+      }],
+    };
+
+    try {
+      const cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+
+      return {
+        completeness: typeof parsed.completeness === 'number' ? Math.max(0, Math.min(100, parsed.completeness)) : fallback.completeness,
+        risks: Array.isArray(parsed.risks) ? parsed.risks : fallback.risks,
+        recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : fallback.recommendations,
+        tasks: Array.isArray(parsed.tasks) ? parsed.tasks : fallback.tasks,
+      };
+    } catch {
+      this.logger.error('Failed to parse delivery decomposition response, using fallback');
+      return fallback;
+    }
   }
 
   private parseTasks(response: string, projectId: string): Array<{

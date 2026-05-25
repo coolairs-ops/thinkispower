@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api';
+import NavBar from '@/lib/nav-bar';
 
 type Mode = 'preview' | 'annotation';
 interface ClickedElement { moduleKey: string; elementPath: string; }
@@ -21,9 +23,11 @@ export default function DemoPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.id as string;
+  const { token, isLoading } = useAuth();
 
   const [demoHtml, setDemoHtml] = useState<string | null>(null);
   const [demoUrl, setDemoUrl] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState('');
   const [status, setStatus] = useState('loading');
   const [publicStatusLabel, setPublicStatusLabel] = useState('');
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
@@ -33,49 +37,45 @@ export default function DemoPage() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval>>();
 
-  const loadDemo = useCallback(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) { router.push('/'); return; }
-    const res = await fetch(`/api/projects/${projectId}/demo`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setDemoHtml(data.html || null);
-      setDemoUrl(data.demoUrl || null);
-      setStatus(data.status || 'loading');
-      setPublicStatusLabel(data.publicStatusLabel || '');
-    }
-  }, [projectId, router]);
-
-  const loadFeedbacks = useCallback(async () => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/projects/${projectId}/feedback`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setFeedbacks(Array.isArray(data) ? data : []);
-    }
-  }, [projectId]);
-
   useEffect(() => {
-    loadDemo();
-    loadFeedbacks();
-  }, [loadDemo, loadFeedbacks]);
+    if (isLoading) return;
+    if (!token) { router.push('/'); return; }
+
+    Promise.all([
+      api.get(`/api/projects/${projectId}/demo`),
+      api.get(`/api/projects/${projectId}`),
+      api.get(`/api/projects/${projectId}/feedback`),
+    ])
+      .then(([demo, proj, fbs]) => {
+        setDemoHtml(demo.html || null);
+        setDemoUrl(demo.demoUrl || null);
+        setStatus(demo.status || 'loading');
+        setPublicStatusLabel(demo.publicStatusLabel || '');
+        setProjectName(proj.name || '');
+        setFeedbacks(Array.isArray(fbs) ? fbs : []);
+      })
+      .catch(() => {});
+  }, [projectId, token, isLoading, router]);
 
   // Poll while generating
   useEffect(() => {
     if (status === 'demo_generating') {
       pollingRef.current = setInterval(() => {
-        loadDemo();
-        loadFeedbacks();
+        api.get(`/api/projects/${projectId}/demo`).then((data) => {
+          setDemoHtml(data.html || null);
+          setDemoUrl(data.demoUrl || null);
+          setStatus(data.status || 'loading');
+          setPublicStatusLabel(data.publicStatusLabel || '');
+        });
+        api.get(`/api/projects/${projectId}/feedback`).then((fbs) => {
+          setFeedbacks(Array.isArray(fbs) ? fbs : []);
+        });
       }, 3000);
       return () => {
         if (pollingRef.current) clearInterval(pollingRef.current);
       };
     }
-  }, [status, loadDemo, loadFeedbacks]);
+  }, [status, projectId]);
 
   // Listen for iframe element-click messages
   useEffect(() => {
@@ -114,36 +114,24 @@ export default function DemoPage() {
     setStatus('demo_generating');
     setPublicStatusLabel('正在生成预览');
     setClickedElement(null);
-    const token = localStorage.getItem('token');
-    await fetch(`/api/projects/${projectId}/demo/generate`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    await api.post(`/api/projects/${projectId}/demo/generate`);
   };
 
   const handleSubmitFeedback = async () => {
     if (!feedbackComment.trim() || !clickedElement) return;
 
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/projects/${projectId}/feedback`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        moduleKey: clickedElement.moduleKey,
-        elementPath: clickedElement.elementPath,
-        pageUrl: demoUrl || '',
-        comment: feedbackComment,
-      }),
+    await api.post(`/api/projects/${projectId}/feedback`, {
+      moduleKey: clickedElement.moduleKey,
+      elementPath: clickedElement.elementPath,
+      pageUrl: demoUrl || '',
+      comment: feedbackComment,
     });
 
-    if (res.ok) {
-      setClickedElement(null);
-      setFeedbackComment('');
-      loadFeedbacks();
-    }
+    setClickedElement(null);
+    setFeedbackComment('');
+    api.get(`/api/projects/${projectId}/feedback`).then((fbs) => {
+      setFeedbacks(Array.isArray(fbs) ? fbs : []);
+    });
   };
 
   const handleClearSelection = () => {
@@ -154,44 +142,13 @@ export default function DemoPage() {
   const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback';
   const showGenerateButton = status === 'plan_ready' || status === 'demo_ready' || status === 'awaiting_demo_feedback';
 
-  const renderMainContent = () => {
-    if (status === 'demo_generating') {
-      return (
-        <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed">
-          <div className="text-center">
-            <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-            <p className="text-gray-500">AI 正在生成预览...</p>
-            <p className="mt-1 text-xs text-gray-400">根据方案内容生成，约需 30-60 秒</p>
-          </div>
-        </div>
-      );
-    }
-
-    if (showPreview && demoHtml) {
-      return (
-        <iframe
-          ref={iframeRef}
-          srcDoc={demoHtml}
-          className="h-full w-full rounded-xl border bg-white"
-          title="预览"
-          sandbox="allow-scripts allow-same-origin"
-        />
-      );
-    }
-
-    return (
-      <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed">
-        <div className="text-center">
-          <p className="text-gray-400">预览尚未生成</p>
-          <p className="mt-1 text-xs text-gray-300">确认方案后可点击"生成预览"按钮</p>
-        </div>
-      </div>
-    );
-  };
+  if (isLoading) return null;
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
-      <header className="flex items-center justify-between border-b bg-white px-6 py-3">
+      <NavBar projectId={projectId} projectName={projectName} />
+
+      <div className="flex items-center justify-between border-b bg-white px-6 py-2">
         <div className="flex items-center gap-4">
           <h1 className="text-lg font-bold text-gray-900">预览</h1>
           <ModeToggle mode={mode} onChange={setMode} />
@@ -209,29 +166,51 @@ export default function DemoPage() {
             </button>
           )}
           {showPreview && (
-            <Link
+            <a
               href={`/projects/${projectId}/delivery`}
               className="rounded-lg border border-green-300 px-4 py-1.5 text-sm text-green-700 hover:bg-green-50 transition-colors"
             >
               交付
-            </Link>
+            </a>
           )}
           {mode === 'annotation' && showPreview && demoHtml && (
             <p className="text-sm text-orange-500">点击页面中想修改的位置，写下意见</p>
           )}
         </div>
-      </header>
+      </div>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Preview area */}
         <div className="flex-1 p-4">
-          {renderMainContent()}
+          {status === 'demo_generating' ? (
+            <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed">
+              <div className="text-center">
+                <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+                <p className="text-gray-500">AI 正在生成预览...</p>
+                <p className="mt-1 text-xs text-gray-400">根据方案内容生成，约需 30-60 秒</p>
+              </div>
+            </div>
+          ) : showPreview && demoHtml ? (
+            <iframe
+              ref={iframeRef}
+              srcDoc={demoHtml}
+              className="h-full w-full rounded-xl border bg-white"
+              title="预览"
+              sandbox="allow-scripts allow-same-origin"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed">
+              <div className="text-center">
+                <p className="text-gray-400">预览尚未生成</p>
+                <p className="mt-1 text-xs text-gray-300">确认方案后可点击"生成预览"按钮</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar — only in annotation mode */}
         {mode === 'annotation' && showPreview && demoHtml && (
           <aside className="w-80 border-l bg-white p-4 overflow-y-auto flex flex-col gap-4">
-            {/* Feedback form */}
             {clickedElement ? (
               <div className="rounded-xl bg-white border border-blue-200 p-4 space-y-3">
                 <div className="flex items-start justify-between">
@@ -272,7 +251,6 @@ export default function DemoPage() {
 
             <hr className="border-gray-200" />
 
-            {/* Feedback history */}
             <div>
               <h2 className="mb-3 text-sm font-semibold text-gray-800">
                 历史意见
@@ -306,8 +284,6 @@ export default function DemoPage() {
     </div>
   );
 }
-
-/* ── Inline helper components ── */
 
 function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
   return (

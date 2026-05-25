@@ -2,30 +2,22 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api';
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const { token, isLoading } = useAuth();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
 
+  if (isLoading) return null;
+  if (!token) { router.push('/'); return null; }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    const res = await fetch('/api/projects', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ name, description }),
-    });
-
-    if (res.ok) {
-      const project = await res.json();
-      router.push(`/projects/${project.id}`);
-    }
+    const project = await api.post('/api/projects', { name, description });
+    router.push(`/projects/${project.id}`);
   };
 
   return (

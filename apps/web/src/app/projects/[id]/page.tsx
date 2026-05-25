@@ -3,6 +3,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api';
+import NavBar from '@/lib/nav-bar';
 
 interface Message {
   id: string;
@@ -15,6 +18,7 @@ export default function ProjectChatPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.id as string;
+  const { token, isLoading } = useAuth();
 
   const [project, setProject] = useState<any>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -22,31 +26,20 @@ export default function ProjectChatPage() {
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const loadProject = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) { router.push('/'); return; }
-    const res = await fetch(`/api/projects/${projectId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) setProject(await res.json());
-    else router.push('/dashboard');
-  };
-
-  const loadMessages = async () => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/projects/${projectId}/messages`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setMessages(Array.isArray(data) ? data : []);
-    }
-  };
-
   useEffect(() => {
-    loadProject();
-    loadMessages();
-  }, [projectId, router]);
+    if (isLoading) return;
+    if (!token) { router.push('/'); return; }
+
+    Promise.all([
+      api.get(`/api/projects/${projectId}`),
+      api.get(`/api/projects/${projectId}/messages`),
+    ])
+      .then(([proj, msgs]) => {
+        setProject(proj);
+        setMessages(Array.isArray(msgs) ? msgs : []);
+      })
+      .catch(() => router.push('/dashboard'));
+  }, [projectId, token, isLoading, router]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -55,29 +48,19 @@ export default function ProjectChatPage() {
   const handleSend = async () => {
     if (!input.trim() || sending) return;
     setSending(true);
-
-    const token = localStorage.getItem('token');
     const userMsg = input;
     setInput('');
 
-    // Optimistically add user message
     setMessages((prev) => [...prev, { id: 'temp', role: 'user', content: userMsg, createdAt: new Date().toISOString() }]);
 
-    const res = await fetch(`/api/projects/${projectId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ content: userMsg }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      // Replace all messages with server response (removes temp message)
+    try {
+      const data = await api.post(`/api/projects/${projectId}/messages`, { content: userMsg });
       setMessages(data.messages || []);
-      // Reload project to get updated status
-      loadProject();
+      const proj = await api.get(`/api/projects/${projectId}`);
+      setProject(proj);
+    } catch {
+      // Restore input on failure
+      setInput(userMsg);
     }
 
     setSending(false);
@@ -85,39 +68,16 @@ export default function ProjectChatPage() {
 
   const isPlanReady = project?.hasPlan || project?.status === 'plan_ready';
 
+  if (isLoading) return null;
   if (!project) return <div className="p-8 text-gray-500">加载中...</div>;
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b bg-white px-6 py-3">
-        <div>
-          <Link href="/dashboard" className="text-sm text-blue-600 hover:underline">← 返回项目列表</Link>
-          <h1 className="text-lg font-bold text-gray-900">{project.name}</h1>
-          <p className="text-xs text-gray-400">{project.statusText || project.status}</p>
-        </div>
-        <div className="flex gap-2">
-          {isPlanReady && (
-            <Link
-              href={`/projects/${projectId}/plan`}
-              className="rounded-lg bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700 animate-pulse"
-            >
-              查看方案 →
-            </Link>
-          )}
-          <Link
-            href={`/projects/${projectId}/delivery`}
-            className="rounded-lg border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            交付
-          </Link>
-        </div>
-      </header>
+      <NavBar projectId={projectId} projectName={project.name} />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-2xl space-y-4">
-          {/* Welcome message */}
           {messages.length === 0 && (
             <div className="flex justify-start">
               <div className="max-w-[80%] rounded-xl bg-white border px-4 py-3">
@@ -150,7 +110,6 @@ export default function ProjectChatPage() {
             </div>
           )}
 
-          {/* Plan ready prompt */}
           {isPlanReady && (
             <div className="flex justify-center">
               <Link
