@@ -7,16 +7,14 @@ services:
       POSTGRES_USER: platform
       POSTGRES_PASSWORD: platform_secret
       POSTGRES_DB: platform
-    ports:
-      - "5432:5432"
+    # ports: 移除主机映射避免冲突，N8N 通过内部网络访问 postgres:5432
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # ports: 移除主机映射避免冲突，N8N 通过内部网络访问 redis:6379
     volumes:
       - redisdata:/data
     restart: unless-stopped

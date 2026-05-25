@@ -16,17 +16,27 @@ export class N8nClient {
     const requestId = crypto.randomUUID();
     this.logger.log(`[${requestId}] Triggering n8n workflow: ${workflowName}`);
 
+    const url = `${this.baseUrl}/webhook/${workflowName}`;
     try {
-      // TODO: Implement actual n8n webhook call
-      // const response = await fetch(`${this.baseUrl}/webhook/${workflowName}`, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json', 'X-API-Key': this.apiKey },
-      //   body: JSON.stringify({ ...payload, requestId }),
-      // });
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.apiKey ? { 'X-API-Key': this.apiKey } : {}),
+        },
+        body: JSON.stringify({ ...payload, requestId }),
+      });
+
+      if (!response.ok) {
+        this.logger.warn(`[${requestId}] n8n workflow returned ${response.status}`);
+        return { success: false };
+      }
+
+      const result = await response.json().catch(() => ({}));
       this.logger.log(`[${requestId}] Workflow triggered: ${workflowName}`);
-      return { success: true, runId: requestId };
+      return { success: true, runId: result.runId || requestId };
     } catch (error) {
-      this.logger.error(`[${requestId}] Failed to trigger workflow: ${workflowName}`, error);
+      this.logger.error(`[${requestId}] Failed to trigger workflow ${workflowName}: ${(error as Error).message}`);
       return { success: false };
     }
   }
@@ -43,8 +53,8 @@ export class N8nClient {
     return this.triggerWorkflow('demo-generate', { projectId });
   }
 
-  async triggerTaskPlanningWorkflow(projectId: string) {
-    return this.triggerWorkflow('task-planning', { projectId });
+  async triggerTaskPlanningWorkflow(projectId: string, feedbackId: string, taskIds: string[]) {
+    return this.triggerWorkflow('task-planning', { projectId, feedbackId, taskIds });
   }
 
   async triggerFeedbackWorkflow(projectId: string, feedbackId: string) {

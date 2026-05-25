@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Optional, Logger } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
+import { MinioService } from '../integrations/minio/minio.service';
 
 const EXPORT_TYPE_FIELD_MAP: Record<string, string> = {
   source: 'sourceZipUrl',
@@ -13,7 +14,10 @@ const EXPORT_TYPE_FIELD_MAP: Record<string, string> = {
 export class BuildService {
   private readonly logger = new Logger(BuildService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private minio?: MinioService,
+  ) {}
 
   /**
    * 创建 Build 记录，version 按项目自动递增。
@@ -64,6 +68,38 @@ export class BuildService {
       data: { status },
     });
     this.logger.log(`Build ${buildId} status -> ${status}`);
+  }
+
+  /**
+   * Upload an artifact buffer to MinIO and store the URL in the Build record.
+   * Falls back silently if MinioService is not configured.
+   */
+  async uploadArtifact(
+    buildId: string,
+    projectId: string,
+    exportType: string,
+    buffer: Buffer,
+    filename: string,
+    contentType?: string,
+  ): Promise<string | undefined> {
+    if (!this.minio) {
+      this.logger.warn('MinIO not configured — cannot upload artifact');
+      return undefined;
+    }
+
+    try {
+      const objectName = this.minio.buildObjectName(projectId, exportType, filename);
+      const url = await this.minio.uploadFile(objectName, buffer, {
+        contentType: contentType || 'application/octet-stream',
+      });
+
+      await this.updateBuildArtifact(buildId, exportType, url);
+      this.logger.log(`Artifact uploaded for build ${buildId}: ${objectName}`);
+      return url;
+    } catch (error) {
+      this.logger.error(`Failed to upload artifact for build ${buildId}: ${error}`);
+      return undefined;
+    }
   }
 
   /**

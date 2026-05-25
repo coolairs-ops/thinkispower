@@ -14,6 +14,8 @@ import { DeliveryModule } from './modules/delivery/delivery.module';
 import { OpenClawModule } from './integrations/openclaw/openclaw.module';
 import { CloudecodeModule } from './integrations/cloudecode/cloudecode.module';
 import { PipelineModule } from './integrations/pipeline/pipeline.module';
+import { MinioModule } from './integrations/minio/minio.module';
+import { N8nWebhookModule } from './modules/n8n-webhook/n8n-webhook.module';
 import { HealthController } from './modules/health/health.controller';
 import { SanitizeService } from './services/sanitize.service';
 import { StatusMapperService } from './services/status-mapper.service';
@@ -45,6 +47,8 @@ import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
     OpenClawModule,
     CloudecodeModule,
     PipelineModule,
+    MinioModule,
+    N8nWebhookModule,
   ],
   controllers: [HealthController],
   providers: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, DeliveryOrchestrator],
