@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>一句话做软件平台 2.0 · 顶层架构设计图</title>
+  <style>
+    :root {
+      --blue: #3b82f6;
+      --orange: #f97316;
+      --green: #22c55e;
+      --purple: #8b5cf6;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --cyan: #06b6d4;
+      --indigo: #6366f1;
+      --slate: #64748b;
+      --bg: #eef2f6;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      padding: 1.5rem;
+      display: flex;
+      justify-content: center;
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1280px;
+      width: 100%;
+      background: white;
+      border-radius: 2rem;
+      padding: 2rem;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06);
+    }
+
+    h1 {
+      font-weight: 800;
+      color: #0f172a;
+      font-size: 1.78rem;
+      letter-spacing: -0.03em;
+    }
+
+    .subtitle {
+      color: #64748b;
+      font-size: 0.9rem;
+      margin: 0.35rem 0 1.25rem;
+      line-height: 1.55;
+      max-width: 980px;
+    }
+
+    .top-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .promise {
+      background: linear-gradient(135deg, #eff6ff, #f8fafc);
+      border: 1px solid #bfdbfe;
+      border-radius: 1.2rem;
+      padding: 1rem 1.2rem;
+    }
+
+    .moat {
+      background: linear-gradient(135deg, #ecfeff, #f8fafc);
+      border: 1px solid #a5f3fc;
+      border-radius: 1.2rem;
+      padding: 1rem 1.2rem;
+    }
+
+    .promise h2,
+    .moat h2 {
+      font-size: 1rem;
+      margin-bottom: 0.45rem;
+    }
+
+    .promise h2 { color: #1e40af; }
+    .moat h2 { color: #0e7490; }
+
+    .promise-grid,
+    .moat-grid {
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .promise-grid { grid-template-columns: repeat(4, 1fr); }
+    .moat-grid { grid-template-columns: repeat(2, 1fr); }
+
+    .promise-item,
+    .moat-item {
+      background: white;
+      border-radius: 0.8rem;
+      padding: 0.75rem;
+      font-size: 0.72rem;
+      color: #334155;
+      line-height: 1.4;
+    }
+
+    .promise-item { border: 1px solid #dbeafe; }
+    .moat-item { border: 1px solid #cffafe; }
+
+    .promise-item strong,
+    .moat-item strong {
+      display: block;
+      font-size: 0.78rem;
+      color: #0f172a;
+      margin-bottom: 0.15rem;
+    }
+
+    .cross-cutting {
+      background: #fffbeb;
+      border: 1px dashed #f59e0b;
+      border-radius: 1rem;
+      padding: 1rem 1.5rem;
+      margin: 0.8rem 0 1rem;
+    }
+
+    .cross-cutting h4 {
+      font-size: 0.84rem;
+      color: #92400e;
+      margin-bottom: 0.55rem;
+    }
+
+    .cc-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .cc-item {
+      background: white;
+      border: 1px solid #fde68a;
+      border-radius: 0.55rem;
+      padding: 0.55rem 0.7rem;
+      font-size: 0.7rem;
+      color: #78350f;
+      flex: 1 1 180px;
+      line-height: 1.35;
+    }
+
+    .cc-item strong {
+      display: block;
+      font-size: 0.75rem;
+      margin-bottom: 0.1rem;
+      color: #451a03;
+    }
+
+    .layers {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .layer {
+      background: #f8fafc;
+      border-radius: 1rem;
+      padding: 1.2rem 1.5rem;
+      border: 2px solid var(--border);
+      position: relative;
+    }
+
+    .layer h3 {
+      font-size: 0.98rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      font-size: 0.62rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 20px;
+      font-weight: 600;
+      background: white;
+      border: 1px solid var(--border);
+      color: #475569;
+    }
+
+    .badge-user { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+    .badge-hidden { background: #f1f5f9; color: #475569; }
+    .badge-key { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+    .badge-moat { background: #cffafe; color: #0e7490; border-color: #67e8f9; }
+    .badge-event { background: #e0e7ff; color: #4338ca; border-color: #a5b4fc; }
+
+    .nodes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+
+    .node {
+      background: white;
+      border-radius: 0.65rem;
+      padding: 0.7rem 0.8rem;
+      border: 1px solid var(--border);
+      flex: 1 1 150px;
+      min-width: 130px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+    }
+
+    .node strong {
+      display: block;
+      font-size: 0.79rem;
+      margin-bottom: 0.15rem;
+      color: #0f172a;
+    }
+
+    .node .desc {
+      font-size: 0.68rem;
+      color: #64748b;
+      line-height: 1.35;
+    }
+
+    .node .tag {
+      display: inline-block;
+      font-size: 0.58rem;
+      padding: 0.1rem 0.42rem;
+      border-radius: 10px;
+      margin-top: 0.35rem;
+      margin-right: 0.2rem;
+      font-weight: 600;
+    }
+
+    .tag-user { background: #eff6ff; color: #1d4ed8; }
+    .tag-plan { background: #fff7ed; color: #c2410c; }
+    .tag-moat { background: #ecfeff; color: #0e7490; }
+    .tag-work { background: #faf5ff; color: #6d28d9; }
+    .tag-code { background: #f0fdf4; color: #15803d; }
+    .tag-safe { background: #fef2f2; color: #b91c1c; }
+    .tag-key { background: #fef3c7; color: #92400e; }
+    .tag-event { background: #e0e7ff; color: #4338ca; }
+    .tag-pipe { background: #fce7f3; color: #9d174d; }
+
+    /* Arrow with event badge */
+    .arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      padding: 0.5rem 0;
+      color: #94a3b8;
+      font-size: 1.1rem;
+      font-weight: 600;
+      position: relative;
+    }
+    .arrow::before {
+      content: '';
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #cbd5e1, transparent);
+    }
+    .arrow::after {
+      content: '';
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #cbd5e1, transparent);
+    }
+    .arrow .event-label {
+      font-size: 0.65rem;
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+      border-radius: 6px;
+      padding: 0.25rem 0.7rem;
+      color: #4338ca;
+      font-family: monospace;
+      white-space: nowrap;
+    }
+
+    /* Event flow pipeline visual within layer */
+    .pipeline-flow {
+      display: flex;
+      align-items: stretch;
+      gap: 0.5rem;
+      margin-top: 0.7rem;
+    }
+    .pipeline-step {
+      flex: 1;
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.65rem;
+      padding: 0.6rem 0.7rem;
+      text-align: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+      min-width: 0;
+    }
+    .pipeline-step .step-icon { font-size: 1rem; }
+    .pipeline-step .step-name {
+      font-size: 0.72rem;
+      font-weight: 700;
+      margin: 0.2rem 0 0.1rem;
+    }
+    .pipeline-step .step-desc {
+      font-size: 0.6rem;
+      color: #64748b;
+      line-height: 1.3;
+    }
+    .pipeline-step .step-event {
+      font-size: 0.55rem;
+      font-family: monospace;
+      color: #6366f1;
+      background: #eef2ff;
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      display: inline-block;
+      margin-top: 0.2rem;
+    }
+    .pipeline-connector {
+      display: flex;
+      align-items: center;
+      color: #cbd5e1;
+      font-size: 0.7rem;
+      padding: 0 0.1rem;
+    }
+
+    .feedback {
+      background: #f0fdf4;
+      border: 1px dashed #22c55e;
+      border-radius: 0.9rem;
+      padding: 0.9rem 1.2rem;
+      margin-top: 0.8rem;
+    }
+
+    .feedback h4 {
+      font-size: 0.82rem;
+      color: #166534;
+      margin-bottom: 0.45rem;
+    }
+
+    .fb-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .fb-item {
+      background: white;
+      border: 1px solid #bbf7d0;
+      border-radius: 0.45rem;
+      padding: 0.48rem 0.7rem;
+      font-size: 0.68rem;
+      line-height: 1.35;
+      color: #14532d;
+      flex: 1 1 210px;
+    }
+
+    .asset-loop {
+      background: #ecfeff;
+      border: 1px dashed #06b6d4;
+      border-radius: 0.9rem;
+      padding: 0.9rem 1.2rem;
+      margin-top: 0.8rem;
+    }
+
+    .asset-loop h4 {
+      font-size: 0.82rem;
+      color: #0e7490;
+      margin-bottom: 0.45rem;
+    }
+
+    .asset-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .asset-item {
+      background: white;
+      border: 1px solid #a5f3fc;
+      border-radius: 0.45rem;
+      padding: 0.48rem 0.7rem;
+      font-size: 0.68rem;
+      line-height: 1.35;
+      color: #155e75;
+      flex: 1 1 220px;
+    }
+
+    .legend {
+      margin-top: 1rem;
+      font-size: 0.68rem;
+      color: #94a3b8;
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      line-height: 1.5;
+    }
+
+    .plain-note {
+      margin-top: 1rem;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 1rem;
+      padding: 0.9rem 1rem;
+      font-size: 0.78rem;
+      color: #475569;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 980px) {
+      .top-grid { grid-template-columns: 1fr; }
+      .promise-grid { grid-template-columns: 1fr 1fr; }
+      .pipeline-flow { flex-direction: column; }
+      .pipeline-connector { transform: rotate(90deg); }
+    }
+
+    @media (max-width: 560px) {
+      body { padding: 0.8rem; }
+      .container { padding: 1.1rem; border-radius: 1.4rem; }
+      .promise-grid, .moat-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 1.35rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>⚙️ 一句话做软件平台 2.0 · 顶层架构设计图</h1>
+  <p class="subtitle">
+    面向普通用户，平台只呈现"说需求、看方案、看预览、点选修改、获取交付"；面向内部系统，新增"事件驱动管道 + 经验资产层"，批注意见通过 <strong>事件管道</strong> 自动流转：API 存储 → OpenClaw AI 决策拆任务 → PipelineService 工作流执行 → Cloudecode 改代码 → Demo 更新。
+  </p>
+
+  <div class="top-grid">
+    <section class="promise">
+      <h2>🎯 用户看到的核心承诺</h2>
+      <div class="promise-grid">
+        <div class="promise-item"><strong>1. 说人话就行</strong>用户只描述想做什么，平台负责追问和整理。</div>
+        <div class="promise-item"><strong>2. 先看样子再确认</strong>先生成可点击预览，降低做错方向的风险。</div>
+        <div class="promise-item"><strong>3. 哪里不对点哪里</strong>用户直接在页面上批注，不需要懂技术。</div>
+        <div class="promise-item"><strong>4. 多形态交付</strong>可在线使用，也预留源码、项目包、仓库交付等高级服务。</div>
+      </div>
+    </section>
+
+    <section class="moat">
+      <h2>🏰 平台内部护城河</h2>
+      <div class="moat-grid">
+        <div class="moat-item"><strong>事件驱动管道</strong>API 只存数据发事件，不关心谁处理；各层独立演进。</div>
+        <div class="moat-item"><strong>AI 决策（总工）</strong>OpenClaw 分析意见、拆解任务、决定修改方案。</div>
+        <div class="moat-item"><strong>经验资产沉淀</strong>决策日志、错误模式、项目复盘持续积累，越用越聪明。</div>
+        <div class="moat-item"><strong>失败自动恢复</strong>Pipeline 重试、错误匹配库、回滚机制保障稳定。</div>
+      </div>
+    </section>
+  </div>
+
+  <div class="cross-cutting">
+    <h4>🛡️ 横切保障层 · 用户感知不到，但平台始终执行</h4>
+    <div class="cc-grid">
+      <div class="cc-item"><strong>📍 点选定位</strong>用户点页面哪里，平台通过 data-module-key + postMessage 定位修改位置。</div>
+      <div class="cc-item"><strong>💓 运行检查</strong>持续检查任务、页面、接口、测试、部署是否正常。</div>
+      <div class="cc-item"><strong>🧯 出错恢复</strong>失败时自动重试、匹配错误模式修复，必要时回到上一个可用版本。</div>
+      <div class="cc-item"><strong>🔒 项目隔离</strong>每个用户、每个项目都有独立空间，互不影响。</div>
+      <div class="cc-item"><strong>🧼 信息过滤</strong>用户界面只出现普通人能理解的文案，不暴露内部术语。</div>
+    </div>
+  </div>
+
+  <div class="layers">
+    <div class="layer" style="border-color:#93c5fd;background:#eff6ff;">
+      <h3>👤 第一层 · 用户使用层 <span class="badge badge-user">用户看得见</span><span class="badge badge-key">越简单越好</span></h3>
+      <div class="nodes">
+        <div class="node">
+          <strong>💬 说出想法</strong>
+          <div class="desc">像聊天一样描述：我要做网站、小程序、管理系统或内部工具。</div>
+          <span class="tag tag-user">聊天输入</span>
+        </div>
+        <div class="node">
+          <strong>🧭 平台追问</strong>
+          <div class="desc">平台像产品经理一样问关键问题，帮用户把需求说完整。</div>
+          <span class="tag tag-user">需求补全</span>
+        </div>
+        <div class="node">
+          <strong>📋 确认方案</strong>
+          <div class="desc">展示页面清单、功能清单、周期、费用和交付方式。</div>
+          <span class="tag tag-user">看得懂的方案</span>
+        </div>
+        <div class="node" style="border:2px solid var(--amber);background:#fffbeb;">
+          <strong>🖼️ 看预览并批注</strong>
+          <div class="desc">直接点页面元素并留言：这里改颜色、加按钮、换文案。</div>
+          <span class="tag tag-key">点哪里改哪里</span>
+        </div>
+        <div class="node">
+          <strong>🚀 获取交付</strong>
+          <div class="desc">获得在线链接，也可根据服务等级申请源码、项目包或仓库交付。</div>
+          <span class="tag tag-user">多形态交付</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <span class="event-label">📢 POST /feedback → feedback.created</span>
+    </div>
+
+    <div class="layer" style="border-color:#fdba74;background:#fff7ed;">
+      <h3>🧠 第二层 · 需求理解与项目管家层 <span class="badge badge-hidden">用户不用懂</span><span class="badge badge-key">决定做什么</span></h3>
+      <div class="nodes">
+        <div class="node" style="border-left:3px solid var(--orange);">
+          <strong>🧾 需求整理器</strong>
+          <div class="desc">把用户聊天内容整理成页面、功能、角色、流程和规则。</div>
+          <span class="tag tag-plan">把话变成需求</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--orange);">
+          <strong>🗺️ 页面与功能地图</strong>
+          <div class="desc">记录页面、按钮、表单、接口和数据之间的关系。</div>
+          <span class="tag tag-plan">知道改哪里</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--orange);">
+          <strong>✅ 验收清单</strong>
+          <div class="desc">把"做好"的标准写清楚，用于后续检查和交付确认。</div>
+          <span class="tag tag-plan">判断做没做好</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--orange);">
+          <strong>📌 任务编排器</strong>
+          <div class="desc">把大项目拆成页面、接口、数据、测试、部署等小任务。</div>
+          <span class="tag tag-plan">拆成小任务</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--orange);">
+          <strong>📣 进度通知器</strong>
+          <div class="desc">在确认、开发、修改、上线、交付等节点给用户普通话提示。</div>
+          <span class="tag tag-plan">用户不迷路</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <span class="event-label">📢 feedback.created</span>
+    </div>
+
+    <div class="layer" style="border-color:#a5b4fc;background:#eef2ff;">
+      <h3>🧠 第三层 · AI 决策与任务拆解层 <span class="badge badge-event">事件监听</span><span class="badge badge-key">总工</span></h3>
+      <div class="pipeline-flow">
+        <div class="pipeline-step" style="border-color:#818cf8;">
+          <div class="step-icon">📩</div>
+          <div class="step-name">OpenClaw Listener</div>
+          <div class="step-desc">监听 feedback.created 事件，触发 AI 分析</div>
+        </div>
+        <div class="pipeline-connector">→</div>
+        <div class="pipeline-step" style="border-color:#818cf8;background:#f5f3ff;">
+          <div class="step-icon">🤖</div>
+          <div class="step-name">OpenClaw AI 分析</div>
+          <div class="step-desc">DeepSeek 分析意见 + demoHtml → 拆解为 1~N 个 Task</div>
+          <span class="step-event">DeepSeek API</span>
+        </div>
+        <div class="pipeline-connector">→</div>
+        <div class="pipeline-step" style="border-color:#818cf8;">
+          <div class="step-icon">📌</div>
+          <div class="step-name">Task 写入 DB</div>
+          <div class="step-desc">Task 状态: pending，关联 project/feedback</div>
+          <span class="step-event">emit tasks.created</span>
+        </div>
+      </div>
+      <div class="nodes" style="margin-top:0.6rem;">
+        <div class="node" style="border-left:3px solid var(--indigo);">
+          <strong>🧩 任务分解规则</strong>
+          <div class="desc">根据意见内容、定位模块、当前结构，决定拆成几个子任务。</div>
+          <span class="tag tag-event">总工决策</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--indigo);">
+          <strong>📝 验收标准生成</strong>
+          <div class="desc">每个 Task 自带验收条件，用于后续自动检查。</div>
+          <span class="tag tag-event">质量标准</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--indigo);">
+          <strong>🔗 反馈关联</strong>
+          <div class="desc">生成的 Task 关联原始 FeedbackItem，可追溯用户原意。</div>
+          <span class="tag tag-event">可追溯</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <span class="event-label">📢 tasks.created</span>
+    </div>
+
+    <div class="layer" style="border-color:#f9a8d4;background:#fdf2f8;">
+      <h3>🛠️ 第四层 · 工作流执行层 <span class="badge badge-event">事件驱动</span><span class="badge badge-key">项目经理</span></h3>
+      <div class="pipeline-flow">
+        <div class="pipeline-step" style="border-color:#e879f9;">
+          <div class="step-icon">📢</div>
+          <div class="step-name">PipelineService</div>
+          <div class="step-desc">监听 tasks.created，读取所有 pending Task</div>
+          <span class="step-event">@OnEvent</span>
+        </div>
+        <div class="pipeline-connector">→</div>
+        <div class="pipeline-step" style="border-color:#e879f9;">
+          <div class="step-icon">🔄</div>
+          <div class="step-name">逐 Task 执行</div>
+          <div class="step-desc">pending → running → completed/failed，最多重试 3 次</div>
+          <span class="step-event">状态流转</span>
+        </div>
+        <div class="pipeline-connector">→</div>
+        <div class="pipeline-step" style="border-color:#e879f9;background:#fdf4ff;">
+          <div class="step-icon">🤖</div>
+          <div class="step-name">调 Cloudecode</div>
+          <div class="step-desc">DeepSeek 生成修改后 HTML → 验证 → 更新 demo</div>
+          <span class="step-event">DeepSeek API</span>
+        </div>
+        <div class="pipeline-connector">→</div>
+        <div class="pipeline-step" style="border-color:#e879f9;">
+          <div class="step-icon">📋</div>
+          <div class="step-name">记录决策日志</div>
+          <div class="step-desc">每次执行结果写入 DecisionLog，沉淀经验</div>
+          <span class="step-event">DecisionLog</span>
+        </div>
+      </div>
+      <div class="nodes" style="margin-top:0.6rem;">
+        <div class="node" style="border-left:3px solid var(--purple);">
+          <strong>📊 Task 状态管理</strong>
+          <div class="desc">每个 Task 独立追踪：pending → running → completed / failed</div>
+          <span class="tag tag-pipe">状态机</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--purple);">
+          <strong>🔁 失败重试</strong>
+          <div class="desc">最多重试 3 次，失败后标记 failed 并记录错误原因。</div>
+          <span class="tag tag-pipe">容错</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--purple);">
+          <strong>🏁 完成回调</strong>
+          <div class="desc">全部 Task 完成后 emit tasks.completed → 通知前端 Demo 已更新</div>
+          <span class="tag tag-pipe">闭环</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <span class="event-label">📢 tasks.completed → Demo 更新</span>
+    </div>
+
+    <div class="layer" style="border-color:#86efac;background:#f0fdf4;">
+      <h3>⚙️ 第五层 · 代码与交付执行层 <span class="badge badge-hidden">平台内部</span><span class="badge badge-key">把软件真正做出来</span></h3>
+      <div class="nodes">
+        <div class="node" style="border-left:3px solid var(--green);">
+          <strong>🧱 页面生成</strong>
+          <div class="desc">DeepSeek 生成单文件 HTML SPA，含 data-module-key 批注标记。</div>
+          <span class="tag tag-code">DeepSeek</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--green);">
+          <strong>🔌 功能接口</strong>
+          <div class="desc">生成登录、查询、保存、权限、通知、导入导出等接口。</div>
+          <span class="tag tag-code">后端</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--green);">
+          <strong>🗄️ 数据结构</strong>
+          <div class="desc">创建数据表、字段、关系、索引和初始化数据。</div>
+          <span class="tag tag-code">数据</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--green);background:#fffbeb;">
+          <strong>📍 批注定位标记</strong>
+          <div class="desc">data-module-key + data-element-path 属性 + postMessage 通信。</div>
+          <span class="tag tag-key">点选定位</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--green);">
+          <strong>🔐 安全与质量检查</strong>
+          <div class="desc">检查 HTML 结构、data-module-key 覆盖率、导航功能。</div>
+          <span class="tag tag-safe">质量保障</span>
+        </div>
+        <div class="node" style="border-left:3px solid var(--green);background:#ecfdf5;">
+          <strong>📤 多形态交付</strong>
+          <div class="desc">在线链接为基础，预留源码下载、项目包导出、仓库交付。</div>
+          <span class="tag tag-key">高级服务</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="feedback">
+    <h4>🔁 事件驱动闭环：提交批注意见 → 事件管道自动处理 → Demo 更新</h4>
+    <div class="fb-items">
+      <div class="fb-item"><strong>🟢 方案确认回路</strong><br>平台整理方案 → 用户确认 → 再生成预览或进入开发。</div>
+      <div class="fb-item"><strong>🟡 批注修改管道</strong><br>提交意见 → <code>feedback.created</code> → OpenClaw 拆 Task → <code>tasks.created</code> → Pipeline 逐任务执行 → Cloudecode 改代码 → <code>tasks.completed</code> → Demo 刷新。</div>
+      <div class="fb-item"><strong>🔵 自动测试回路</strong><br>开发完成 → 自动检查 → 发现问题 → 自动修复 → 再检查。</div>
+      <div class="fb-item"><strong>🔴 出错恢复回路</strong><br>Task 失败 → 自动重试 → 匹配错误模式 → 修复或回滚。</div>
+      <div class="fb-item"><strong>🟣 多形态交付回路</strong><br>在线使用 → 用户验收 → 按服务等级提供源码或项目包。</div>
+    </div>
+  </div>
+
+  <div class="asset-loop">
+    <h4>🏰 经验资产闭环：每做一个项目，平台都变得更聪明</h4>
+    <div class="asset-items">
+      <div class="asset-item"><strong>1. 记录判断</strong><br>每次 AI 拆任务、执行结果、失败原因都写入 DecisionLog。</div>
+      <div class="asset-item"><strong>2. 记录错误</strong><br>沉淀错误特征、触发场景、推荐修复方式和修复成功率。</div>
+      <div class="asset-item"><strong>3. 自动复盘</strong><br>项目完成后总结需求、修改次数、主要问题、交付方式和可复用经验。</div>
+      <div class="asset-item"><strong>4. 反哺下一次</strong><br>类似项目自动推荐模板、关键追问、测试项和处理策略。</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div>🔵 <strong>用户使用层</strong>：聊天、确认方案、看预览、点选批注、获取交付</div>
+    <div>🟠 <strong>项目管家层</strong>：整理需求、拆任务、生成方案、通知进度</div>
+    <div>🟣 <strong>AI 决策层</strong>：事件驱动、意见分析、任务拆解、验收标准</div>
+    <div>🩷 <strong>工作流执行层</strong>：PipelineService、逐 Task 执行、重试、决策日志</div>
+    <div>🟢 <strong>执行交付层</strong>：代码生成、批注定位、质量检查、多形态交付</div>
+  </div>
+
+  <div class="plain-note">
+    <strong>设计原则：</strong>用户侧保持极简，只看到"说需求、看方案、看预览、点选修改、获取交付"；平台内部新增<strong>事件驱动管道</strong>（API → OpenClaw AI 决策 → PipelineService 执行 → Cloudecode 改代码），所有通信通过 <code>@nestjs/event-emitter</code> 事件解耦。各层可独立演进：Phase 1 使用进程内事件，后续可替换为 n8n 工作流或消息队列。所有内部方法论、工具名、执行代号都不得出现在用户可见界面、通知、错误提示和帮助文档中。
+  </div>
+</div>
+</body>
+</html>

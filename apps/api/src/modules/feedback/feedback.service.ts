@@ -1,12 +1,15 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
+import { EVENTS } from '../../events/event-types';
 
 @Injectable()
 export class FeedbackService {
   constructor(
     private prisma: PrismaService,
     private statusMapper: StatusMapperService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async findAll(userId: string, projectId: string) {
@@ -64,6 +67,15 @@ export class FeedbackService {
         },
       });
     }
+
+    // Emit event for the pipeline to process
+    this.eventEmitter.emit(EVENTS.FEEDBACK_CREATED, {
+      feedbackId: feedback.id,
+      projectId,
+      comment: data.comment,
+      moduleKey: data.moduleKey,
+      elementPath: data.elementPath,
+    });
 
     return {
       id: feedback.id,

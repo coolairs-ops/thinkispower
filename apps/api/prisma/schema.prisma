@@ -59,6 +59,7 @@ model Project {
   errorEvents              ErrorEvent[]
   caseReviews              CaseReview[]
   experienceRecommendations ExperienceRecommendation[]
+  demoSnapshots             DemoSnapshot[]
 
   @@index([userId])
   @@map("projects")
@@ -130,6 +131,7 @@ model Task {
   decisionLogs DecisionLog[]
   errorEvents  ErrorEvent[]
   generatedTaskFeedback FeedbackItem[] @relation("GeneratedTask")
+  demoSnapshots         DemoSnapshot[]
 
   @@index([projectId])
   @@map("tasks")
@@ -157,6 +159,24 @@ model FeedbackItem {
 
   @@index([projectId])
   @@map("feedback_items")
+}
+
+// ============ Demo 快照（版本历史） ============
+
+model DemoSnapshot {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id") @db.Uuid
+  html      String   // 修改前的完整 demoHtml 快照
+  taskId    String?  @map("task_id") @db.Uuid
+  source    String   // 'demo_generate' | 'pipeline_execute' | 'manual_rollback'
+  version   Int      // 项目内自增版本号，从 1 开始
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task    Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, version])
+  @@map("demo_snapshots")
 }
 
 // ============ 构建记录 ============

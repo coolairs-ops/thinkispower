@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 type Mode = 'preview' | 'annotation';
 interface ClickedElement { moduleKey: string; elementPath: string; }
@@ -206,6 +207,14 @@ export default function DemoPage() {
             >
               生成预览
             </button>
+          )}
+          {showPreview && (
+            <Link
+              href={`/projects/${projectId}/delivery`}
+              className="rounded-lg border border-green-300 px-4 py-1.5 text-sm text-green-700 hover:bg-green-50 transition-colors"
+            >
+              交付
+            </Link>
           )}
           {mode === 'annotation' && showPreview && demoHtml && (
             <p className="text-sm text-orange-500">点击页面中想修改的位置，写下意见</p>

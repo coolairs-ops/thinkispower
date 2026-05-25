@@ -83,7 +83,7 @@ export default function ProjectChatPage() {
     setSending(false);
   };
 
-  const isPlanReady = project?.status === 'plan_ready';
+  const isPlanReady = project?.hasPlan || project?.status === 'plan_ready';
 
   if (!project) return <div className="p-8 text-gray-500">加载中...</div>;
 

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException,
 import { PrismaService } from '../../database/prisma.service';
 import { DemoGeneratorService } from '../../services/demo-generator.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
+import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 
 @Injectable()
 export class DemoService {
@@ -11,6 +12,7 @@ export class DemoService {
     private prisma: PrismaService,
     private demoGenerator: DemoGeneratorService,
     private statusMapper: StatusMapperService,
+    private demoSnapshotService: DemoSnapshotService,
   ) {}
 
   async getDemo(userId: string, projectId: string) {
@@ -82,6 +84,19 @@ export class DemoService {
       // Validate HTML size
       if (html.length < 100) {
         throw new Error('生成的 HTML 内容过短');
+      }
+
+      // 保存当前 demoHtml 快照（如果已存在）
+      const existing = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { demoHtml: true },
+      });
+      if (existing?.demoHtml) {
+        await this.demoSnapshotService.createSnapshot(
+          projectId,
+          existing.demoHtml,
+          'demo_generate',
+        );
       }
 
       await this.prisma.project.update({

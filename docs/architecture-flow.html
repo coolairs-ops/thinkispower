@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Think-is-power 事件驱动管道架构</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0f172a; color: #e2e8f0; padding: 40px; }
+  h1 { text-align: center; font-size: 28px; margin-bottom: 6px; color: #f1f5f9; letter-spacing: 2px; }
+  .subtitle { text-align: center; color: #64748b; margin-bottom: 40px; font-size: 14px; }
+
+  /* ====== Pipeline ====== */
+  .pipeline { display: flex; flex-direction: column; align-items: center; gap: 0; max-width: 960px; margin: 0 auto; }
+
+  .layer { width: 100%; border-radius: 12px; padding: 20px 24px; position: relative; border: 1px solid; }
+  .layer h2 { font-size: 16px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .layer .role { font-size: 12px; opacity: .7; margin-bottom: 12px; }
+  .layer .steps { font-size: 13px; line-height: 1.9; padding-left: 20px; }
+  .layer .steps li { margin-bottom: 2px; }
+  .layer .steps li em { color: #93c5fd; font-style: normal; }
+  .layer .steps li .hl { color: #fde68a; }
+  .layer .steps li .dim { color: #64748b; }
+
+  /* Layer colors */
+  .layer-user   { background: #1e293b; border-color: #334155; }
+  .layer-api    { background: #0c1929; border-color: #1e3a5f; }
+  .layer-oc     { background: #1a1a2e; border-color: #3b2f6e; }
+  .layer-n8n    { background: #1a1a1a; border-color: #5f3e1e; }
+  .layer-cdc    { background: #0d1f1a; border-color: #1e5f3a; }
+  .layer-result { background: #0c1929; border-color: #1e3a5f; }
+
+  .layer-user h2   { color: #94a3b8; }
+  .layer-api h2    { color: #60a5fa; }
+  .layer-oc h2     { color: #a78bfa; }
+  .layer-n8n h2    { color: #fbbf24; }
+  .layer-cdc h2    { color: #34d399; }
+  .layer-result h2 { color: #60a5fa; }
+
+  /* Arrow between layers */
+  .arrow { width: 2px; height: 36px; background: linear-gradient(#475569, #334155); position: relative; }
+  .arrow::after { content: ''; position: absolute; bottom: -2px; left: -5px; border: 6px solid transparent; border-top-color: #475569; border-bottom: none; }
+
+  .arrow .event-tag { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); white-space: nowrap; background: #1e293b; border: 1px solid #475569; border-radius: 4px; padding: 2px 10px; font-size: 11px; color: #94a3b8; font-family: monospace; }
+
+  /* Task box */
+  .task-example { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 12px; font-family: monospace; line-height: 1.7; color: #cbd5e1; }
+
+  /* Legend */
+  .legend { max-width: 960px; margin: 40px auto 0; background: #1e293b; border-radius: 10px; padding: 20px 24px; border: 1px solid #334155; }
+  .legend h3 { font-size: 14px; color: #94a3b8; margin-bottom: 12px; }
+  .legend table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .legend th { text-align: left; padding: 6px 10px; color: #64748b; font-weight: 500; border-bottom: 1px solid #334155; }
+  .legend td { padding: 6px 10px; border-bottom: 1px solid #1e293b; }
+  .legend .old { color: #94a3b8; text-decoration: line-through; opacity: .5; }
+  .legend .new { color: #f1f5f9; }
+
+  /* Phase badges */
+  .badge { display: inline-block; font-size: 10px; padding: 1px 8px; border-radius: 10px; font-weight: 500; letter-spacing: .5px; }
+  .badge-storage { background: #1e3a5f; color: #60a5fa; }
+  .badge-decision { background: #2e1065; color: #a78bfa; }
+  .badge-workflow { background: #451a03; color: #fbbf24; }
+  .badge-exec { background: #064e3b; color: #34d399; }
+
+  /* Event badge */
+  .event-badge { display: inline-block; font-size: 11px; padding: 2px 10px; border-radius: 4px; background: #334155; color: #e2e8f0; font-family: monospace; border: 1px solid #475569; }
+
+  .footer { text-align: center; margin-top: 24px; font-size: 12px; color: #475569; }
+</style>
+</head>
+<body>
+
+<h1>Think-is-power · 事件驱动管道架构</h1>
+<p class="subtitle">OpenClaw AI 决策 → n8n 工作流执行 → Cloudecode 代码修改</p>
+
+<div class="pipeline">
+
+  <!-- === Step 0: User === -->
+  <div class="layer layer-user">
+    <h2>👤 用户</h2>
+    <div class="role">在 Demo 页面批注模式下点击元素 → 填写意见 → 提交</div>
+    <ol class="steps">
+      <li>点击 Demo 页面中的元素 → 侧边栏出现表单</li>
+      <li>填写修改意见：<span class="hl">"表格增加一列操作按钮"</span></li>
+      <li>点击"提交意见"</li>
+    </ol>
+  </div>
+
+  <div class="arrow"><span class="event-tag">POST /feedback</span></div>
+
+  <!-- === Layer 1: API === -->
+  <div class="layer layer-api">
+    <h2><span class="badge badge-storage">存储层</span> API · Think-is-power</h2>
+    <div class="role">NestJS 网关 + 数据持久化</div>
+    <ol class="steps">
+      <li>存入 <em>FeedbackItem</em> 到 PostgreSQL</li>
+      <li>更新 <em>Project.status</em> = <span class="hl">'awaiting_demo_feedback'</span></li>
+      <li>发布事件：<span class="event-badge">📢 feedback.created</span></li>
+    </ol>
+    <div class="task-example" style="margin-top:8px">
+{ projectId: "uuid", feedbackId: "uuid" }
+    </div>
+  </div>
+
+  <div class="arrow"><span class="event-tag">📢 feedback.created</span></div>
+
+  <!-- === Layer 2: OpenClaw === -->
+  <div class="layer layer-oc">
+    <h2><span class="badge badge-decision">决策层 · 总工</span> OpenClaw</h2>
+    <div class="role">AI 分析批注意见 → 拆解为可执行的任务清单</div>
+    <ol class="steps">
+      <li>收到 <span class="event-badge">📢 feedback.created</span></li>
+      <li>读取 <em>FeedbackItem.comment</em> + 当前 <em>Project.demoHtml</em></li>
+      <li><span class="hl">AI 分析</span>：改哪里？怎么改？需要拆成几个任务？</li>
+      <li>产出 1～N 个 <em>Task</em>，写入 DB</li>
+      <li>发布事件：<span class="event-badge">📢 tasks.created</span></li>
+    </ol>
+    <div class="task-example">
+┌──────────────────────────────────────┐
+│ type: "frontend"                     │
+│ title: "列表页表格增加操作按钮列"      │
+│ moduleKey: "list"                    │
+│ description: "在表格 thead 加'操作'  │
+│   列，每行末尾加编辑和删除按钮..."     │
+│ acceptanceCriteria: [                │
+│   "thead 有'操作'列",                │
+│   "按钮有 data-module-key 属性"       │
+│ ]                                    │
+└──────────────────────────────────────┘
+    </div>
+  </div>
+
+  <div class="arrow"><span class="event-tag">📢 tasks.created</span></div>
+
+  <!-- === Layer 3: n8n === -->
+  <div class="layer layer-n8n">
+    <h2><span class="badge badge-workflow">工作流层 · 项目经理</span> n8n</h2>
+    <div class="role">可靠的工作流执行引擎 — 重试、超时、并行</div>
+    <ol class="steps">
+      <li>收到 <span class="event-badge">📢 tasks.created</span></li>
+      <li>读取所有 <em>status = 'pending'</em> 的 Task</li>
+      <li>对每个 Task 循环：
+        <span class="hl">更新 status='running'</span> →
+        <span class="hl">调 Cloudecode</span> →
+        <span class="hl">成功 → completed</span> /
+        <span class="hl">失败 → 重试(最多3次)</span> →
+        <span class="hl">→ failed</span>
+      </li>
+      <li>为每个 Task 记录 <em>DecisionLog</em></li>
+      <li>所有 Task 完成后，回调 API</li>
+      <li>发布事件：<span class="event-badge">📢 tasks.completed</span></li>
+    </ol>
+  </div>
+
+  <div class="arrow" style="height:28px"></div>
+
+  <!-- === Layer 4: Cloudecode === -->
+  <div class="layer layer-cdc">
+    <h2><span class="badge badge-exec">执行层 · 开发</span> Cloudecode</h2>
+    <div class="role">接收具体任务 → 修改代码 → 报告结果</div>
+    <ol class="steps">
+      <li>n8n 调用 <em>POST /cloudecode/execute</em></li>
+      <li>读取当前 <em>demoHtml</em></li>
+      <li>调用 DeepSeek 生成修改后的 HTML</li>
+      <li>验证 HTML 结构正确</li>
+      <li>返回：<span class="hl">{ success, html, changedFiles, testReport }</span></li>
+    </ol>
+  </div>
+
+  <div class="arrow" style="height:28px"></div>
+
+  <!-- === Layer 5: API Callback === -->
+  <div class="layer layer-result">
+    <h2><span class="badge badge-storage">回调</span> API 收到 n8n 回调</h2>
+    <div class="role">更新数据库 → 用户看到新 Demo</div>
+    <ol class="steps">
+      <li>更新 <em>FeedbackItem.status</em> = <span class="hl">'resolved'</span></li>
+      <li>更新 <em>Project.demoHtml</em> = 新 HTML</li>
+      <li>更新 <em>Project.status</em> = <span class="hl">'demo_ready'</span></li>
+      <li><span class="hl">用户刷新页面 → 看到新版 Demo</span></li>
+    </ol>
+  </div>
+
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <h3>各层职责对比 · 旧 → 新</h3>
+  <table>
+    <tr><th>组件</th><th>旧职责（链式调用）</th><th>新职责（事件驱动管道）</th></tr>
+    <tr>
+      <td>API</td>
+      <td class="old">调 n8n → 等回调</td>
+      <td class="new">存数据、发事件、收回调 —— 不关心谁处理</td>
+    </tr>
+    <tr>
+      <td>OpenClaw</td>
+      <td class="old">被 n8n 调用的任务拆解工具</td>
+      <td class="new">AI 决策总工 —— 分析意见、拆任务、决定怎么做</td>
+    </tr>
+    <tr>
+      <td>n8n</td>
+      <td class="old">总指挥 —— 编排一切</td>
+      <td class="new">专业工作流引擎 —— 重试、并行、超时、监控</td>
+    </tr>
+    <tr>
+      <td>Cloudecode</td>
+      <td class="old">改代码</td>
+      <td class="new">改代码（不变，但调用方从 API 变成 n8n）</td>
+    </tr>
+  </table>
+</div>
+
+<div class="footer">
+  事件总线由 n8n 内置提供 · 不依赖外部消息队列 · 2026-05
+</div>
+
+</body>
+</html>
