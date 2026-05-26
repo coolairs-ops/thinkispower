@@ -39,7 +39,11 @@ export class PlanService {
 
       await this.prisma.project.update({
         where: { id: projectId },
-        data: { planSummary: plan as any },
+        data: {
+          planSummary: plan as any,
+          status: 'plan_ready',
+          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('plan_ready'),
+        },
       });
 
       return plan;

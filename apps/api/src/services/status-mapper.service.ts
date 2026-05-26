@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 const STATUS_LABEL_MAP: Record<string, string> = {
   needs_input: '正在了解需求',
   clarifying: '正在帮你整理需求',
+  prd_ready: '需求文档已确认',
   plan_ready: '方案已生成',
   awaiting_plan_confirmation: '等待你确认方案',
   demo_generating: '正在生成预览',

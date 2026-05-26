@@ -78,48 +78,74 @@ export class DemoService {
   }
 
   private async generateDemoAsync(projectId: string, planSummary: any) {
-    try {
-      const html = await this.demoGenerator.generateDemoHtml(planSummary);
+    let lastImprovements: string | undefined = undefined;
+    const MAX_RETRIES = 2;
 
-      // Validate HTML size
-      if (html.length < 100) {
-        throw new Error('生成的 HTML 内容过短');
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const html = await this.demoGenerator.generateDemoHtml(planSummary, lastImprovements);
+
+        // Validate HTML size
+        if (html.length < 100) {
+          throw new Error('生成的 HTML 内容过短');
+        }
+
+        // 质量门禁：评估 Demo 质量
+        const evaluation = await this.demoGenerator.evaluateDemo(html, planSummary);
+        this.logger.log(`Demo 质量评估: ${evaluation.score}分 (第 ${attempt + 1} 次生成)`);
+
+        if (evaluation.score < 60 && attempt < MAX_RETRIES) {
+          lastImprovements = `质量评分 ${evaluation.score}/100，以下方面需要改进：\n${evaluation.missingItems.map((i) => `- ${i}`).join('\n')}\n${evaluation.details}`;
+          this.logger.log(`Demo 质量不足(${evaluation.score}分)，重新生成 (${attempt + 1}/${MAX_RETRIES})`);
+          continue;
+        }
+
+        if (evaluation.score < 60) {
+          this.logger.warn(`Demo 质量评分 ${evaluation.score}，但已超过最大重试次数`);
+        }
+
+        // 保存当前 demoHtml 快照（如果已存在）
+        const existing = await this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { demoHtml: true },
+        });
+        if (existing?.demoHtml) {
+          await this.demoSnapshotService.createSnapshot(
+            projectId,
+            existing.demoHtml,
+            'demo_generate',
+          );
+        }
+
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: {
+            demoHtml: html,
+            demoUrl: `/demo/${projectId}`,
+            status: 'demo_ready',
+            publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
+          },
+        });
+
+        this.logger.log(`演示生成成功 (${projectId}): ${html.length} bytes, 评分 ${evaluation.score}`);
+        return; // 成功退出
+      } catch (err) {
+        this.logger.error(`演示生成失败 (尝试 ${attempt + 1}/${MAX_RETRIES + 1}):`, err);
+
+        if (attempt < MAX_RETRIES) {
+          lastImprovements = `生成过程出错，请确保输出完整的 HTML 文档：${(err as Error).message}`;
+          continue;
+        }
+
+        // 所有重试均失败，重置状态
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: {
+            status: 'plan_ready',
+            publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('plan_ready'),
+          },
+        });
       }
-
-      // 保存当前 demoHtml 快照（如果已存在）
-      const existing = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { demoHtml: true },
-      });
-      if (existing?.demoHtml) {
-        await this.demoSnapshotService.createSnapshot(
-          projectId,
-          existing.demoHtml,
-          'demo_generate',
-        );
-      }
-
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          demoHtml: html,
-          demoUrl: `/demo/${projectId}`,
-          status: 'demo_ready',
-          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
-        },
-      });
-
-      this.logger.log(`演示生成成功 (${projectId}): ${html.length} bytes`);
-    } catch (err) {
-      this.logger.error(`演示生成失败:`, err);
-      // Reset status to plan_ready so user can retry
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          status: 'plan_ready',
-          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('plan_ready'),
-        },
-      });
     }
   }
 }

@@ -29,6 +29,7 @@ import { HtmlValidatorService } from './services/html-validator.service';
 import { ErrorMatcherService } from './services/error-matcher.service';
 import { BuildService } from './services/build.service';
 import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
+import { ProductDiscoveryService } from './services/product-discovery.service';
 
 @Global()
 @Module({
@@ -53,7 +54,7 @@ import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
     N8nWebhookModule,
   ],
   controllers: [HealthController],
-  providers: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, DeliveryOrchestrator],
-  exports: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService],
+  providers: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, DeliveryOrchestrator, ProductDiscoveryService],
+  exports: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, ProductDiscoveryService],
 })
 export class AppModule {}

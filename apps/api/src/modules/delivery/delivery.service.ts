@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ConfigService } from '@nestjs/config';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { BuildService } from '../../services/build.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { OpenClawClient } from '../../integrations/openclaw/openclaw.client';
 import { N8nClient } from '../../integrations/n8n/n8n.client';
-import { EVENTS, DeliveryExportRequestedPayload, ExportType, TasksCreatedPayload } from '../../events/event-types';
+import { EVENTS, DeliveryExportRequestedPayload, ExportType, TasksCreatedPayload, TasksCompletedPayload } from '../../events/event-types';
 
 @Injectable()
 export class DeliveryService {
@@ -13,6 +14,7 @@ export class DeliveryService {
 
   constructor(
     private prisma: PrismaService,
+    private config: ConfigService,
     private eventEmitter: EventEmitter2,
     private buildService: BuildService,
     private statusMapper: StatusMapperService,
@@ -134,11 +136,14 @@ export class DeliveryService {
     } else {
       // 没有任务需要执行，直接标记为完成
       this.logger.log(`[完成] 无交付任务，直接标记完成`);
+      const baseUrl = this.config.get<string>('APP_BASE_URL', 'http://localhost:3001');
+      const productionUrl = `${baseUrl}/api/projects/${projectId}/demo`;
       await this.prisma.project.update({
         where: { id: projectId },
         data: {
           status: 'completed',
           publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('completed'),
+          productionUrl,
         },
       });
     }
@@ -202,6 +207,44 @@ export class DeliveryService {
    * 检查 N8N 是否可用。
    * 通过 N8N 环境变量判断（实际生产环境应做健康检查）。
    */
+  @OnEvent(EVENTS.TASKS_COMPLETED)
+  async handleDeliveryTasksCompleted(payload: TasksCompletedPayload) {
+    const { projectId } = payload;
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true },
+    });
+
+    if (project?.status === 'exporting') {
+      const baseUrl = this.config.get<string>('APP_BASE_URL', 'http://localhost:3001');
+      const productionUrl = `${baseUrl}/api/projects/${projectId}/demo`;
+
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'completed',
+          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('completed'),
+          productionUrl,
+        },
+      });
+
+      // 更新最新 Build 记录
+      const latestBuild = await this.prisma.build.findFirst({
+        where: { projectId },
+        orderBy: { version: 'desc' },
+        select: { id: true },
+      });
+      if (latestBuild) {
+        await this.prisma.build.update({
+          where: { id: latestBuild.id },
+          data: { status: 'success', productionUrl },
+        });
+      }
+
+      this.logger.log(`[交付完成] 项目 ${projectId} 交付完成, productionUrl=${productionUrl}`);
+    }
+  }
+
   private async checkN8nAvailability(): Promise<boolean> {
     try {
       const url = process.env.N8N_URL || 'http://localhost:5678';

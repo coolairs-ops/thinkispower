@@ -1,13 +1,14 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
-import { ClarifyService } from '../../services/clarify.service';
+import { Prisma } from '@prisma/client';
+import { ProductDiscoveryService, PRD } from '../../services/product-discovery.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 
 @Injectable()
 export class MessageService {
   constructor(
     private prisma: PrismaService,
-    private clarify: ClarifyService,
+    private discovery: ProductDiscoveryService,
     private statusMapper: StatusMapperService,
   ) {}
 
@@ -38,13 +39,15 @@ export class MessageService {
     });
 
     // 2. Update status to clarifying
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: {
-        status: 'clarifying',
-        publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('clarifying'),
-      },
-    });
+    if (project.status !== 'clarifying') {
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'clarifying',
+          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('clarifying'),
+        },
+      });
+    }
 
     // 3. Get all messages for context
     const allMessages = await this.prisma.projectMessage.findMany({
@@ -52,44 +55,51 @@ export class MessageService {
       orderBy: { createdAt: 'asc' },
     });
 
-    // 4. Call clarify service
-    const result = await this.clarify.processMessages(
+    // 4. Call ProductDiscoveryService (PM deep exploration)
+    const result = await this.discovery.processMessages(
       allMessages.map(m => ({ role: m.role, content: m.content })),
     );
 
-    if (result.needMoreInfo && result.questions.length > 0) {
-      // Save assistant questions
-      const questionText = result.questions.join('\n\n');
+    if (result.needMoreInfo && result.question) {
+      // 4a. Still exploring — save the AI question
+      const assistantContent = result.summary
+        ? `${result.summary}\n\n${result.question}`
+        : result.question;
+
       await this.prisma.projectMessage.create({
-        data: { projectId, role: 'assistant', content: questionText },
+        data: { projectId, role: 'assistant', content: assistantContent },
       });
-    } else if (result.structuredRequirement) {
-      // Save structured requirement as system_internal
+    } else if (result.prd) {
+      // 4b. PRD ready — save it and update status
       await this.prisma.projectMessage.create({
         data: {
           projectId,
           role: 'system_internal',
-          content: '结构化需求已生成',
-          metadata: { structuredRequirement: result.structuredRequirement },
+          content: 'PRD 已生成',
+          metadata: { prd: result.prd } as any,
         },
       });
 
-      // Save success message to user
+      // Save completion message
+      const completionMessage = result.summary
+        ? `${result.summary}\n\n我已经对你想做的产品有了全面了解。下面是我整理的需求文档，你看看是否准确？如果有需要修改的地方，直接告诉我，我可以帮你调整。`
+        : '我已经对你想做的产品有了全面了解。下面是我整理的需求文档，你看看是否准确？如果有需要修改的地方，直接告诉我，我可以帮你调整。';
+
       await this.prisma.projectMessage.create({
         data: {
           projectId,
           role: 'assistant',
-          content: '我已经了解了你的需求，可以查看方案了。',
+          content: completionMessage,
         },
       });
 
-      // Update project with structured requirement
+      // Update project with PRD and status
       await this.prisma.project.update({
         where: { id: projectId },
         data: {
-          status: 'plan_ready',
-          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('plan_ready'),
-          structuredRequirement: result.structuredRequirement as any,
+          status: 'prd_ready',
+          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('prd_ready'),
+          structuredRequirement: { prd: result.prd } as unknown as Prisma.JsonNullValueInput,
         },
       });
     }

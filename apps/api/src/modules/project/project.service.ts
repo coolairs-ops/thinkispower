@@ -60,21 +60,26 @@ export class ProjectService {
     return this.toPublicProject(project);
   }
 
-  async update(userId: string, projectId: string, data: { name?: string; description?: string; appType?: string }) {
+  async update(userId: string, projectId: string, data: { name?: string; description?: string; appType?: string; structuredRequirement?: any }) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权修改该项目');
 
+    const updateData: any = { ...data };
+    if (data.structuredRequirement) {
+      updateData.structuredRequirement = data.structuredRequirement as any;
+    }
+
     const updated = await this.prisma.project.update({
       where: { id: projectId },
-      data,
+      data: updateData,
       include: { deliveryOptions: true },
     });
     return this.toPublicProject(updated);
   }
 
   private toPublicProject(project: any) {
-    const { userId, structuredRequirement, planSummary, moduleMap, acceptanceChecklist, ...rest } = project;
+    const { userId, planSummary, moduleMap, acceptanceChecklist, ...rest } = project;
     return {
       ...rest,
       hasPlan: !!planSummary,

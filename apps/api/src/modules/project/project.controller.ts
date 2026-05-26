@@ -23,7 +23,7 @@ export class ProjectController {
   }
 
   @Patch(':projectId')
-  async update(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { name?: string; description?: string; appType?: string }) {
+  async update(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { name?: string; description?: string; appType?: string; structuredRequirement?: any }) {
     return this.projectService.update(req.user.id, projectId, body);
   }
 }
