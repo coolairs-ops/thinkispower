@@ -14,7 +14,7 @@
                                     │
                       ┌─────────────┼─────────────┐
                       ▼              ▼             ▼
-               Cloudecode       OpenClaw        N8N
+               Cloudecode       Hermes        N8N
                (源码/部署)       (打包拆任务)    (仓库/数据库)
 ```
 
@@ -44,7 +44,7 @@
 见各份独立文档：
 
 - [CLOUDECODE.md](./CLOUDECODE.md) — 代码生成集成
-- [OPENCLAW.md](./OPENCLAW.md) — 任务分解集成
+- [HERMES.md](./HERMES.md) — 任务分解集成
 - [N8N.md](./N8N.md) — 工作流集成
 
 ## 开发指引

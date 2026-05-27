@@ -134,6 +134,40 @@ export class N8nWebhookController {
   }
 
   @Public()
+  @Post('run-tasks')
+  async runTasks(@Body() body: { projectId: string; feedbackId?: string | null; taskIds?: string[] }) {
+    const { projectId, feedbackId } = body;
+    const requestedTaskIds = Array.isArray(body.taskIds) ? body.taskIds.filter(Boolean) : [];
+    this.logger.log(`N8N webhook: run tasks for project ${projectId} (${requestedTaskIds.length || 'pending'} requested)`);
+
+    if (!projectId) {
+      return { success: false, error: 'Missing projectId' };
+    }
+
+    const tasks = await this.prisma.task.findMany({
+      where: requestedTaskIds.length > 0
+        ? { projectId, id: { in: requestedTaskIds }, status: 'pending' }
+        : { projectId, status: 'pending' },
+      select: { id: true },
+      orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    if (tasks.length === 0) {
+      this.logger.warn(`N8N webhook: no pending tasks for project ${projectId}`);
+      return { success: true, taskCount: 0, taskIds: [] };
+    }
+
+    const taskIds = tasks.map((task) => task.id);
+    this.eventEmitter.emit(EVENTS.TASKS_CREATED, {
+      projectId,
+      feedbackId: feedbackId || null,
+      taskIds,
+    });
+
+    return { success: true, taskCount: taskIds.length, taskIds };
+  }
+
+  @Public()
   @Post('tasks-complete')
   async tasksComplete(@Body() body: { projectId: string; feedbackId: string }) {
     const { projectId, feedbackId } = body;

@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { OpenClawClient } from './openclaw.client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { HermesClient } from './hermes.client';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
+import { StatusMapperService } from '../../services/status-mapper.service';
 
-describe('OpenClawClient', () => {
-  let client: OpenClawClient;
+describe('HermesClient', () => {
+  let client: HermesClient;
   let prisma: PrismaService;
   let deepseek: DeepseekService;
 
@@ -46,19 +48,29 @@ describe('OpenClawClient', () => {
     chat: jest.fn(),
   };
 
+  const mockEventEmitter = {
+    emit: jest.fn(),
+  };
+
+  const mockStatusMapper = {
+    mapProjectStatusToPublicLabel: jest.fn().mockReturnValue('测试状态'),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        OpenClawClient,
+        HermesClient,
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: DeepseekService, useValue: mockDeepseekService },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
+        { provide: StatusMapperService, useValue: mockStatusMapper },
       ],
     }).compile();
 
-    client = module.get<OpenClawClient>(OpenClawClient);
+    client = module.get<HermesClient>(HermesClient);
     prisma = module.get<PrismaService>(PrismaService);
     deepseek = module.get<DeepseekService>(DeepseekService);
   });

@@ -1,26 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OnEvent } from '@nestjs/event-emitter';
-import { OpenClawClient } from './openclaw.client';
+import { HermesClient } from './hermes.client';
 import { N8nClient } from '../n8n/n8n.client';
-import { EVENTS, FeedbackCreatedPayload } from '../../events/event-types';
+import { EVENTS, FeedbackCreatedPayload, UserConfirmedPlanPayload } from '../../events/event-types';
 
 @Injectable()
-export class OpenClawListener {
-  private readonly logger = new Logger(OpenClawListener.name);
+export class HermesListener {
+  private readonly logger = new Logger(HermesListener.name);
 
   constructor(
     private eventEmitter: EventEmitter2,
-    private openclaw: OpenClawClient,
+    private hermes: HermesClient,
     private n8nClient: N8nClient,
   ) {}
 
   @OnEvent(EVENTS.FEEDBACK_CREATED)
   async handleFeedbackCreated(payload: FeedbackCreatedPayload) {
-    this.logger.log(`OpenClaw processing feedback ${payload.feedbackId}`);
+    this.logger.log(`Hermes processing feedback ${payload.feedbackId}`);
 
     try {
-      const taskIds = await this.openclaw.handleFeedback(payload.feedbackId);
+      const taskIds = await this.hermes.handleFeedback(payload.feedbackId);
 
       if (taskIds.length === 0) {
         this.logger.warn(`No tasks created for feedback ${payload.feedbackId}`);
@@ -52,7 +52,15 @@ export class OpenClawListener {
         taskIds,
       });
     } catch (error) {
-      this.logger.error(`OpenClaw processing failed for feedback ${payload.feedbackId}`, error);
+      this.logger.error(`Hermes processing failed for feedback ${payload.feedbackId}`, error);
     }
+  }
+
+  @OnEvent(EVENTS.USER_CONFIRMED_PLAN)
+  async handleUserConfirmedPlan(payload: UserConfirmedPlanPayload) {
+    this.logger.log(`[Hermes] 用户确认方案, 启动交付管线, 项目 ${payload.projectId}`);
+
+    // 用户的确认信号 → Hermes 认知分析 → N8N 编排 → Cloudecode 执行
+    // DeliveryService.confirmDelivery 已完成全套流程
   }
 }

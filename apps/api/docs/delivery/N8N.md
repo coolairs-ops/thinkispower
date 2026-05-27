@@ -39,7 +39,7 @@ async triggerDeliveryExportWorkflow(
 1. **搭建 N8N** — 部署 N8N 服务，创建对应工作流
 2. **配置 URL** — 在 `.env` 中设置：
    ```
-   N8N_URL=http://localhost:5678
+   N8N_URL=http://192.168.124.126:15678
    ```
 3. **取消注释 fetch** — 在 `n8n.client.ts` 的 `triggerWorkflow()` 方法中，取消注释第 21-25 行的 `fetch()` 调用
 4. **注册到 DeliveryOrchestrator** — 注入 `N8nClient`，在 `handleN8nWorkflow()` 中调用对应的 trigger 方法

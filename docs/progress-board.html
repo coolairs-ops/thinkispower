@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Think-is-power · 工程进度看板</title>
+<style>
+  :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --dim: #94a3b8; --accent: #38bdf8; --green: #22c55e; --yellow: #eab308; --red: #ef4444; --blue: #3b82f6; --purple: #a855f7; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 2rem; max-width: 1200px; margin: auto; }
+  h1 { font-size: 1.8rem; margin-bottom: .25rem; background: linear-gradient(135deg,var(--accent),var(--purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { color: var(--dim); margin-bottom: 2rem; font-size: .9rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 { font-size: 1rem; color: var(--accent); margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin: .75rem 0 1.5rem; }
+  .progress-fill { height: 100%; border-radius: 4px; transition: width .6s; }
+  .stat-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .stat { flex: 1; min-width: 100px; text-align: center; padding: .75rem; background: rgba(255,255,255,.03); border-radius: 8px; }
+  .stat .num { font-size: 1.8rem; font-weight: 700; }
+  .stat .label { font-size: .75rem; color: var(--dim); margin-top: .2rem; }
+  .item { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem 0; border-bottom: 1px solid rgba(255,255,255,.04); font-size: .85rem; }
+  .item:last-child { border: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .tag { font-size: .7rem; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,.08); color: var(--dim); flex-shrink: 0; }
+  .col { display: flex; flex-direction: column; gap: .4rem; }
+  .arch-box { display: flex; align-items: center; gap: .5rem; padding: .6rem; background: rgba(255,255,255,.03); border-radius: 8px; font-size: .82rem; }
+  .arch-flow { display: flex; align-items: center; justify-content: center; gap: .5rem; margin: 1rem 0; flex-wrap: wrap; font-size: .8rem; }
+  .arrow { color: var(--dim); font-size: 1.2rem; }
+  .phase { background: var(--card); border: 1px solid var(--border); padding: .3rem .7rem; border-radius: 6px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } body { padding: 1rem; } }
+</style>
+</head>
+<body>
+
+<h1>🔧 Think-is-power · 工程进度看板</h1>
+<p class="subtitle">工程控制论驱动的软件交付平台 · 更新于 2026-05-27</p>
+
+<div class="stat-row">
+  <div class="stat"><div class="num" style="color:var(--green)">6</div><div class="label">已完成里程碑</div></div>
+  <div class="stat"><div class="num" style="color:var(--yellow)">2</div><div class="label">进行中</div></div>
+  <div class="stat"><div class="num" style="color:var(--dim)">8</div><div class="label">待办</div></div>
+  <div class="stat"><div class="num" style="color:var(--accent)">14</div><div class="label">单元测试文件</div></div>
+  <div class="stat"><div class="num" style="color:var(--blue)">16</div><div class="label">API 端点模块</div></div>
+</div>
+
+<div class="progress-bar"><div class="progress-fill" style="width:52%;background:linear-gradient(90deg,var(--yellow),var(--green))"></div></div>
+<p style="text-align:right;font-size:.8rem;color:var(--dim);margin:-1.25rem 0 1.5rem">总体进度 ≈ 52%</p>
+
+<div class="grid">
+
+<!-- 架构总览 -->
+<div class="card">
+  <h2>📐 闭环控制架构</h2>
+  <div class="col">
+    <div class="arch-box"><span style="color:var(--blue)">🧠 传感器</span> — Hermes (DeepSeek) 认知分析</div>
+    <div class="arch-box"><span style="color:var(--yellow)">🎮 控制器</span> — N8N 工作流编排</div>
+    <div class="arch-box"><span style="color:var(--red)">⚙️ 被控对象</span> — Cloudecode 代码执行</div>
+    <div class="arch-box"><span style="color:var(--green)">🔁 反馈信道</span> — Webhook 回调 + 事件总线</div>
+  </div>
+  <div class="arch-flow">
+    <span class="phase">用户需求</span>
+    <span class="arrow">→</span>
+    <span class="phase" style="border-color:var(--blue)">Hermes</span>
+    <span class="arrow">→</span>
+    <span class="phase" style="border-color:var(--yellow)">N8N</span>
+    <span class="arrow">→</span>
+    <span class="phase" style="border-color:var(--red)">Cloudecode</span>
+    <span class="arrow">→</span>
+    <span class="phase" style="border-color:var(--green)">交付</span>
+  </div>
+</div>
+
+<!-- 整体进度 -->
+<div class="card">
+  <h2>📊 里程碑进度</h2>
+  <div class="col">
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M1 · 基础设施</strong><br><span style="color:var(--dim);font-size:.8rem">NestJS + Prisma + PostgreSQL + MinIO + Docker Compose + CI</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M2 · 项目流程闭环</strong><br><span style="color:var(--dim);font-size:.8rem">需求录入 → 澄清 → 方案 → Demo 生成 → 批注反馈</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M3 · 交付流水线</strong><br><span style="color:var(--dim);font-size:.8rem">Hermes 分析 + N8N 编排 + Cloudecode 执行 + Webhook 回调</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M4 · 质量门禁</strong><br><span style="color:var(--dim);font-size:.8rem">PRD 深度探索、Demo 校验、回滚、错误模式库</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M5 · N8N 与认证集成</strong><br><span style="color:var(--dim);font-size:.8rem">N8N 实例配置 + API Key + 9 个 webhook 工作流 + 账号认证</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M6 · 交付导出增强</strong><br><span style="color:var(--dim);font-size:.8rem">PipelineService export_* 路由 + CloudecodeClient generateAsset + Dockerfile</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M7 · 前端交付页</strong><br><span style="color:var(--dim);font-size:.8rem">Next.js 交付页面 294 行，核心逻辑完成，状态显示待细化</span></div></div>
+  </div>
+</div>
+
+<!-- 后端完成度 -->
+<div class="card full" style="grid-column:1/-1">
+  <h2>🐱 后端模块完成度</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:.85rem">
+    <tr style="color:var(--dim);border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:.5rem">模块</th>
+      <th style="text-align:left">文件</th>
+      <th style="text-align:center">状态</th>
+      <th style="text-align:center">测试</th>
+      <th style="text-align:right">说明</th>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Auth</td><td>JWT + Passport</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">注册/登录/鉴权</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Project</td><td>11 个端点</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">CRUD + 状态管理</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Clarify</td><td>clarify.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">需求澄清 + DeepSeek</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Plan</td><td>plan-generator.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">方案生成</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Demo</td><td>demo-generator.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">Demo HTML 生成</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Feedback</td><td>feedback.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">批注 + 状态流转</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Hermes</td><td>hermes.client.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">AI 任务拆解</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>N8N Client</td><td>n8n.client.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">Webhook 触发</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>N8N Webhook</td><td>n8n-webhook.controller.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">5 个回调端点</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Pipeline</td><td>pipeline.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">export_* 路由 + 降级路径已修复</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Delivery</td><td>delivery.service.ts + orchestrator</td><td style="text-align:center;color:var(--yellow)">🔄</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">核心逻辑完成</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Cloudecode</td><td>cloudecode.client.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">AI 代码执行</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>MinIO</td><td>minio.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">文件存储</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Quality Gates</td><td>html-validator, error-matcher, snapshot</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">质量门禁全部实现</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Sanitize</td><td>sanitize.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">关键词过滤</td></tr>
+    <tr><td>Product Discovery</td><td>product-discovery.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">PRD 深度探索</td></tr>
+  </table>
+</div>
+
+<!-- 前端完成度 -->
+<div class="card">
+  <h2>🎨 前端页面</h2>
+  <div class="col">
+    <div class="item"><span class="dot" style="background:var(--green)"></span> Landing / 首页 <span class="tag">91 行</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> 项目看板 <span class="tag">89 行</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> 新建项目 <span class="tag">62 行</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> 项目详情 <span class="tag">573 行</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> 方案页 <span class="tag">323 行</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> Demo 预览 + 批注 <span class="tag">327 行</span></div>
+    <div class="item"><span class="dot" style="background:var(--yellow)"></span> 交付页 <span class="tag">294 行</span> — 核心逻辑完成</div>
+    <div class="item"><span class="dot" style="background:var(--dim)"></span> 历史快照页 <span class="tag">—</span></div>
+  </div>
+</div>
+
+<!-- 基础设施 -->
+<div class="card">
+  <h2>☁️ 基础设施</h2>
+  <div class="col">
+    <div class="item"><span class="dot" style="background:var(--green)"></span> Docker Compose（PostgreSQL + Redis + MinIO + N8N）</div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> CI（GitHub Actions + lint + build）</div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> N8N 实例 · <a href="http://192.168.124.126:15678" target="_blank">192.168.124.126:15678</a></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> 9 个 N8N 工作流已创建并激活</div>
+    <div class="item"><span class="dot" style="background:var(--yellow)"></span> 平台 API 待部署（Dockerfile + docker-compose 配置已完成）</div>
+    <div class="item"><span class="dot" style="background:var(--dim)"></span> 生产环境域名/HTTPS</div>
+  </div>
+</div>
+
+<!-- 下一步 -->
+<div class="card full">
+  <h2>🎯 下一步做什么</h2>
+  <div class="col">
+    <div class="item"><span class="dot" style="background:var(--yellow)"></span> <strong>优先级高 · 启动平台 API</strong><br><span style="color:var(--dim);font-size:.8rem">部署 NestJS 后端到服务器，让 N8N webhook 工作流可回调平台 API（目前返回 500）</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> <strong>PipelineService export_* 路由</strong><br><span style="color:var(--dim);font-size:.8rem">已完成：5 种导出类型 + CloudecodeClient.generateAsset + 降级路径修复</span></div>
+    <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>交付页状态展示细化</strong> — 前端交付页绑定 Build 状态、进度条、错误提示</div>
+    <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>历史快照 UI</strong> — Demo 版本历史浏览和手动回滚界面</div>
+    <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>案例复盘 + 经验推荐</strong> — CaseReview / ExperienceRecommendation 完整闭环</div>
+    <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>生产部署</strong> — 域名 / HTTPS / 持久化存储 / 监控告警</div>
+    <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>Cloudecode 真实运行时</strong> — 替换 internal/cloudecode 占位服务</div>
+  </div>
+</div>
+
+<!-- 数据模型 -->
+<div class="card full">
+  <h2>🗃️ 数据模型</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+    <tr style="color:var(--dim);border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:.4rem">表</th><th style="text-align:left">用途</th><th style="text-align:center">状态</th>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>users</td><td>用户 + 套餐</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>projects</td><td>项目全生命周期</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>modules</td><td>模块/页面/API 映射</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>tasks</td><td>任务分解 + 状态 + 重试</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>feedback_items</td><td>批注反馈</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>demo_snapshots</td><td>Demo 版本历史</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>builds</td><td>交付构建记录</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>delivery_options</td><td>交付开关配置</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>decision_logs</td><td>决策日志</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>error_events</td><td>错误事件</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>case_reviews</td><td>案例复盘</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+    <tr><td>experience_recommendations</td><td>经验推荐</td><td style="text-align:center;color:var(--green)">✅</td></tr>
+  </table>
+</div>
+
+</div>
+</body>
+</html>

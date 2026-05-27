@@ -5,7 +5,7 @@ import { PrismaService } from '../database/prisma.service';
 import { BuildService } from './build.service';
 import { StatusMapperService } from './status-mapper.service';
 import { DeepseekService } from './deepseek.service';
-import { OpenClawClient } from '../integrations/openclaw/openclaw.client';
+import { HermesClient } from '../integrations/hermes/hermes.client';
 import { N8nClient } from '../integrations/n8n/n8n.client';
 import { MinioService } from '../integrations/minio/minio.service';
 import {
@@ -54,7 +54,7 @@ export class DeliveryOrchestrator {
     private buildService: BuildService,
     private statusMapper: StatusMapperService,
     private deepseek: DeepseekService,
-    private openclaw: OpenClawClient,
+    private hermes: HermesClient,
     private n8n: N8nClient,
     private minio: MinioService,
   ) {}
@@ -188,7 +188,7 @@ export class DeliveryOrchestrator {
   // ═══════════ 执行机构 2：打包导出 ═══════════
   /**
    * 将 Demo HTML 打包为可下载的文件。
-   * 简单场景：直接上传 HTML；复杂场景：调用 OpenClaw 分解为子任务。
+   * 简单场景：直接上传 HTML；复杂场景：调用 Hermes 分解为子任务。
    */
   private async handlePackageExport(payload: DeliveryExportRequestedPayload): Promise<string | undefined> {
     const { projectId, buildId } = payload;

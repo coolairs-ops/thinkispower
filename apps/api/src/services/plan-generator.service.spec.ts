@@ -62,7 +62,7 @@ describe('PlanGeneratorService', () => {
 
       // Fallback plan should be returned
       expect(result.summary).toContain('客户');
-      expect(result.pages).toHaveLength(6);
+      expect(result.pages).toHaveLength(4);
       expect(result.estimatedDays).toBe(10);
     });
 

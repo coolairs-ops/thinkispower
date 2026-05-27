@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
+import { StatusMapperService } from '../../services/status-mapper.service';
+import { EVENTS } from '../../events/event-types';
 
 const DELIVERY_DECOMPOSITION_PROMPT = `你是一个软件项目技术负责人（总工），负责项目的交付评估和任务分解。
 
@@ -53,17 +56,19 @@ const TASK_DECOMPOSITION_PROMPT = `你是一个软件项目技术负责人（总
 }`;
 
 @Injectable()
-export class OpenClawClient {
-  private readonly logger = new Logger(OpenClawClient.name);
+export class HermesClient {
+  private readonly logger = new Logger(HermesClient.name);
 
   constructor(
     private config: ConfigService,
     private prisma: PrismaService,
     private deepseek: DeepseekService,
+    private eventEmitter: EventEmitter2,
+    private statusMapper: StatusMapperService,
   ) {}
 
   async handleFeedback(feedbackId: string): Promise<string[]> {
-    this.logger.log(`OpenClaw analyzing feedback ${feedbackId}`);
+    this.logger.log(`Hermes analyzing feedback ${feedbackId}`);
 
     const feedback = await this.prisma.feedbackItem.findUnique({
       where: { id: feedbackId },
@@ -97,7 +102,7 @@ export class OpenClawClient {
     );
 
     const tasks = this.parseTasks(response, feedback.projectId);
-    this.logger.log(`OpenClaw decomposed into ${tasks.length} tasks`);
+    this.logger.log(`Hermes decomposed into ${tasks.length} tasks`);
 
     const taskIds: string[] = [];
     for (const task of tasks) {
@@ -118,7 +123,7 @@ export class OpenClawClient {
     if (taskIds.length > 0) {
       await this.prisma.feedbackItem.update({
         where: { id: feedbackId },
-        data: { generatedTaskId: taskIds[0] },
+        data: { generatedTaskId: taskIds[0], status: 'processing' },
       });
     }
 
@@ -129,7 +134,7 @@ export class OpenClawClient {
     taskIds: string[];
     analysis: { completeness: number; risks: Array<{ severity: string; description: string }>; recommendations: string[] };
   }> {
-    this.logger.log(`OpenClaw analyzing delivery readiness for project ${projectId}`);
+    this.logger.log(`Hermes analyzing delivery readiness for project ${projectId}`);
 
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
@@ -164,7 +169,7 @@ export class OpenClawClient {
     );
 
     const parsed = this.parseDeliveryResponse(response);
-    this.logger.log(`OpenClaw delivery analysis: ${parsed.completeness}% complete, ${parsed.tasks.length} tasks, ${parsed.risks.length} risks`);
+    this.logger.log(`Hermes delivery analysis: ${parsed.completeness}% complete, ${parsed.tasks.length} tasks, ${parsed.risks.length} risks`);
 
     // Create Task records
     const taskIds: string[] = [];
@@ -263,5 +268,40 @@ export class OpenClawClient {
         }];
       }
     }
+  }
+
+  /**
+   * PRD 就绪 — 保存 PRD + 更新项目状态（不触发 N8N，等用户确认方案）
+   */
+  async handlePrdReady(projectId: string, prd: any, summary: string): Promise<void> {
+    this.logger.log(`[Hermes] PRD 就绪, 项目 ${projectId}`);
+
+    await this.prisma.projectMessage.create({
+      data: {
+        projectId,
+        role: 'system_internal',
+        content: 'PRD 已生成',
+        metadata: { prd } as any,
+      },
+    });
+
+    const completionMessage = summary
+      ? `${summary}\n\n我已经对你想做的产品有了全面了解。下面是我整理的需求文档，你看看是否准确？如果有需要修改的地方，直接告诉我，我可以帮你调整。`
+      : '我已经对你想做的产品有了全面了解。下面是我整理的需求文档，你看看是否准确？如果有需要修改的地方，直接告诉我，我可以帮你调整。';
+
+    await this.prisma.projectMessage.create({
+      data: { projectId, role: 'assistant', content: completionMessage },
+    });
+
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        status: 'prd_ready',
+        publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('prd_ready'),
+        structuredRequirement: { prd } as any,
+      },
+    });
+
+    this.logger.log(`[Hermes] PRD 已保存, 等待用户确认方案, 项目 ${projectId}`);
   }
 }

@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
-import { EVENTS } from '../../events/event-types';
+import { EVENTS, TaskFailedPayload, TasksCompletedPayload } from '../../events/event-types';
 
 @Injectable()
 export class FeedbackService {
@@ -114,5 +115,53 @@ export class FeedbackService {
       id: updated.id,
       status: updated.status,
     };
+  }
+
+  @OnEvent(EVENTS.TASKS_COMPLETED)
+  async handleFeedbackTasksCompleted(payload: TasksCompletedPayload) {
+    if (!payload.feedbackId) return;
+
+    const feedback = await this.prisma.feedbackItem.findFirst({
+      where: { id: payload.feedbackId, projectId: payload.projectId },
+      select: { id: true },
+    });
+    if (!feedback) return;
+
+    await this.prisma.feedbackItem.update({
+      where: { id: payload.feedbackId },
+      data: { status: 'resolved' },
+    });
+
+    await this.prisma.project.update({
+      where: { id: payload.projectId },
+      data: {
+        status: 'demo_ready',
+        publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
+      },
+    });
+  }
+
+  @OnEvent(EVENTS.TASK_FAILED)
+  async handleFeedbackTaskFailed(payload: TaskFailedPayload) {
+    if (!payload.feedbackId) return;
+
+    const feedback = await this.prisma.feedbackItem.findFirst({
+      where: { id: payload.feedbackId, projectId: payload.projectId },
+      select: { id: true },
+    });
+    if (!feedback) return;
+
+    await this.prisma.feedbackItem.update({
+      where: { id: payload.feedbackId },
+      data: { status: 'processing' },
+    });
+
+    await this.prisma.project.update({
+      where: { id: payload.projectId },
+      data: {
+        status: 'failed',
+        publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('failed'),
+      },
+    });
   }
 }

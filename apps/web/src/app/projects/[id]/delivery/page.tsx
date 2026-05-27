@@ -7,6 +7,22 @@ import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import NavBar from '@/lib/nav-bar';
 
+const EXPORT_BUTTONS = [
+  { key: 'source-download', label: '下载源码', endpoint: 'request-source-download' },
+  { key: 'package-export', label: '导出项目包', endpoint: 'request-package-export' },
+  { key: 'repository-transfer', label: '交付到我的代码仓库', endpoint: 'request-repository-transfer' },
+  { key: 'database-export', label: '导出数据库结构', endpoint: 'request-database-export' },
+  { key: 'deployment-config', label: '导出部署配置', endpoint: 'request-deployment-config' },
+];
+
+const EXPORT_FIELD_MAP: Record<string, string> = {
+  'source-download': 'sourceZipUrl',
+  'package-export': 'packageZipUrl',
+  'repository-transfer': 'repositoryUrl',
+  'database-export': 'databaseSchemaUrl',
+  'deployment-config': 'deploymentConfigUrl',
+};
+
 export default function DeliveryPage() {
   const params = useParams();
   const router = useRouter();
@@ -19,9 +35,25 @@ export default function DeliveryPage() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportStates, setExportStates] = useState<Record<string, { loading: boolean; done: boolean; url?: string }>>({});
+  const [caseReview, setCaseReview] = useState<any>(null);
+  const [recommendations, setRecommendations] = useState<any[]>([]);
 
   // 状态观测器 — 轮询交付状态
-  const pollInterval = 5000; // 5 秒
+  const pollInterval = 5000;
+
+  const fetchReviewAndRecs = async () => {
+    try {
+      const [review, recs] = await Promise.all([
+        api.get(`/api/projects/${projectId}/case-review`),
+        api.get(`/api/projects/${projectId}/experience-recommendations`),
+      ]);
+      setCaseReview(review);
+      setRecommendations(recs || []);
+    } catch {
+      // Review/recommendations may not exist yet (being generated async)
+    }
+  };
 
   useEffect(() => {
     if (isLoading) return;
@@ -37,6 +69,9 @@ export default function DeliveryPage() {
           setProjectName(proj.name || '');
           setLoading(false);
           setError(null);
+          if (d.status === 'completed') {
+            fetchReviewAndRecs();
+          }
         })
         .catch((err) => {
           setLoading(false);
@@ -47,11 +82,13 @@ export default function DeliveryPage() {
 
     // 如果项目正在交付中，轮询状态变化
     const timer = setInterval(() => {
-      // 只当状态是 exporting 或 deploying 时继续轮询
       api.get(`/api/projects/${projectId}/delivery`).then((d) => {
         setDelivery(d);
         if (d.status === 'completed' || d.status === 'build_failed') {
           clearInterval(timer);
+        }
+        if (d.status === 'completed') {
+          fetchReviewAndRecs();
         }
       }).catch(() => {});
     }, pollInterval);
@@ -68,7 +105,6 @@ export default function DeliveryPage() {
       setDelivery((prev: any) => ({ ...prev, status: 'exporting' }));
       toast('交付流程已启动，正在分析项目...', 'success');
 
-      // 如果分析报告中有风险提示，展示给用户
       if (result.analysis?.risks?.length > 0) {
         const highRisks = result.analysis.risks.filter((r: any) => r.severity === 'high');
         if (highRisks.length > 0) {
@@ -85,6 +121,48 @@ export default function DeliveryPage() {
   const handleRetry = () => {
     setError(null);
     handleStartDelivery();
+  };
+
+  const handleExport = async (buttonKey: string, endpoint: string) => {
+    if (!delivery?.isPro) {
+      toast('高级交付服务需升级套餐，请联系平台顾问。', 'info');
+      return;
+    }
+
+    setExportStates(prev => ({ ...prev, [buttonKey]: { loading: true, done: false } }));
+
+    try {
+      const result = await api.post(`/api/projects/${projectId}/delivery/${endpoint}`);
+      if (result.upgradeRequired) {
+        toast(result.message, 'info');
+        setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false } }));
+        return;
+      }
+
+      toast('导出任务已启动...', 'success');
+
+      // 等几秒后刷新获取下载链接
+      setTimeout(async () => {
+        try {
+          const d = await api.get(`/api/projects/${projectId}/delivery`);
+          setDelivery(d);
+          const field = EXPORT_FIELD_MAP[buttonKey];
+          const url = d?.latestBuild?.[field];
+          setExportStates(prev => ({
+            ...prev,
+            [buttonKey]: { loading: false, done: true, url },
+          }));
+          if (url) {
+            toast('导出完成', 'success');
+          }
+        } catch {
+          setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false } }));
+        }
+      }, 3000);
+    } catch (err: any) {
+      toast(err.message || '导出失败', 'error');
+      setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false } }));
+    }
   };
 
   if (isLoading) return null;
@@ -159,7 +237,6 @@ export default function DeliveryPage() {
                   </a>
                 </div>
               )}
-              {/* 展示交付分析结果 */}
               {delivery?.deliveryAnalysis && (
                 <div className="mt-3 text-sm text-green-700">
                   <p>完整度评估：{delivery.deliveryAnalysis.completeness}%</p>
@@ -264,29 +341,127 @@ export default function DeliveryPage() {
           </section>
 
           {/* ─── 高级交付服务 ─── */}
-          <section className="rounded-xl bg-white p-6 shadow-sm">
+          <section className="mb-6 rounded-xl bg-white p-6 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold text-gray-800">高级交付服务</h2>
             <div className="grid grid-cols-2 gap-3">
-              {[
-                { key: 'source-download', label: '下载源码' },
-                { key: 'package-export', label: '导出项目包' },
-                { key: 'repository-transfer', label: '交付到我的代码仓库' },
-                { key: 'database-export', label: '导出数据库结构' },
-                { key: 'deployment-config', label: '导出部署配置' },
-              ].map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => {/* keep existing handler */}}
-                  className="rounded-lg border p-4 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  {item.label}
-                  {!delivery?.isPro && (
-                    <p className="mt-1 text-xs text-gray-400">这是高级交付服务，如需开通请联系平台顾问。</p>
-                  )}
-                </button>
-              ))}
+              {EXPORT_BUTTONS.map((item) => {
+                const state = exportStates[item.key];
+                const isLoading = state?.loading;
+                const isDone = state?.done;
+                const downloadUrl = state?.url;
+
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => handleExport(item.key, item.endpoint)}
+                    disabled={isLoading || isDelivering || !delivery?.isPro}
+                    className={`rounded-lg border p-4 text-left text-sm transition-colors ${
+                      isDone
+                        ? 'border-green-300 bg-green-50'
+                        : isLoading
+                        ? 'border-blue-200 bg-blue-50'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    } disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {isLoading && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />}
+                      {isDone && <span className="text-green-600">✅</span>}
+                      <span className={isDone ? 'text-green-700' : ''}>{item.label}</span>
+                    </div>
+                    {isDone && downloadUrl && (
+                      <a
+                        href={downloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-1 inline-block text-xs text-blue-600 hover:underline"
+                      >
+                        下载文件 ↗
+                      </a>
+                    )}
+                    {isDone && !downloadUrl && (
+                      <p className="mt-1 text-xs text-green-600">已完成</p>
+                    )}
+                    {isLoading && (
+                      <p className="mt-1 text-xs text-blue-600">处理中...</p>
+                    )}
+                    {!isLoading && !isDone && !delivery?.isPro && (
+                      <p className="mt-1 text-xs text-gray-400">这是高级交付服务，如需开通请联系平台顾问。</p>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </section>
+
+          {/* ─── 复盘报告 ─── */}
+          {caseReview && (
+            <section className="mb-6 rounded-xl bg-white p-6 shadow-sm">
+              <h2 className="mb-3 text-lg font-semibold text-gray-800">📋 项目复盘</h2>
+              <div className="space-y-3 text-sm text-gray-700">
+                {caseReview.summary && (
+                  <p className="text-gray-600">{caseReview.summary}</p>
+                )}
+                {caseReview.appType && (
+                  <p><span className="font-medium text-gray-500">项目类型：</span>{caseReview.appType}</p>
+                )}
+                {caseReview.mainErrors?.length > 0 && (
+                  <div>
+                    <p className="font-medium text-gray-500 mb-1">主要问题：</p>
+                    <ul className="list-disc pl-4 space-y-1">
+                      {caseReview.mainErrors.map((e: any, i: number) => (
+                        <li key={i} className={e.severity === 'high' ? 'text-red-600' : 'text-yellow-600'}>
+                          [{e.stage}] {e.description}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {caseReview.reusableLessons?.length > 0 && (
+                  <div>
+                    <p className="font-medium text-gray-500 mb-1">可复用经验：</p>
+                    <ul className="list-disc pl-4">
+                      {caseReview.reusableLessons.map((l: string, i: number) => (
+                        <li key={i}>{l}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* ─── 经验推荐 ─── */}
+          {recommendations.length > 0 && (
+            <section className="rounded-xl bg-white p-6 shadow-sm">
+              <h2 className="mb-3 text-lg font-semibold text-gray-800">💡 经验推荐</h2>
+              <div className="space-y-3">
+                {recommendations.map((rec: any, i: number) => (
+                  <div key={i} className="rounded-lg bg-gray-50 p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                        {rec.recommendationType}
+                      </span>
+                      <span className="text-xs text-gray-400">{rec.stage}</span>
+                    </div>
+                    {rec.recommendation?.title && (
+                      <p className="text-sm font-medium text-gray-800">{rec.recommendation.title}</p>
+                    )}
+                    {rec.recommendation?.content && (
+                      <p className="text-sm text-gray-600 mt-1">{rec.recommendation.content}</p>
+                    )}
+                    {rec.recommendation?.tags?.length > 0 && (
+                      <div className="flex gap-1 mt-1">
+                        {rec.recommendation.tags.map((tag: string, j: number) => (
+                          <span key={j} className="rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-500">{tag}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>

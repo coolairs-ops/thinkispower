@@ -1,14 +1,20 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
-import { Prisma } from '@prisma/client';
-import { ProductDiscoveryService, PRD } from '../../services/product-discovery.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
+import { ProductDiscoveryService } from '../../services/product-discovery.service';
+import { HermesClient } from '../../integrations/hermes/hermes.client';
+import { HermesQualityService } from '../../services/hermes-quality.service';
 
 @Injectable()
 export class MessageService {
+  // In-memory quality hints for each project (transient, lost on restart)
+  private qualityHints = new Map<string, string[]>();
+
   constructor(
     private prisma: PrismaService,
     private discovery: ProductDiscoveryService,
+    private hermes: HermesClient,
+    private hermesQuality: HermesQualityService,
     private statusMapper: StatusMapperService,
   ) {}
 
@@ -55,13 +61,21 @@ export class MessageService {
       orderBy: { createdAt: 'asc' },
     });
 
-    // 4. Call ProductDiscoveryService (PM deep exploration)
+    // 4. Get quality hints from previous round's Hermes analysis
+    const savedHints = this.qualityHints.get(projectId) || [];
+    const hintsStr = savedHints.length > 0 ? savedHints.join('\n') : undefined;
+
+    // 5. PM 多轮需求探索（注入 Hermes 质量门禁 hint）
     const result = await this.discovery.processMessages(
       allMessages.map(m => ({ role: m.role, content: m.content })),
+      hintsStr,
     );
 
+    // 6. Clear used hints (injected into PM's context for this round)
+    this.qualityHints.delete(projectId);
+
     if (result.needMoreInfo && result.question) {
-      // 4a. Still exploring — save the AI question
+      // 7a. 还在探索 — 保存 AI 追问
       const assistantContent = result.summary
         ? `${result.summary}\n\n${result.question}`
         : result.question;
@@ -69,39 +83,17 @@ export class MessageService {
       await this.prisma.projectMessage.create({
         data: { projectId, role: 'assistant', content: assistantContent },
       });
+
+      // 7b. Hermes 静默质量门禁 — 分析本轮对话，为下一轮 PM 提供 hint
+      const qualityResult = await this.hermesQuality.analyzeResponse(
+        allMessages.map(m => ({ role: m.role, content: m.content })),
+      );
+      if (qualityResult.hints.length > 0) {
+        this.qualityHints.set(projectId, qualityResult.hints);
+      }
     } else if (result.prd) {
-      // 4b. PRD ready — save it and update status
-      await this.prisma.projectMessage.create({
-        data: {
-          projectId,
-          role: 'system_internal',
-          content: 'PRD 已生成',
-          metadata: { prd: result.prd } as any,
-        },
-      });
-
-      // Save completion message
-      const completionMessage = result.summary
-        ? `${result.summary}\n\n我已经对你想做的产品有了全面了解。下面是我整理的需求文档，你看看是否准确？如果有需要修改的地方，直接告诉我，我可以帮你调整。`
-        : '我已经对你想做的产品有了全面了解。下面是我整理的需求文档，你看看是否准确？如果有需要修改的地方，直接告诉我，我可以帮你调整。';
-
-      await this.prisma.projectMessage.create({
-        data: {
-          projectId,
-          role: 'assistant',
-          content: completionMessage,
-        },
-      });
-
-      // Update project with PRD and status
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          status: 'prd_ready',
-          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('prd_ready'),
-          structuredRequirement: { prd: result.prd } as unknown as Prisma.JsonNullValueInput,
-        },
-      });
+      // 8. PRD 就绪 — 仅保存 PRD，不触发 N8N（等待用户确认方案）
+      await this.hermes.handlePrdReady(projectId, result.prd, result.summary);
     }
 
     // 5. Return filtered messages (no system_internal)

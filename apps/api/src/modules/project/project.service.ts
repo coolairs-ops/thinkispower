@@ -78,6 +78,25 @@ export class ProjectService {
     return this.toPublicProject(updated);
   }
 
+  async confirmPlan(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('项目不存在');
+    if (project.userId !== userId) throw new ForbiddenException('无权操作');
+    if (project.status !== 'prd_ready') {
+      throw new ForbiddenException('项目状态不是 prd_ready，无法确认方案');
+    }
+
+    const updated = await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        status: 'plan_ready',
+        publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('plan_ready'),
+      },
+      include: { deliveryOptions: true },
+    });
+    return this.toPublicProject(updated);
+  }
+
   private toPublicProject(project: any) {
     const { userId, planSummary, moduleMap, acceptanceChecklist, ...rest } = project;
     return {

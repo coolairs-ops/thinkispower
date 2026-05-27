@@ -1,4 +1,4 @@
-# OpenClaw 交付集成
+# Hermes 交付集成
 
 ## 用途
 
@@ -20,7 +20,7 @@ export_source | export_package | export_repository | export_database_schema | ex
 
 ### 步骤
 
-1. **添加分解方法** — 在 `openclaw.client.ts` 中添加 `handleDeliveryExport()` 方法：
+1. **添加分解方法** — 在 `hermes.client.ts` 中添加 `handleDeliveryExport()` 方法：
 
 ```typescript
 async handleDeliveryExport(projectId: string, exportType: string): Promise<string[]> {
@@ -43,12 +43,12 @@ async handleDeliveryExport(projectId: string, exportType: string): Promise<strin
 3. **在 DeliveryOrchestrator 中注册** — 调用 `handleDeliveryExport()` 替代 TODO：
 
 ```typescript
-const taskIds = await this.openclaw.handleDeliveryExport(projectId, 'package');
+const taskIds = await this.hermes.handleDeliveryExport(projectId, 'package');
 this.eventEmitter.emit(EVENTS.TASKS_CREATED, { projectId, feedbackId: null, taskIds });
 ```
 
 ### 参考
 
-- 现有 `OpenClawClient.handleFeedback()` — 参考其 DeepSeek 调用 + JSON 解析模式
-- `openclaw.client.ts` 中的任务分解 prompt — 参考其格式，替换任务类型为 `export_*`
+- 现有 `HermesClient.handleFeedback()` — 参考其 DeepSeek 调用 + JSON 解析模式
+- `hermes.client.ts` 中的任务分解 prompt — 参考其格式，替换任务类型为 `export_*`
 - PipelineService — 需要添加任务类型路由

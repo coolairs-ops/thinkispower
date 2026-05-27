@@ -11,12 +11,14 @@ import { DemoSnapshotModule } from './modules/demo-snapshot/demo-snapshot.module
 import { FeedbackModule } from './modules/feedback/feedback.module';
 import { TaskModule } from './modules/task/task.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
-import { OpenClawModule } from './integrations/openclaw/openclaw.module';
+import { HermesModule } from './integrations/hermes/hermes.module';
 import { CloudecodeModule } from './integrations/cloudecode/cloudecode.module';
 import { PipelineModule } from './integrations/pipeline/pipeline.module';
 import { MinioModule } from './integrations/minio/minio.module';
 import { N8nModule } from './integrations/n8n/n8n.module';
 import { N8nWebhookModule } from './modules/n8n-webhook/n8n-webhook.module';
+import { CaseReviewModule } from './modules/case-review/case-review.module';
+import { ExperienceRecommendationModule } from './modules/experience-recommendation/experience-recommendation.module';
 import { HealthController } from './modules/health/health.controller';
 import { SanitizeService } from './services/sanitize.service';
 import { StatusMapperService } from './services/status-mapper.service';
@@ -30,6 +32,7 @@ import { ErrorMatcherService } from './services/error-matcher.service';
 import { BuildService } from './services/build.service';
 import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
 import { ProductDiscoveryService } from './services/product-discovery.service';
+import { HermesQualityService } from './services/hermes-quality.service';
 
 @Global()
 @Module({
@@ -46,15 +49,17 @@ import { ProductDiscoveryService } from './services/product-discovery.service';
     TaskModule,
     DemoSnapshotModule,
     DeliveryModule,
-    OpenClawModule,
+    HermesModule,
     CloudecodeModule,
     PipelineModule,
     MinioModule,
     N8nModule,
     N8nWebhookModule,
+    CaseReviewModule,
+    ExperienceRecommendationModule,
   ],
   controllers: [HealthController],
-  providers: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, DeliveryOrchestrator, ProductDiscoveryService],
-  exports: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, ProductDiscoveryService],
+  providers: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, DeliveryOrchestrator, ProductDiscoveryService, HermesQualityService],
+  exports: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, ProductDiscoveryService, HermesQualityService],
 })
 export class AppModule {}

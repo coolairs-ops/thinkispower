@@ -16,10 +16,13 @@ export interface DeepseekOptions {
 export class DeepseekService {
   private readonly logger = new Logger(DeepseekService.name);
   private apiKey: string;
-  private baseUrl = 'https://api.deepseek.com/v1';
+  private baseUrl: string;
+  private model: string;
 
   constructor(private config: ConfigService) {
     this.apiKey = this.config.get('DEEPSEEK_API_KEY', '');
+    this.baseUrl = this.config.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1');
+    this.model = this.config.get('DEEPSEEK_MODEL', 'deepseek-chat');
   }
 
   async chat(messages: DeepseekMessage[], options?: DeepseekOptions): Promise<string> {
@@ -36,7 +39,7 @@ export class DeepseekService {
           Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({
-          model: options?.model || 'deepseek-chat',
+          model: options?.model || this.model,
           messages,
           temperature: options?.temperature ?? 0.7,
           max_tokens: options?.maxTokens ?? 2048,

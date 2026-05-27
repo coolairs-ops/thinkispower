@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { DeliveryController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
-import { OpenClawModule } from '../../integrations/openclaw/openclaw.module';
+import { HermesModule } from '../../integrations/hermes/hermes.module';
 import { N8nModule } from '../../integrations/n8n/n8n.module';
+import { CaseReviewModule } from '../case-review/case-review.module';
+import { ExperienceRecommendationModule } from '../experience-recommendation/experience-recommendation.module';
 
 @Module({
-  imports: [OpenClawModule, N8nModule],
+  imports: [HermesModule, N8nModule, CaseReviewModule, ExperienceRecommendationModule],
   controllers: [DeliveryController],
   providers: [DeliveryService],
   exports: [DeliveryService],

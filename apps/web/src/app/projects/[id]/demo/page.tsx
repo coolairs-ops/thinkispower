@@ -166,12 +166,20 @@ export default function DemoPage() {
             </button>
           )}
           {showPreview && (
-            <a
-              href={`/projects/${projectId}/delivery`}
-              className="rounded-lg border border-green-300 px-4 py-1.5 text-sm text-green-700 hover:bg-green-50 transition-colors"
-            >
-              交付
-            </a>
+            <>
+              <a
+                href={`/projects/${projectId}/snapshots`}
+                className="rounded-lg border border-gray-300 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                历史版本
+              </a>
+              <a
+                href={`/projects/${projectId}/delivery`}
+                className="rounded-lg border border-green-300 px-4 py-1.5 text-sm text-green-700 hover:bg-green-50 transition-colors"
+              >
+                交付
+              </a>
+            </>
           )}
           {mode === 'annotation' && showPreview && demoHtml && (
             <p className="text-sm text-orange-500">点击页面中想修改的位置，写下意见</p>

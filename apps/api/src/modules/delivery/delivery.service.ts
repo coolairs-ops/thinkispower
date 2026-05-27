@@ -4,8 +4,10 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { BuildService } from '../../services/build.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
-import { OpenClawClient } from '../../integrations/openclaw/openclaw.client';
+import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { N8nClient } from '../../integrations/n8n/n8n.client';
+import { CaseReviewService } from '../case-review/case-review.service';
+import { ExperienceRecommendationService } from '../experience-recommendation/experience-recommendation.service';
 import { EVENTS, DeliveryExportRequestedPayload, ExportType, TasksCreatedPayload, TasksCompletedPayload } from '../../events/event-types';
 
 @Injectable()
@@ -18,8 +20,10 @@ export class DeliveryService {
     private eventEmitter: EventEmitter2,
     private buildService: BuildService,
     private statusMapper: StatusMapperService,
-    private openclaw: OpenClawClient,
+    private hermes: HermesClient,
     private n8n: N8nClient,
+    private caseReviewService: CaseReviewService,
+    private experienceService: ExperienceRecommendationService,
   ) {}
 
   async getDelivery(userId: string, projectId: string) {
@@ -36,7 +40,7 @@ export class DeliveryService {
     // 获取最新 Build
     const latestBuild = await this.buildService.getLatestBuild(projectId);
 
-    // 读取 OpenClaw 交付分析结果（如果有）
+    // 读取 Hermes 交付分析结果（如果有）
     const deliveryAnalysis = (project.structuredRequirement as any)?.deliveryAnalysis || null;
 
     return {
@@ -73,7 +77,7 @@ export class DeliveryService {
    * 确认交付 — 工程控制论的"控制器启动器"。
    *
    * 不再直接 status = 'completed'，而是触发完整控制回路：
-   *   1. OpenClaw 认知分析（传感器）→ 任务分解 + 风险评估
+   *   1. Hermes 认知分析（传感器）→ 任务分解 + 风险评估
    *   2. N8N 编排（控制器）→ 调度执行
    *   3. Cloudecode 执行（被控对象）→ 代码生成
    *   4. Webhook 回调（反馈信道）→ 更新状态
@@ -91,9 +95,9 @@ export class DeliveryService {
 
     this.logger.log(`[控制器] 开始交付流程: 项目 ${projectId}`);
 
-    // ─── 阶段 1：传感器 — OpenClaw 认知分析 ───
-    this.logger.log(`[传感器] OpenClaw 分析项目交付就绪状态`);
-    const { taskIds, analysis } = await this.openclaw.handleDeliveryExport(projectId);
+    // ─── 阶段 1：传感器 — Hermes 认知分析 ───
+    this.logger.log(`[传感器] Hermes 分析项目交付就绪状态`);
+    const { taskIds, analysis } = await this.hermes.handleDeliveryExport(projectId);
 
     this.logger.log(
       `[传感器] 分析完成: 完整度 ${analysis.completeness}%, ${taskIds.length} 个任务, ${analysis.risks.length} 个风险`,
@@ -123,15 +127,15 @@ export class DeliveryService {
       if (result.success) {
         this.logger.log(`[前向通道] N8N 交付工作流已触发: runId=${result.runId}`);
       } else {
-        // N8N 触发失败，降级到 PipelineService
+        // N8N 触发失败，降级到 PipelineService 本地执行
         this.logger.warn(`[降级] N8N 触发失败，降级到 PipelineService 本地执行`);
-        const tasksPayload: TasksCreatedPayload = { projectId, feedbackId: null as any, taskIds };
+        const tasksPayload: TasksCreatedPayload = { projectId, taskIds };
         this.eventEmitter.emit(EVENTS.TASKS_CREATED, tasksPayload);
       }
     } else if (taskIds.length > 0) {
       // 降级路径：PipelineService 本地顺序执行
       this.logger.log(`[降级] N8N 不可用，使用 PipelineService 本地执行`);
-      const tasksPayload: TasksCreatedPayload = { projectId, feedbackId: null as any, taskIds };
+      const tasksPayload: TasksCreatedPayload = { projectId, taskIds };
       this.eventEmitter.emit(EVENTS.TASKS_CREATED, tasksPayload);
     } else {
       // 没有任务需要执行，直接标记为完成
@@ -242,12 +246,25 @@ export class DeliveryService {
       }
 
       this.logger.log(`[交付完成] 项目 ${projectId} 交付完成, productionUrl=${productionUrl}`);
+
+      // 异步生成复盘和经验推荐
+      this.caseReviewService.generateReview(projectId).then(review => {
+        this.logger.log(`[复盘] 项目 ${projectId} 复盘报告已生成`);
+      }).catch(err => {
+        this.logger.error(`[复盘] 项目 ${projectId} 复盘生成失败: ${err.message}`);
+      });
+
+      this.experienceService.generateRecommendations(projectId).then(recs => {
+        this.logger.log(`[经验] 项目 ${projectId} 经验推荐已生成: ${recs.length} 条`);
+      }).catch(err => {
+        this.logger.error(`[经验] 项目 ${projectId} 推荐生成失败: ${err.message}`);
+      });
     }
   }
 
   private async checkN8nAvailability(): Promise<boolean> {
     try {
-      const url = process.env.N8N_URL || 'http://localhost:5678';
+      const url = process.env.N8N_URL || 'http://192.168.124.126:15678';
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
 

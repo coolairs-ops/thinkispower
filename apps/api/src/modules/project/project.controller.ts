@@ -1,11 +1,15 @@
 import { Controller, Get, Post, Patch, Body, Param, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ProjectService } from './project.service';
+import { DeliveryService } from '../delivery/delivery.service';
 
 @Controller('api/projects')
 @UseGuards(JwtAuthGuard)
 export class ProjectController {
-  constructor(private projectService: ProjectService) {}
+  constructor(
+    private projectService: ProjectService,
+    private deliveryService: DeliveryService,
+  ) {}
 
   @Post()
   async create(@Req() req: any, @Body() body: { name: string; description?: string }) {
@@ -25,5 +29,13 @@ export class ProjectController {
   @Patch(':projectId')
   async update(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { name?: string; description?: string; appType?: string; structuredRequirement?: any }) {
     return this.projectService.update(req.user.id, projectId, body);
+  }
+
+  @Post(':projectId/confirm-plan')
+  async confirmPlan(@Req() req: any, @Param('projectId') projectId: string) {
+    // 1. Validate and update status to plan_ready
+    await this.projectService.confirmPlan(req.user.id, projectId);
+    // 2. Start delivery pipeline
+    return this.deliveryService.confirmDelivery(req.user.id, projectId);
   }
 }

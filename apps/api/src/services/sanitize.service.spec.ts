@@ -26,18 +26,15 @@ describe('SanitizeService', () => {
     });
 
     it('should handle multiple replacements in one string', () => {
-      const input = 'n8n + OpenClaw + GSD 协同工作';
+      const input = 'n8n + GSD 协同工作';
       const result = service.sanitizePublicText(input);
       expect(result).toContain('业务流程引擎');
-      expect(result).toContain('平台服务');
       expect(result).toContain('平台引擎');
       expect(result).not.toContain('n8n');
-      expect(result).not.toContain('OpenClaw');
     });
 
     it('should handle case-insensitive replacement', () => {
       expect(service.sanitizePublicText('N8N 工作流')).toContain('业务流程引擎');
-      expect(service.sanitizePublicText('openclaw API')).toContain('平台服务');
     });
 
     it('should handle null or undefined gracefully', () => {
@@ -58,17 +55,15 @@ describe('SanitizeService', () => {
     });
 
     it('should sanitize recursively in objects', () => {
-      const input = { name: '项目', engine: 'n8n', description: '由 OpenClaw 驱动' };
+      const input = { name: '项目', engine: 'n8n' };
       const result = service.sanitizeResponseBody(input) as Record<string, string>;
       expect(result.engine).toContain('业务流程引擎');
-      expect(result.description).toContain('平台服务');
     });
 
     it('should sanitize recursively in arrays', () => {
-      const input = ['使用 n8n', '通过 OpenClaw'];
+      const input = ['使用 n8n'];
       const result = service.sanitizeResponseBody(input) as string[];
       expect(result[0]).toContain('业务流程引擎');
-      expect(result[1]).toContain('平台服务');
     });
 
     it('should return non-string primitives as-is', () => {

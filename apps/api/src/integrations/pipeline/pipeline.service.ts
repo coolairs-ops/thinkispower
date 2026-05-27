@@ -4,6 +4,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { TaskService } from '../../modules/task/task.service';
 import { CloudecodeClient } from '../cloudecode/cloudecode.client';
 import { PrismaService } from '../../database/prisma.service';
+import { BuildService } from '../../services/build.service';
 import { HtmlValidatorService } from '../../services/html-validator.service';
 import { ErrorMatcherService } from '../../services/error-matcher.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
@@ -20,6 +21,7 @@ export class PipelineService {
     private eventEmitter: EventEmitter2,
     private taskService: TaskService,
     private cloudecode: CloudecodeClient,
+    private buildService: BuildService,
     private prisma: PrismaService,
     private validator: HtmlValidatorService,
     private errorMatcher: ErrorMatcherService,
@@ -58,10 +60,26 @@ export class PipelineService {
   }
 
   /**
-   * 执行单个 Task，包含验证 → 重试 → 回滚循环。
+   * 执行单个 Task。
+   * 根据 task.type 路由到不同的执行逻辑：
+   * - frontend | backend | database | test | fix → HTML 修改（现有逻辑）
+   * - export_* → 导出资产处理
    */
-  private async executeTask(taskId: string, projectId: string, feedbackId: string) {
-    this.logger.log(`Executing task ${taskId}`);
+  private async executeTask(taskId: string, projectId: string, feedbackId?: string | null) {
+    const task = await this.taskService.findById(taskId);
+    if (!task) {
+      this.logger.error(`Task ${taskId} not found`);
+      return;
+    }
+
+    // Export tasks → 导出处理
+    if (task.type.startsWith('export_') || task.type === 'deploy') {
+      await this.handleExportTask(task, projectId);
+      return;
+    }
+
+    // HTML 修改任务 → 现有逻辑，包含验证 → 重试 → 回滚循环
+    this.logger.log(`Executing HTML modification task ${taskId} type=${task.type}`);
 
     for (let attempt = 0; attempt <= 3; attempt++) {
       try {
@@ -141,6 +159,102 @@ export class PipelineService {
         this.eventEmitter.emit(EVENTS.TASK_FAILED, { projectId, feedbackId, taskId, error: msg });
         return;
       }
+    }
+  }
+
+  /**
+   * 处理导出类型任务 (export_source | export_package | export_repository | export_database_schema | export_deployment_config)。
+   * 包装现有资产或 AI 生成内容 → 上传 MinIO → 更新 Build 记录。
+   */
+  private async handleExportTask(task: any, projectId: string) {
+    const exportType = task.type.replace('export_', '');
+    this.logger.log(`Handling export task ${task.id} type=${task.type} → exportType=${exportType}`);
+
+    await this.taskService.updateStatus(task.id, 'running');
+
+    try {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { demoHtml: true, planSummary: true, structuredRequirement: true },
+      });
+      if (!project) throw new Error(`Project ${projectId} not found`);
+
+      // 找关联的 Build（PipelineService 是降级路径，Build 由 confirmDelivery 预先创建）
+      const build = await this.buildService.getLatestBuild(projectId);
+      if (!build) {
+        throw new Error('No build record found — cannot upload export artifact');
+      }
+
+      let buffer: Buffer;
+      let filename: string;
+      let contentType: string;
+
+      if (task.type === 'export_source' || task.type === 'export_package') {
+        // 打包现有资产
+        const content = JSON.stringify(
+          {
+            projectId,
+            exportType,
+            generatedAt: new Date().toISOString(),
+            demoHtml: project.demoHtml,
+            planSummary: project.planSummary,
+            structuredRequirement: project.structuredRequirement,
+          },
+          null,
+          2,
+        );
+        buffer = Buffer.from(content, 'utf-8');
+        filename = `${exportType}-${projectId.slice(0, 8)}.json`;
+        contentType = 'application/json';
+      } else {
+        // AI 生成内容（仓库代码 / 数据库 SQL / 部署配置）
+        const result = await this.cloudecode.generateAsset(task.type, {
+          planSummary: project.planSummary as string | null,
+          structuredRequirement: project.structuredRequirement,
+          demoHtml: project.demoHtml,
+        });
+        buffer = Buffer.from(result.content, 'utf-8');
+        filename = result.fileName;
+        contentType = result.contentType;
+      }
+
+      const url = await this.buildService.uploadArtifact(
+        build.id,
+        projectId,
+        exportType,
+        buffer,
+        filename,
+        contentType,
+      );
+
+      await this.taskService.updateStatus(task.id, 'completed', {
+        resultPayload: { url, filename, exportType },
+      });
+
+      await this.logDecision(task.id, projectId, 'export_complete', {
+        success: true,
+        exportType,
+        url,
+        filename,
+      });
+
+      this.logger.log(`Export task ${task.id} completed: ${filename} → ${url}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Export task ${task.id} failed: ${msg}`);
+
+      await this.taskService.updateStatus(task.id, 'failed', { errorMessage: msg });
+      await this.logDecision(task.id, projectId, 'export_failed', {
+        success: false,
+        exportType: task.type,
+        error: msg,
+      });
+
+      this.eventEmitter.emit(EVENTS.TASK_FAILED, {
+        projectId,
+        taskId: task.id,
+        error: msg,
+      });
     }
   }
 

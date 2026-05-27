@@ -8,7 +8,7 @@ export class N8nClient {
   private apiKey: string;
 
   constructor(private config: ConfigService) {
-    this.baseUrl = this.config.get('N8N_URL', 'http://localhost:5678');
+    this.baseUrl = this.config.get('N8N_URL', 'http://192.168.124.126:15678');
     this.apiKey = this.config.get('N8N_API_KEY', '');
   }
 

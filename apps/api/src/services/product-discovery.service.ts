@@ -105,7 +105,7 @@ export class ProductDiscoveryService {
 
   constructor(private deepseek: DeepseekService) {}
 
-  async processMessages(messages: { role: string; content: string }[]): Promise<DiscoveryResult> {
+  async processMessages(messages: { role: string; content: string }[], extraSystemHints?: string): Promise<DiscoveryResult> {
     const contextMessages = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
@@ -119,8 +119,12 @@ export class ProductDiscoveryService {
       ? '\n【注意】已经进行了多轮对话，请基于已有信息直接输出 PRD，不要再追问。如果某些维度信息不足，请合理推断。'
       : '';
 
+    const systemContent = extraSystemHints
+      ? `${DISCOVERY_SYSTEM_PROMPT}\n\n## Hermes 质量门禁提示\n以下是在对话中发现的需要注意的问题，请你在本轮提问中呼应处理：\n${extraSystemHints}`
+      : DISCOVERY_SYSTEM_PROMPT;
+
     const aiMessages = [
-      { role: 'system' as const, content: DISCOVERY_SYSTEM_PROMPT },
+      { role: 'system' as const, content: systemContent },
       ...contextMessages,
       {
         role: 'user' as const,

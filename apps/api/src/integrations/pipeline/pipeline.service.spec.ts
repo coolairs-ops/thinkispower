@@ -4,6 +4,7 @@ import { PipelineService } from './pipeline.service';
 import { TaskService } from '../../modules/task/task.service';
 import { CloudecodeClient } from '../cloudecode/cloudecode.client';
 import { PrismaService } from '../../database/prisma.service';
+import { BuildService } from '../../services/build.service';
 import { HtmlValidatorService } from '../../services/html-validator.service';
 import { ErrorMatcherService } from '../../services/error-matcher.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
@@ -64,6 +65,11 @@ describe('PipelineService', () => {
     rollback: jest.fn(),
   };
 
+  const mockBuildService = {
+    uploadArtifact: jest.fn(),
+    getLatestBuild: jest.fn(),
+  };
+
   const pendingTask = {
     id: 'task-1',
     projectId: 'project-1',
@@ -96,6 +102,7 @@ describe('PipelineService', () => {
         { provide: HtmlValidatorService, useValue: mockValidator },
         { provide: ErrorMatcherService, useValue: mockErrorMatcher },
         { provide: HtmlModuleExtractorService, useValue: mockHtmlExtractor },
+        { provide: BuildService, useValue: mockBuildService },
         { provide: DemoSnapshotService, useValue: mockDemoSnapshotService },
       ],
     }).compile();
