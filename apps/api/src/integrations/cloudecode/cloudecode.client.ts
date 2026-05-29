@@ -5,18 +5,19 @@ import { DeepseekService } from '../../services/deepseek.service';
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 
-const HTML_MODIFICATION_PROMPT = `你是一个前端开发工程师。根据任务描述，修改 Demo HTML 文件。
+const HTML_MODIFICATION_PROMPT = `你是一个前端开发工程师。根据任务描述，生成/修改 Demo HTML 文件。
 
 要求：
-1. 保持单文件 HTML SPA 结构
-2. 保持 data-module-key 和 data-element-path 属性
-3. 保持 postMessage 通信机制
-4. 保持导航切换方式（onclick + navigate()，不使用 hashchange）
-5. **只修改目标模块的内容**，不要改动其他模块、侧边栏导航、样式、脚本
-6. 不要改变无关模块的 render() 函数内容
-7. 输出完整的 HTML，不要省略任何部分
-
-直接输出 HTML（不要 markdown 包裹）。`;
+1. 单文件 HTML SPA，左侧导航 + 右侧内容区
+2. 每个交互元素必须标注 data-module-key 和 data-element-path：
+   - 按钮：{key} data-element-path="add-btn"、"save-btn"、"delete-btn"
+   - 输入框：data-element-path="search-input"、"name-input"
+   - 表格行/单元格：data-element-path="row-1"、"col-name"
+   - 卡片/统计块：data-element-path="card-1"、"stat-total"
+   - **不要把 data-module-key 挂在整页容器上，挂到具体可操作元素上**
+   - **导航菜单项不要加 data-module-key**
+3. 保持 onclick + navigate() 导航方式
+4. 输出完整 HTML，不要 markdown 包裹`;
 
 @Injectable()
 export class CloudecodeClient {
@@ -150,13 +151,68 @@ export class CloudecodeClient {
       return { success: false, rawError: 'Failed to extract HTML from DeepSeek response' };
     }
 
+    // 注入批注高亮支持（AI 生成的 HTML 缺少这部分）
+    const finalHtml = this.injectAnnotationSupport(html);
+
     await this.prisma.project.update({
       where: { id: project.id },
-      data: { demoHtml: html, demoUrl: `/demo/${project.id}`, status: 'demo_ready' },
+      data: { demoHtml: finalHtml, demoUrl: `/demo/${project.id}`, status: 'demo_ready' },
     });
 
-    this.logger.log(`Demo HTML generated for project ${project.id}: ${html.length} bytes`);
+    this.logger.log(`Demo HTML generated for project ${project.id}: ${finalHtml.length} bytes`);
     return { success: true, summary: 'Demo HTML generated', changedFiles: ['demo.html'] };
+  }
+
+  /**
+   * 注入批注高亮 CSS + 消息监听器到 AI 生成的 HTML。
+   * AI 不会自动生成这部分，需要后处理补上。
+   */
+  private injectAnnotationSupport(html: string): string {
+    const highlightCss = `
+.annotation-highlight { outline: 3px solid #3b82f6 !important; outline-offset: 2px; background: rgba(59,130,246,.08) !important; border-radius: 4px; }`;
+
+    const highlightJs = `
+// 批注模式：点击元素 → 通知父窗口
+document.addEventListener('click', function(e) {
+  var el = e.target.closest('[data-module-key]');
+  if (el) {
+    window.parent.postMessage({
+      type: 'element-click',
+      moduleKey: el.getAttribute('data-module-key'),
+      elementPath: el.getAttribute('data-element-path') || ''
+    }, '*');
+  }
+});
+
+// 批注模式：接收父窗口的高亮/取消高亮指令
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'highlight-element') {
+    document.querySelectorAll('.annotation-highlight').forEach(function(el) { el.classList.remove('annotation-highlight'); });
+    var sel = '[data-module-key="' + e.data.moduleKey + '"]';
+    if (e.data.elementPath) sel += '[data-element-path="' + e.data.elementPath + '"]';
+    var t = document.querySelector(sel);
+    if (t) { t.classList.add('annotation-highlight'); t.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  } else if (e.data && e.data.type === 'clear-highlight') {
+    document.querySelectorAll('.annotation-highlight').forEach(function(el) { el.classList.remove('annotation-highlight'); });
+  }
+});`;
+
+    // 注入 CSS 到 </style> 或 </head> 前
+    if (html.includes('</style>')) {
+      html = html.replace('</style>', highlightCss + '\n</style>');
+    } else if (html.includes('</head>')) {
+      html = html.replace('</head>', '<style>' + highlightCss + '\n</style>\n</head>');
+    }
+
+    // 注入 JS 到最后一个 </script> 前
+    const lastScript = html.lastIndexOf('</script>');
+    if (lastScript > 0) {
+      html = html.slice(0, lastScript) + highlightJs + '\n' + html.slice(lastScript);
+    } else if (html.includes('</body>')) {
+      html = html.replace('</body>', '<script>' + highlightJs + '\n</script>\n</body>');
+    }
+
+    return html;
   }
 
   private buildUserMessage(

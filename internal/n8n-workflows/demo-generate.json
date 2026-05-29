@@ -10,7 +10,7 @@
       }
     },
     {
-      "name": "调用平台后端 API",
+      "name": "触发平台生成",
       "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
@@ -33,7 +33,7 @@
     }
   ],
   "connections": {
-    "Webhook": { "main": [[ { "node": "调用平台后端 API", "type": "main", "index": 0 } ]] },
-    "调用平台后端 API": { "main": [[ { "node": "返回结果", "type": "main", "index": 0 } ]] }
+    "Webhook": { "main": [[ { "node": "触发平台生成", "type": "main", "index": 0 } ]] },
+    "触发平台生成": { "main": [[ { "node": "返回结果", "type": "main", "index": 0 } ]] }
   }
 }

@@ -43,7 +43,7 @@ export class DeepseekService {
           temperature: options?.temperature ?? 0.7,
           max_tokens: options?.maxTokens ?? 2048,
         },
-        30_000,
+        60_000,
       );
       return result.choices?.[0]?.message?.content || '';
     } catch (error) {

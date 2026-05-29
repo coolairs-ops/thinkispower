@@ -7,11 +7,12 @@ export async function createZipBuffer(
   rootDir: string,
   files: Array<{ path: string; content: string }>,
 ): Promise<Buffer> {
-  const { default: archiver } = await import('archiver');
+  // archiver v8 ESM: require() 返回 { Archiver }, 需要用 new
+  const { Archiver } = require('archiver');
   return new Promise((resolve, reject) => {
     const tmpFile = join(tmpdir(), `project-${randomUUID()}.zip`);
     const output = createWriteStream(tmpFile);
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    const archive = new Archiver('zip', { zlib: { level: 9 } });
 
     output.on('close', () => {
       const buf = readFileSync(tmpFile);

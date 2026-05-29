@@ -38,7 +38,7 @@ services:
       N8N_PORT: 5678
       N8N_PROTOCOL: http
       WEBHOOK_URL: http://192.168.124.126:5678/
-      PLATFORM_API_URL: http://api:3001
+      PLATFORM_API_URL: http://host.docker.internal:3001
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: 5432
