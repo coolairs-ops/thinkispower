@@ -79,7 +79,35 @@ export class DemoService {
 
   private async generateDemoAsync(projectId: string, planSummary: any) {
     let lastImprovements: string | undefined = undefined;
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = 1; // 减少重试，API 失败时快速降级
+
+    // 直接生成基础 HTML 作为最终降级
+    const fallbackToBasicHtml = async () => {
+      const basicHtml = this.buildBasicDemoHtml(planSummary);
+      const existing = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { demoHtml: true },
+      });
+      if (existing?.demoHtml) {
+        await this.demoSnapshotService.createSnapshot(projectId, existing.demoHtml, 'demo_generate');
+      }
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          demoHtml: basicHtml,
+          demoUrl: `/demo/${projectId}`,
+          status: 'demo_ready',
+          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
+        },
+      });
+      this.logger.log(`演示降级成功 (${projectId}): 基础模板 ${basicHtml.length} bytes`);
+    };
+
+    // 超时保护：30 秒后强制降级
+    const timeout = setTimeout(() => {
+      this.logger.warn(`Demo 生成超时 (${projectId})，使用基础模板`);
+      fallbackToBasicHtml();
+    }, 45_000);
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -103,6 +131,8 @@ export class DemoService {
         if (evaluation.score < 60) {
           this.logger.warn(`Demo 质量评分 ${evaluation.score}，但已超过最大重试次数`);
         }
+
+        clearTimeout(timeout); // 成功生成，取消超时降级
 
         // 保存当前 demoHtml 快照（如果已存在）
         const existing = await this.prisma.project.findUnique({
