@@ -1,5 +1,5 @@
 {
-  "name": "方案生成工作流",
+  "name": "\u65b9\u6848\u751f\u6210\u5de5\u4f5c\u6d41",
   "nodes": [
     {
       "name": "Webhook",
@@ -7,10 +7,14 @@
       "parameters": {
         "path": "plan",
         "responseMode": "lastNode"
-      }
+      },
+      "position": [
+        0,
+        0
+      ]
     },
     {
-      "name": "调用平台后端 API",
+      "name": "\u8c03\u7528\u5e73\u53f0\u540e\u7aef API",
       "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
@@ -18,22 +22,53 @@
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
-            { "name": "projectId", "value": "={{ $json.body.projectId }}" }
+            {
+              "name": "projectId",
+              "value": "={{ $json.body.projectId }}"
+            }
           ]
         }
-      }
+      },
+      "position": [
+        250,
+        0
+      ]
     },
     {
-      "name": "返回结果",
+      "name": "\u8fd4\u56de\u7ed3\u679c",
       "type": "n8n-nodes-base.respondToWebhook",
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}"
-      }
+      },
+      "position": [
+        500,
+        0
+      ]
     }
   ],
   "connections": {
-    "Webhook": { "main": [[ { "node": "调用平台后端 API", "type": "main", "index": 0 } ]] },
-    "调用平台后端 API": { "main": [[ { "node": "返回结果", "type": "main", "index": 0 } ]] }
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "\u8c03\u7528\u5e73\u53f0\u540e\u7aef API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "\u8c03\u7528\u5e73\u53f0\u540e\u7aef API": {
+      "main": [
+        [
+          {
+            "node": "\u8fd4\u56de\u7ed3\u679c",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }

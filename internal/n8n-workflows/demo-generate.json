@@ -1,5 +1,5 @@
 {
-  "name": "演示生成工作流",
+  "name": "\u6f14\u793a\u751f\u6210\u5de5\u4f5c\u6d41",
   "nodes": [
     {
       "name": "Webhook",
@@ -7,10 +7,14 @@
       "parameters": {
         "path": "demo-generate",
         "responseMode": "lastNode"
-      }
+      },
+      "position": [
+        0,
+        0
+      ]
     },
     {
-      "name": "触发平台生成",
+      "name": "\u89e6\u53d1\u5e73\u53f0\u751f\u6210",
       "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
@@ -18,22 +22,53 @@
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
-            { "name": "projectId", "value": "={{ $json.body.projectId }}" }
+            {
+              "name": "projectId",
+              "value": "={{ $json.body.projectId }}"
+            }
           ]
         }
-      }
+      },
+      "position": [
+        250,
+        0
+      ]
     },
     {
-      "name": "返回结果",
+      "name": "\u8fd4\u56de\u7ed3\u679c",
       "type": "n8n-nodes-base.respondToWebhook",
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}"
-      }
+      },
+      "position": [
+        500,
+        0
+      ]
     }
   ],
   "connections": {
-    "Webhook": { "main": [[ { "node": "触发平台生成", "type": "main", "index": 0 } ]] },
-    "触发平台生成": { "main": [[ { "node": "返回结果", "type": "main", "index": 0 } ]] }
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "\u89e6\u53d1\u5e73\u53f0\u751f\u6210",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "\u89e6\u53d1\u5e73\u53f0\u751f\u6210": {
+      "main": [
+        [
+          {
+            "node": "\u8fd4\u56de\u7ed3\u679c",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }

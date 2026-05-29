@@ -1,5 +1,5 @@
 {
-  "name": "批注反馈工作流",
+  "name": "\u6279\u6ce8\u53cd\u9988\u5de5\u4f5c\u6d41",
   "nodes": [
     {
       "name": "Webhook",
@@ -7,10 +7,14 @@
       "parameters": {
         "path": "feedback",
         "responseMode": "lastNode"
-      }
+      },
+      "position": [
+        0,
+        0
+      ]
     },
     {
-      "name": "触发平台任务管线",
+      "name": "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf",
       "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
@@ -18,23 +22,57 @@
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
-            { "name": "projectId", "value": "={{ $json.body.projectId }}" },
-            { "name": "feedbackId", "value": "={{ $json.body.feedbackId }}" }
+            {
+              "name": "projectId",
+              "value": "={{ $json.body.projectId }}"
+            },
+            {
+              "name": "feedbackId",
+              "value": "={{ $json.body.feedbackId }}"
+            }
           ]
         }
-      }
+      },
+      "position": [
+        250,
+        0
+      ]
     },
     {
-      "name": "返回结果",
+      "name": "\u8fd4\u56de\u7ed3\u679c",
       "type": "n8n-nodes-base.respondToWebhook",
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}"
-      }
+      },
+      "position": [
+        500,
+        0
+      ]
     }
   ],
   "connections": {
-    "Webhook": { "main": [[ { "node": "触发平台任务管线", "type": "main", "index": 0 } ]] },
-    "触发平台任务管线": { "main": [[ { "node": "返回结果", "type": "main", "index": 0 } ]] }
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf": {
+      "main": [
+        [
+          {
+            "node": "\u8fd4\u56de\u7ed3\u679c",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }
