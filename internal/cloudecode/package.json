@@ -1,0 +1,20 @@
+{
+  "name": "cloudecode",
+  "version": "2.0.0",
+  "description": "Cloudecode 代码执行引擎 - 调用 DeepSeek API 生成代码",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "typescript": "^5.6.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "ts-node-dev": "^2.0.0"
+  }
+}

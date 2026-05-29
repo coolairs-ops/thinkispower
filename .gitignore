@@ -8,6 +8,8 @@ demo_response.json
 internal/*
 !internal/n8n-workflows/
 !internal/n8n-workflows/*.json
+!internal/cloudecode/
+!internal/cloudecode/**/*
 graphify-out/
 project_status.json
 _r.ps1
