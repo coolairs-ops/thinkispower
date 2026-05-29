@@ -168,7 +168,7 @@ export class DeliveryService {
   async requestExport(userId: string, projectId: string, exportType: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, user: { select: { plan: true } } },
+      select: { id: true, userId: true, status: true, user: { select: { plan: true } } },
     });
 
     if (!project) throw new NotFoundException('项目不存在');
