@@ -45,6 +45,10 @@ export class N8nClient {
     return this.triggerWorkflow('task-planning', { projectId, feedbackId, taskIds });
   }
 
+  async triggerDemoGenerateWorkflow(projectId: string) {
+    return this.triggerWorkflow('demo-generate', { projectId });
+  }
+
   async triggerDeliveryExportWorkflow(projectId: string, deliveryType: string) {
     return this.triggerWorkflow('delivery-export', { projectId, deliveryType });
   }

@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as http from 'node:http';
+import * as https from 'node:https';
 import { generateFallbackPrd, getFallbackQuestion } from '../common/utils/prd-fallback';
 
 export interface DeepseekMessage {
@@ -33,37 +35,69 @@ export class DeepseekService {
     }
 
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120_000);
-
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
+      const result = await this.httpPost(
+        `${this.baseUrl}/chat/completions`,
+        {
           model: options?.model || this.model,
           messages,
           temperature: options?.temperature ?? 0.7,
           max_tokens: options?.maxTokens ?? 2048,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.logger.error(`DeepSeek API error: ${response.status} ${errorText}`);
-        return this.getFallbackResponse(messages);
-      }
-
-      const data = await response.json();
-      return data.choices?.[0]?.message?.content || '';
+        },
+        30_000,
+      );
+      return result.choices?.[0]?.message?.content || '';
     } catch (error) {
-      this.logger.error('DeepSeek API call failed', error);
+      this.logger.error('DeepSeek API call failed', error as any);
       return this.getFallbackResponse(messages);
     }
+  }
+
+  /**
+   * Use node:http instead of fetch() to avoid AbortController hanging issues.
+   */
+  private httpPost(url: string, body: unknown, timeoutMs: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const urlObj = new URL(url);
+      const mod = urlObj.protocol === 'https:' ? https : http;
+      const data = JSON.stringify(body);
+
+      const options: http.RequestOptions = {
+        hostname: urlObj.hostname,
+        port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+        path: urlObj.pathname + urlObj.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Length': Buffer.byteLength(data),
+        },
+        timeout: timeoutMs,
+      };
+
+      const req = mod.request(options, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks).toString();
+          if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+            this.logger.error(`DeepSeek API error: ${res.statusCode} ${raw.slice(0, 200)}`);
+            reject(new Error(`HTTP ${res.statusCode}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(raw));
+          } catch {
+            reject(new Error('Invalid JSON response'));
+          }
+        });
+      });
+
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+
+      req.write(data);
+      req.end();
+    });
   }
 
   /**

@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
-import { DemoGeneratorService } from '../../services/demo-generator.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
+import { N8nClient } from '../../integrations/n8n/n8n.client';
+import { EVENTS, TasksCreatedPayload } from '../../events/event-types';
 
 @Injectable()
 export class DemoService {
@@ -10,9 +12,10 @@ export class DemoService {
 
   constructor(
     private prisma: PrismaService,
-    private demoGenerator: DemoGeneratorService,
     private statusMapper: StatusMapperService,
     private demoSnapshotService: DemoSnapshotService,
+    private n8n: N8nClient,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async getDemo(userId: string, projectId: string) {
@@ -78,111 +81,53 @@ export class DemoService {
   }
 
   private async generateDemoAsync(projectId: string, planSummary: any) {
-    let lastImprovements: string | undefined = undefined;
-    const MAX_RETRIES = 1; // 减少重试，API 失败时快速降级
-
-    // 直接生成基础 HTML 作为最终降级
-    const fallbackToBasicHtml = async () => {
+    // 超时降级保底（60s）
+    const fallbackTimer = setTimeout(async () => {
+      this.logger.warn(`Demo 生成超时 (${projectId})，使用基础模板`);
       const basicHtml = this.buildBasicDemoHtml(planSummary);
       const existing = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { demoHtml: true },
+        where: { id: projectId }, select: { demoHtml: true },
       });
       if (existing?.demoHtml) {
         await this.demoSnapshotService.createSnapshot(projectId, existing.demoHtml, 'demo_generate');
       }
       await this.prisma.project.update({
         where: { id: projectId },
-        data: {
-          demoHtml: basicHtml,
-          demoUrl: `/demo/${projectId}`,
-          status: 'demo_ready',
-          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
-        },
+        data: { demoHtml: basicHtml, demoUrl: `/demo/${projectId}`, status: 'demo_ready',
+          publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready') },
       });
       this.logger.log(`演示降级成功 (${projectId}): 基础模板 ${basicHtml.length} bytes`);
-    };
+    }, 60_000);
 
-    // 超时保护：30 秒后强制降级
-    const timeout = setTimeout(() => {
-      this.logger.warn(`Demo 生成超时 (${projectId})，使用基础模板`);
-      fallbackToBasicHtml();
-    }, 45_000);
-
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const html = await this.demoGenerator.generateDemoHtml(planSummary, lastImprovements);
-
-        // Validate HTML size
-        if (html.length < 100) {
-          throw new Error('生成的 HTML 内容过短');
-        }
-
-        // 质量门禁：评估 Demo 质量
-        const evaluation = await this.demoGenerator.evaluateDemo(html, planSummary);
-        this.logger.log(`Demo 质量评估: ${evaluation.score}分 (第 ${attempt + 1} 次生成)`);
-
-        if (evaluation.score < 60 && attempt < MAX_RETRIES) {
-          lastImprovements = `质量评分 ${evaluation.score}/100，以下方面需要改进：\n${evaluation.missingItems.map((i) => `- ${i}`).join('\n')}\n${evaluation.details}`;
-          this.logger.log(`Demo 质量不足(${evaluation.score}分)，重新生成 (${attempt + 1}/${MAX_RETRIES})`);
-          continue;
-        }
-
-        if (evaluation.score < 60) {
-          this.logger.warn(`Demo 质量评分 ${evaluation.score}，但已超过最大重试次数`);
-        }
-
-        clearTimeout(timeout); // 成功生成，取消超时降级
-
-        // 保存当前 demoHtml 快照（如果已存在）
-        const existing = await this.prisma.project.findUnique({
-          where: { id: projectId },
-          select: { demoHtml: true },
-        });
-        if (existing?.demoHtml) {
-          await this.demoSnapshotService.createSnapshot(
-            projectId,
-            existing.demoHtml,
-            'demo_generate',
-          );
-        }
-
-        await this.prisma.project.update({
-          where: { id: projectId },
-          data: {
-            demoHtml: html,
-            demoUrl: `/demo/${projectId}`,
-            status: 'demo_ready',
-            publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
-          },
-        });
-
-        this.logger.log(`演示生成成功 (${projectId}): ${html.length} bytes, 评分 ${evaluation.score}`);
-        return; // 成功退出
-      } catch (err) {
-        this.logger.error(`演示生成失败 (尝试 ${attempt + 1}/${MAX_RETRIES + 1}):`, err);
-
-        if (attempt < MAX_RETRIES) {
-          lastImprovements = `生成过程出错，请确保输出完整的 HTML 文档：${(err as Error).message}`;
-          continue;
-        }
-
-        // 所有重试均失败 → 生成基础 HTML 模板降级，而非完全重置
-        this.logger.warn(`AI 生成失败，使用基础模板降级 (${projectId})`);
-        const basicHtml = this.buildBasicDemoHtml(planSummary);
-        await this.demoSnapshotService.createSnapshot(projectId, basicHtml, 'demo_generate');
-        await this.prisma.project.update({
-          where: { id: projectId },
-          data: {
-            demoHtml: basicHtml,
-            demoUrl: `/demo/${projectId}`,
-            status: 'demo_ready',
-            publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
-          },
-        });
-        this.logger.log(`演示降级成功 (${projectId}): 基础模板 ${basicHtml.length} bytes`);
+    try {
+      // 优先触发 N8N 工作流编排
+      const n8nResult = await this.n8n.triggerDemoGenerateWorkflow(projectId);
+      if (n8nResult.success) {
+        this.logger.log(`N8N demo-generate workflow triggered (${projectId})`);
+        clearTimeout(fallbackTimer);
         return;
       }
+
+      // N8N 不可用 → 降级：创建 Task → Pipeline → Cloudecode
+      this.logger.warn(`N8N unavailable, falling back to Pipeline for demo ${projectId}`);
+      const task = await this.prisma.task.create({
+        data: {
+          projectId,
+          type: 'frontend',
+          title: '生成 Demo 预览',
+          description: `根据方案生成完整的 Demo HTML 预览页面。\n方案摘要：${planSummary.summary || '软件项目'}\n页面：${(planSummary.pages || []).join('、')}`,
+          priority: 100,
+          status: 'pending',
+          inputPayload: { planSummary, source: 'demo_generate' },
+        },
+      });
+      this.eventEmitter.emit(EVENTS.TASKS_CREATED, {
+        projectId, taskIds: [task.id],
+      } as TasksCreatedPayload);
+      this.logger.log(`Demo 降级 Pipeline 已提交 (${projectId})`, task.id);
+      clearTimeout(fallbackTimer);
+    } catch (err) {
+      this.logger.error(`Demo 生成失败 (${projectId}):`, err);
     }
   }
 

@@ -48,6 +48,12 @@ export class CloudecodeClient {
       }
 
       const project = task.project;
+
+      // 如果还没有 demoHtml，则是首次 Demo 生成 → 改用 HTML 生成 prompt
+      if (!project.demoHtml && task.type === 'frontend') {
+        return this.generateDemoHtml(task, project);
+      }
+
       if (!project.demoHtml) {
         return { success: false, rawError: 'No demo HTML found for project' };
       }
@@ -111,6 +117,46 @@ export class CloudecodeClient {
         rawError: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /**
+   * 首次 Demo 生成 — 从 plan 信息生成完整 HTML。
+   */
+  private async generateDemoHtml(task: any, project: any): Promise<{
+    success: boolean;
+    summary?: string;
+    changedFiles?: string[];
+    rawError?: string;
+  }> {
+    this.logger.log(`Cloudecode generating demo HTML for project ${project.id}`);
+
+    const planSummary = (task.inputPayload as any)?.planSummary || {};
+    const pages = Array.isArray(planSummary.pages) ? planSummary.pages : ['首页', '列表页'];
+    const features = Array.isArray(planSummary.features) ? planSummary.features : [];
+    const name = planSummary.summary || '应用';
+
+    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p: string) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f: string) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
+
+    const response = await this.deepseek.chat(
+      [
+        { role: 'system', content: HTML_MODIFICATION_PROMPT },
+        { role: 'user', content: prompt },
+      ],
+      { temperature: 0.3, maxTokens: 8192 },
+    );
+
+    const html = this.extractHtml(response);
+    if (!html) {
+      return { success: false, rawError: 'Failed to extract HTML from DeepSeek response' };
+    }
+
+    await this.prisma.project.update({
+      where: { id: project.id },
+      data: { demoHtml: html, demoUrl: `/demo/${project.id}`, status: 'demo_ready' },
+    });
+
+    this.logger.log(`Demo HTML generated for project ${project.id}: ${html.length} bytes`);
+    return { success: true, summary: 'Demo HTML generated', changedFiles: ['demo.html'] };
   }
 
   private buildUserMessage(
