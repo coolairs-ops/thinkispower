@@ -39,7 +39,7 @@ export default function DeliveryPage() {
   const [caseReview, setCaseReview] = useState<any>(null);
   const [recommendations, setRecommendations] = useState<any[]>([]);
 
-  // 状态观测器 — 轮询交付状态
+  // 轮询交付进度
   const pollInterval = 5000;
 
   const fetchReviewAndRecs = async () => {
@@ -141,24 +141,38 @@ export default function DeliveryPage() {
 
       toast('导出任务已启动...', 'success');
 
-      // 等几秒后刷新获取下载链接
-      setTimeout(async () => {
+      // 轮询等待导出完成（最多等 30 秒）
+      let attempts = 0;
+      const maxAttempts = 10;
+      const pollForExport = async (): Promise<void> => {
+        attempts++;
         try {
           const d = await api.get(`/api/projects/${projectId}/delivery`);
           setDelivery(d);
           const field = EXPORT_FIELD_MAP[buttonKey];
           const url = d?.latestBuild?.[field];
-          setExportStates(prev => ({
-            ...prev,
-            [buttonKey]: { loading: false, done: true, url },
-          }));
           if (url) {
+            setExportStates(prev => ({
+              ...prev,
+              [buttonKey]: { loading: false, done: true, url },
+            }));
             toast('导出完成', 'success');
+            return;
           }
         } catch {
-          setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false } }));
+          // 继续轮询
         }
-      }, 3000);
+        if (attempts < maxAttempts) {
+          setTimeout(pollForExport, 3000);
+        } else {
+          setExportStates(prev => ({
+            ...prev,
+            [buttonKey]: { loading: false, done: false },
+          }));
+          toast('导出处理中，请稍后刷新页面查看', 'info');
+        }
+      };
+      setTimeout(pollForExport, 3000);
     } catch (err: any) {
       toast(err.message || '导出失败', 'error');
       setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false } }));
@@ -181,21 +195,27 @@ export default function DeliveryPage() {
         <div className="mx-auto max-w-3xl">
           <h1 className="mb-6 text-2xl font-bold text-gray-900">交付</h1>
 
-          {/* ─── 状态观测器：交付进度 ─── */}
+          {/* ─── 交付进度 ─── */}
           {isDelivering && (
             <section className="mb-6 rounded-xl bg-blue-50 p-6 shadow-sm border border-blue-200">
               <h2 className="mb-3 text-lg font-semibold text-blue-800">交付进行中</h2>
               <div className="flex items-center gap-3">
                 <div className="h-2 w-full rounded-full bg-blue-200">
-                  <div className="h-2 w-1/2 animate-pulse rounded-full bg-blue-600"></div>
+                  <div
+                    className="h-2 animate-pulse rounded-full bg-blue-600 transition-all duration-700"
+                    style={{ width: `${delivery?.latestBuild?.status === 'building' ? 60 : delivery?.latestBuild?.status === 'success' ? 90 : 35}%` }}
+                  ></div>
                 </div>
                 <span className="text-sm text-blue-600 shrink-0">
-                  {status === 'exporting' ? '正在打包导出...' : '正在上线...'}
+                  {delivery?.latestBuild?.status === 'building' ? '正在打包生成...' : '正在分析处理...'}
                 </span>
               </div>
-              <p className="mt-2 text-sm text-blue-600">
-                系统正在自动处理交付流程，请耐心等待。页面将自动刷新进度。
-              </p>
+              <div className="mt-2 text-sm text-blue-600 space-y-1">
+                <p>系统正在自动处理交付流程，请耐心等待。页面将自动刷新进度。</p>
+                {delivery?.latestBuild?.version && (
+                  <p className="text-xs text-blue-400">构建版本 #{delivery.latestBuild.version}</p>
+                )}
+              </div>
             </section>
           )}
 
@@ -203,16 +223,31 @@ export default function DeliveryPage() {
           {isFailed && (
             <section className="mb-6 rounded-xl bg-red-50 p-6 shadow-sm border border-red-200">
               <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-red-800">❌ 交付失败</h2>
-                  <p className="mt-1 text-sm text-red-600">
-                    {delivery?.latestBuild?.testReport?.error || '交付过程中出现异常，请重试或联系平台。'}
-                  </p>
+                <div className="flex-1">
+                  <h2 className="text-lg font-semibold text-red-800">交付失败</h2>
+                  {error && (
+                    <p className="mt-1 text-sm text-red-600">{error}</p>
+                  )}
+                  {!error && (
+                    <p className="mt-1 text-sm text-red-600">
+                      交付过程中出现异常，请重试或联系平台。
+                    </p>
+                  )}
+                  {delivery?.latestBuild?.testReport?.error && (
+                    <p className="mt-2 text-xs text-red-500 font-mono bg-red-100 rounded p-2">
+                      {delivery.latestBuild.testReport.error}
+                    </p>
+                  )}
+                  {delivery?.latestBuild && !delivery.latestBuild.testReport?.error && (
+                    <p className="mt-2 text-xs text-red-400">
+                      构建版本 #{delivery.latestBuild.version} — 状态: {delivery.latestBuild.status}
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={handleRetry}
                   disabled={starting}
-                  className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:bg-red-300 transition-colors"
+                  className="ml-4 shrink-0 rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:bg-red-300 transition-colors"
                 >
                   {starting ? '重试中...' : '重新交付'}
                 </button>
@@ -317,7 +352,7 @@ export default function DeliveryPage() {
               </button>
             </div>
 
-            {/* 工程控制论信息展示 — 状态观测器数据 */}
+            {/* 项目评估数据 */}
             {delivery?.deliveryAnalysis && !isCompleted && (
               <div className="mt-4 rounded-lg bg-gray-50 p-4">
                 <h3 className="text-sm font-semibold text-gray-700">项目评估报告</h3>

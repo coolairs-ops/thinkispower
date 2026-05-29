@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OnEvent } from '@nestjs/event-emitter';
 import { HermesClient } from './hermes.client';
 import { N8nClient } from '../n8n/n8n.client';
-import { EVENTS, FeedbackCreatedPayload, UserConfirmedPlanPayload } from '../../events/event-types';
+import { EVENTS, FeedbackCreatedPayload } from '../../events/event-types';
 
 @Injectable()
 export class HermesListener {
@@ -56,11 +56,4 @@ export class HermesListener {
     }
   }
 
-  @OnEvent(EVENTS.USER_CONFIRMED_PLAN)
-  async handleUserConfirmedPlan(payload: UserConfirmedPlanPayload) {
-    this.logger.log(`[Hermes] 用户确认方案, 启动交付管线, 项目 ${payload.projectId}`);
-
-    // 用户的确认信号 → Hermes 认知分析 → N8N 编排 → Cloudecode 执行
-    // DeliveryService.confirmDelivery 已完成全套流程
-  }
 }

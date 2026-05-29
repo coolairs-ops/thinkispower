@@ -65,11 +65,12 @@ export class MessageService {
     const savedHints = this.qualityHints.get(projectId) || [];
     const hintsStr = savedHints.length > 0 ? savedHints.join('\n') : undefined;
 
-    // 5. PM 多轮需求探索（注入 Hermes 质量门禁 hint）
-    const result = await this.discovery.processMessages(
-      allMessages.map(m => ({ role: m.role, content: m.content })),
-      hintsStr,
-    );
+    // 5. 并行执行 PM 探索 + Hermes 质量门禁（两者相互独立，节省 ≈50% 等待时间）
+    const messages = allMessages.map(m => ({ role: m.role, content: m.content }));
+    const [result, qualityResult] = await Promise.all([
+      this.discovery.processMessages(messages, hintsStr),
+      this.hermesQuality.analyzeResponse(messages).catch(() => ({ hints: [], needsFollowUp: false } as any)),
+    ]);
 
     // 6. Clear used hints (injected into PM's context for this round)
     this.qualityHints.delete(projectId);
@@ -84,10 +85,7 @@ export class MessageService {
         data: { projectId, role: 'assistant', content: assistantContent },
       });
 
-      // 7b. Hermes 静默质量门禁 — 分析本轮对话，为下一轮 PM 提供 hint
-      const qualityResult = await this.hermesQuality.analyzeResponse(
-        allMessages.map(m => ({ role: m.role, content: m.content })),
-      );
+      // 7b. 保存质量门禁 hint 供下一轮 PM 使用
       if (qualityResult.hints.length > 0) {
         this.qualityHints.set(projectId, qualityResult.hints);
       }

@@ -26,6 +26,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.23",
     "@prisma/client": "^6.19.3",
+    "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "cheerio": "^1.2.0",
     "class-transformer": "^0.5.1",
@@ -33,6 +34,7 @@
     "minio": "^8.0.7",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pg": "^8.21.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "socket.io": "^4.8.3"
@@ -41,6 +43,7 @@
     "@nestjs/cli": "^11.0.21",
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.1.24",
+    "@types/archiver": "^7.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",

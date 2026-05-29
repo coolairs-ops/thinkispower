@@ -5,6 +5,12 @@ dist/
 *.log
 .claude/
 demo_response.json
-internal/
+internal/*
+!internal/n8n-workflows/
+!internal/n8n-workflows/*.json
 graphify-out/
 project_status.json
+_r.ps1
+_r.vbs
+_repl2.vbs
+_test.txt

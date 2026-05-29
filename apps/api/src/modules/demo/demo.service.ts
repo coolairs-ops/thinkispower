@@ -45,13 +45,13 @@ export class DemoService {
   async generateDemo(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, planSummary: true },
+      select: { id: true, userId: true, status: true, planSummary: true, structuredRequirement: true },
     });
 
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
 
-    const allowedStatuses = ['plan_ready', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback'];
+    const allowedStatuses = ['prd_ready', 'plan_ready', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback'];
     if (!allowedStatuses.includes(project.status)) {
       throw new BadRequestException(`当前状态(${project.status})不允许生成预览`);
     }
@@ -137,15 +137,111 @@ export class DemoService {
           continue;
         }
 
-        // 所有重试均失败，重置状态
+        // 所有重试均失败 → 生成基础 HTML 模板降级，而非完全重置
+        this.logger.warn(`AI 生成失败，使用基础模板降级 (${projectId})`);
+        const basicHtml = this.buildBasicDemoHtml(planSummary);
+        await this.demoSnapshotService.createSnapshot(projectId, basicHtml, 'demo_generate');
         await this.prisma.project.update({
           where: { id: projectId },
           data: {
-            status: 'plan_ready',
-            publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('plan_ready'),
+            demoHtml: basicHtml,
+            demoUrl: `/demo/${projectId}`,
+            status: 'demo_ready',
+            publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
           },
+        });
+        this.logger.log(`演示降级成功 (${projectId}): 基础模板 ${basicHtml.length} bytes`);
+        return;
+      }
+    }
+  }
+
+  /**
+   * 当 AI 生成失败时，基于 planSummary 生成一个基础管理面板 HTML 模板。
+   */
+  private buildBasicDemoHtml(planSummary: any): string {
+    const plan = typeof planSummary === 'object' && planSummary ? planSummary : {};
+    const pages: string[] = Array.isArray(plan.pages) ? plan.pages : ['首页', '列表页'];
+    const features: string[] = Array.isArray(plan.features) ? plan.features : [];
+    const name = plan.summary || '应用';
+
+    const navItems = pages.map((p, i) => {
+      const key = `page-${i}`;
+      return `        <a class="nav-item" data-route="${key}" onclick="navigate('${key}')">${p}</a>`;
+    }).join('\n');
+
+    const pageRenders = pages.map((p, i) => {
+      const key = `page-${i}`;
+      const featureCards = features.map((f, fi) =>
+        `            <div class="card" data-module-key="${key}" data-element-path="feature-${fi}"><h3>${f}</h3><p class="text-gray-500 text-sm mt-1">点击此处进行操作</p></div>`
+      ).join('\n');
+      return `      '${key}': { render: function() { return \`<h2 data-module-key="${key}" data-element-path="title">${p}</h2><div class="card-grid">${featureCards}</div>\`; }, name: '${p}' }`;
+    }).join(',\n');
+
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${name}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; min-height: 100vh; background: #f5f7fa; color: #333; }
+  .sidebar { width: 220px; background: #1e293b; color: #fff; padding: 20px 0; }
+  .sidebar h1 { padding: 0 20px 20px; font-size: 16px; border-bottom: 1px solid #334155; }
+  .nav { padding: 10px 0; }
+  .nav-item { display: block; padding: 10px 20px; color: #94a3b8; cursor: pointer; text-decoration: none; font-size: 14px; transition: all .2s; }
+  .nav-item:hover { background: #334155; color: #fff; }
+  .nav-item.active { background: #3b82f6; color: #fff; }
+  .main { flex: 1; padding: 30px; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 20px; }
+  .card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.1); cursor: pointer; transition: box-shadow .2s; }
+  .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+  .text-gray-500 { color: #6b7280; }
+  .text-sm { font-size: 13px; }
+  .mt-1 { margin-top: 4px; }
+  .annotation-highlight { outline: 3px solid #3b82f6; outline-offset: 2px; background: rgba(59,130,246,.08); border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="sidebar">
+    <h1>${name}</h1>
+    <div class="nav">
+${navItems}
+    </div>
+  </div>
+  <div class="main" id="main-content"></div>
+  <script>
+    var pages = { ${pageRenders} };
+    function navigate(key) {
+      var page = pages[key];
+      if (page) {
+        document.getElementById('main-content').innerHTML = page.render();
+        document.querySelectorAll('.nav-item').forEach(function(el) {
+          el.classList.toggle('active', el.getAttribute('data-route') === key);
         });
       }
     }
+    document.addEventListener('click', function(e) {
+      var el = e.target.closest('[data-module-key]');
+      if (el) {
+        window.parent.postMessage({ type: 'element-click', moduleKey: el.getAttribute('data-module-key'), elementPath: el.getAttribute('data-element-path') || '' }, '*');
+      }
+    });
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'highlight-element') {
+        document.querySelectorAll('.annotation-highlight').forEach(function(el) { el.classList.remove('annotation-highlight'); });
+        var sel = '[data-module-key="' + e.data.moduleKey + '"]';
+        if (e.data.elementPath) sel += '[data-element-path="' + e.data.elementPath + '"]';
+        var t = document.querySelector(sel);
+        if (t) { t.classList.add('annotation-highlight'); t.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      } else if (e.data && e.data.type === 'clear-highlight') {
+        document.querySelectorAll('.annotation-highlight').forEach(function(el) { el.classList.remove('annotation-highlight'); });
+      }
+    });
+    navigate(Object.keys(pages)[0]);
+  </script>
+</body>
+</html>`;
   }
 }

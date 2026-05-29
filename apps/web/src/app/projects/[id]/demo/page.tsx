@@ -140,7 +140,7 @@ export default function DemoPage() {
   };
 
   const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback';
-  const showGenerateButton = status === 'plan_ready' || status === 'demo_ready' || status === 'awaiting_demo_feedback';
+  const showGenerateButton = status === 'prd_ready' || status === 'plan_ready' || status === 'demo_ready' || status === 'demo_generating' || status === 'awaiting_demo_feedback';
 
   if (isLoading) return null;
 

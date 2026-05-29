@@ -1,26 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DeepseekService } from './deepseek.service';
-
-/**
- * 产品需求文档 PRD 结构
- */
-export interface PRD {
-  productName: string;
-  summary: string;
-  background: string;
-  targetUsers: string[];
-  userPainPoints: string[];
-  useScenarios: string[];
-  coreValue: string;
-  productForm: string;
-  mvpScope: string[];
-  successCriteria: string[];
-  pages: string[];
-  features: string[];
-  roles: string[];
-  dataObjects: string[];
-  riskPoints: string[];
-}
+import { PRD, generateFallbackPrd } from '../common/utils/prd-fallback';
 
 interface DiscoveryResult {
   needMoreInfo: boolean;
@@ -216,72 +196,6 @@ export class ProductDiscoveryService {
   }
 
   private generateBasicPrd(text: string): PRD {
-    const isCrm = /客户|crm/i.test(text);
-    const isEcom = /商城|电商|购物|商品|订单/i.test(text);
-    const isOa = /办公|oa|审批|流程/i.test(text);
-    const isDelivery = /外卖|点餐|配送|餐厅|餐饮/i.test(text);
-    const isEdu = /教育|课程|学习|培训/i.test(text);
-
-    let summary = '业务管理系统';
-    let targetUsers = ['管理员'];
-    let pages = ['首页', '登录页'];
-    let features = ['基础数据管理'];
-    let roles = ['管理员', '普通用户'];
-    let dataObjects = ['用户'];
-
-    if (isCrm) {
-      summary = '客户关系管理系统';
-      targetUsers = ['销售员', '销售经理', '管理员'];
-      pages = ['首页', '客户列表', '客户详情', '跟进记录'];
-      features = ['客户信息管理', '跟进记录', '销售漏斗', '数据统计'];
-      roles = ['销售员', '销售经理', '管理员'];
-      dataObjects = ['客户', '跟进记录', '销售目标'];
-    } else if (isEcom) {
-      summary = '电商商城系统';
-      targetUsers = ['普通买家', '商家', '管理员'];
-      pages = ['首页', '商品列表', '商品详情', '购物车', '订单页'];
-      features = ['商品浏览', '购物车', '下单支付', '订单管理'];
-      roles = ['买家', '商家', '管理员'];
-      dataObjects = ['商品', '订单', '用户', '购物车'];
-    } else if (isDelivery) {
-      summary = '餐饮外卖管理系统';
-      targetUsers = ['餐厅老板', '服务员', '顾客'];
-      pages = ['菜单展示', '点餐页', '订单管理', '后台管理'];
-      features = ['菜单管理', '在线点餐', '订单管理', '数据统计'];
-      roles = ['管理员', '服务员', '顾客'];
-      dataObjects = ['菜品', '订单', '分类'];
-    } else if (isOa) {
-      summary = 'OA办公管理系统';
-      targetUsers = ['员工', '部门主管', '管理员'];
-      pages = ['首页', '审批列表', '审批详情', '通讯录'];
-      features = ['流程审批', '通知公告', '文档管理'];
-      roles = ['员工', '主管', '管理员'];
-      dataObjects = ['审批单', '通知', '文档'];
-    } else if (isEdu) {
-      summary = '在线教育系统';
-      targetUsers = ['学生', '老师', '管理员'];
-      pages = ['首页', '课程列表', '课程详情', '学习中心'];
-      features = ['课程管理', '在线学习', '作业提交', '成绩管理'];
-      roles = ['学生', '老师', '管理员'];
-      dataObjects = ['课程', '学生', '作业', '成绩'];
-    }
-
-    return {
-      productName: summary,
-      summary,
-      background: `用户需要一个${summary}`,
-      targetUsers,
-      userPainPoints: ['现有流程效率低', '信息管理混乱'],
-      useScenarios: ['日常工作管理'],
-      coreValue: '提升工作效率，降低管理成本',
-      productForm: '网页',
-      mvpScope: features.slice(0, 3),
-      successCriteria: ['核心功能可以正常使用', '用户能够独立完成操作'],
-      pages,
-      features,
-      roles,
-      dataObjects,
-      riskPoints: ['需求可能还不够明确', '建议进一步确认用户真实场景'],
-    };
+    return generateFallbackPrd(text);
   }
 }

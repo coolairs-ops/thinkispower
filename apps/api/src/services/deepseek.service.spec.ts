@@ -42,6 +42,10 @@ describe('DeepseekService', () => {
     it('should return CRM fallback for customer-related queries', async () => {
       const result = await service.chat([
         { role: 'user', content: '我想做一个客户管理系统' },
+        { role: 'assistant', content: '好的，能说说具体需求吗？' },
+        { role: 'user', content: '给销售团队用的' },
+        { role: 'assistant', content: '好的' },
+        { role: 'user', content: '需要管理客户信息和跟进记录' },
       ]);
 
       expect(result).toContain('客户管理系统');
@@ -50,6 +54,10 @@ describe('DeepseekService', () => {
     it('should return e-commerce fallback for shopping-related queries', async () => {
       const result = await service.chat([
         { role: 'user', content: '我想做一个电商商城' },
+        { role: 'assistant', content: '好的，能说说具体需求吗？' },
+        { role: 'user', content: '卖东西给普通用户' },
+        { role: 'assistant', content: '好的' },
+        { role: 'user', content: '需要商品展示和购物车功能' },
       ]);
 
       expect(result).toContain('电商商城系统');
@@ -58,9 +66,13 @@ describe('DeepseekService', () => {
     it('should return OA fallback for office-related queries', async () => {
       const result = await service.chat([
         { role: 'user', content: '帮我做个 OA 审批系统' },
+        { role: 'assistant', content: '好的，能说说具体需求吗？' },
+        { role: 'user', content: '给公司内部员工用的' },
+        { role: 'assistant', content: '好的' },
+        { role: 'user', content: '需要流程审批和考勤管理' },
       ]);
 
-      expect(result).toContain('OA 办公管理系统');
+      expect(result).toContain('OA办公管理系统');
     });
 
     it('should ask questions when no specific app type detected', async () => {

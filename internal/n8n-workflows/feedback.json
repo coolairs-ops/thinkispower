@@ -1,0 +1,40 @@
+{
+  "name": "批注反馈工作流",
+  "nodes": [
+    {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "path": "feedback",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "name": "触发平台任务管线",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_API_URL }}/api/n8n-webhook/run-tasks",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "projectId", "value": "={{ $json.body.projectId }}" },
+            { "name": "feedbackId", "value": "={{ $json.body.feedbackId }}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "返回结果",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[ { "node": "触发平台任务管线", "type": "main", "index": 0 } ]] },
+    "触发平台任务管线": { "main": [[ { "node": "返回结果", "type": "main", "index": 0 } ]] }
+  }
+}

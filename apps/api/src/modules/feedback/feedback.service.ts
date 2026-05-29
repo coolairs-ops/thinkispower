@@ -132,6 +132,10 @@ export class FeedbackService {
       data: { status: 'resolved' },
     });
 
+    this.statusMapper.assertValidTransition(
+      (await this.prisma.project.findUnique({ where: { id: payload.projectId }, select: { status: true } }))?.status || '',
+      'demo_ready',
+    );
     await this.prisma.project.update({
       where: { id: payload.projectId },
       data: {

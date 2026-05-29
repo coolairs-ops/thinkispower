@@ -1,0 +1,39 @@
+{
+  "name": "演示生成工作流",
+  "nodes": [
+    {
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "path": "demo-generate",
+        "responseMode": "lastNode"
+      }
+    },
+    {
+      "name": "调用平台后端 API",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_API_URL }}/internal/workflows/demo-generate",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "projectId", "value": "={{ $json.body.projectId }}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "返回结果",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[ { "node": "调用平台后端 API", "type": "main", "index": 0 } ]] },
+    "调用平台后端 API": { "main": [[ { "node": "返回结果", "type": "main", "index": 0 } ]] }
+  }
+}

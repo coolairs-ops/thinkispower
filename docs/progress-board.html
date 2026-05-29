@@ -37,18 +37,18 @@
 <body>
 
 <h1>🔧 Think-is-power · 工程进度看板</h1>
-<p class="subtitle">工程控制论驱动的软件交付平台 · 更新于 2026-05-27</p>
+<p class="subtitle">工程控制论驱动的软件交付平台 · 更新于 2026-05-27 (v2)</p>
 
 <div class="stat-row">
-  <div class="stat"><div class="num" style="color:var(--green)">6</div><div class="label">已完成里程碑</div></div>
-  <div class="stat"><div class="num" style="color:var(--yellow)">2</div><div class="label">进行中</div></div>
-  <div class="stat"><div class="num" style="color:var(--dim)">8</div><div class="label">待办</div></div>
-  <div class="stat"><div class="num" style="color:var(--accent)">14</div><div class="label">单元测试文件</div></div>
-  <div class="stat"><div class="num" style="color:var(--blue)">16</div><div class="label">API 端点模块</div></div>
+  <div class="stat"><div class="num" style="color:var(--green)">8</div><div class="label">已完成里程碑</div></div>
+  <div class="stat"><div class="num" style="color:var(--yellow)">1</div><div class="label">进行中</div></div>
+  <div class="stat"><div class="num" style="color:var(--dim)">6</div><div class="label">待办</div></div>
+  <div class="stat"><div class="num" style="color:var(--accent)">16</div><div class="label">单元测试套件</div></div>
+  <div class="stat"><div class="num" style="color:var(--blue)">154</div><div class="label">单元测试用例</div></div>
 </div>
 
-<div class="progress-bar"><div class="progress-fill" style="width:52%;background:linear-gradient(90deg,var(--yellow),var(--green))"></div></div>
-<p style="text-align:right;font-size:.8rem;color:var(--dim);margin:-1.25rem 0 1.5rem">总体进度 ≈ 52%</p>
+<div class="progress-bar"><div class="progress-fill" style="width:62%;background:linear-gradient(90deg,var(--yellow),var(--green))"></div></div>
+<p style="text-align:right;font-size:.8rem;color:var(--dim);margin:-1.25rem 0 1.5rem">总体进度 ≈ 62%</p>
 
 <div class="grid">
 
@@ -85,6 +85,7 @@
     <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M5 · N8N 与认证集成</strong><br><span style="color:var(--dim);font-size:.8rem">N8N 实例配置 + API Key + 9 个 webhook 工作流 + 账号认证</span></div></div>
     <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M6 · 交付导出增强</strong><br><span style="color:var(--dim);font-size:.8rem">PipelineService export_* 路由 + CloudecodeClient generateAsset + Dockerfile</span></div></div>
     <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M7 · 前端交付页</strong><br><span style="color:var(--dim);font-size:.8rem">Next.js 交付页面 294 行，核心逻辑完成，状态显示待细化</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span><div><strong>M8 · 交付资产升级 + 安全修复</strong><br><span style="color:var(--dim);font-size:.8rem">handleCodeGeneration 升级为真实项目 zip、Cloudecode generateProject() 8 文件生成、SanitizeInterceptor 全局注册、.env.example 清理 API key</span></div></div>
   </div>
 </div>
 
@@ -109,7 +110,7 @@
     <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>N8N Client</td><td>n8n.client.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">Webhook 触发</td></tr>
     <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>N8N Webhook</td><td>n8n-webhook.controller.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">5 个回调端点</td></tr>
     <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Pipeline</td><td>pipeline.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">export_* 路由 + 降级路径已修复</td></tr>
-    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Delivery</td><td>delivery.service.ts + orchestrator</td><td style="text-align:center;color:var(--yellow)">🔄</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">核心逻辑完成</td></tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Delivery</td><td>delivery.service.ts + orchestrator</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--dim)">—</td><td style="text-align:right;color:var(--dim)">真实项目 zip 生成 + 资产打包</td></tr>
     <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Cloudecode</td><td>cloudecode.client.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">AI 代码执行</td></tr>
     <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>MinIO</td><td>minio.service.ts</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">文件存储</td></tr>
     <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td>Quality Gates</td><td>html-validator, error-matcher, snapshot</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:center;color:var(--green)">✅</td><td style="text-align:right;color:var(--dim)">质量门禁全部实现</td></tr>
@@ -150,8 +151,9 @@
 <div class="card full">
   <h2>🎯 下一步做什么</h2>
   <div class="col">
-    <div class="item"><span class="dot" style="background:var(--yellow)"></span> <strong>优先级高 · 启动平台 API</strong><br><span style="color:var(--dim);font-size:.8rem">部署 NestJS 后端到服务器，让 N8N webhook 工作流可回调平台 API（目前返回 500）</span></div>
-    <div class="item"><span class="dot" style="background:var(--green)"></span> <strong>PipelineService export_* 路由</strong><br><span style="color:var(--dim);font-size:.8rem">已完成：5 种导出类型 + CloudecodeClient.generateAsset + 降级路径修复</span></div>
+    <div class="item"><span class="dot" style="background:var(--yellow)"></span> <strong>优先级高 · 启动平台 API</strong><br><span style="color:var(--dim);font-size:.8rem">部署 NestJS 后端到服务器，让 N8N webhook 工作流可回调平台 API</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> <strong>PipelineService export_* 路由 + 真实项目生成</strong><br><span style="color:var(--dim);font-size:.8rem">已完成：5 种导出类型、项目 zip 打包、CloudecodeClient.generateProject()</span></div>
+    <div class="item"><span class="dot" style="background:var(--green)"></span> <strong>SanitizeInterceptor 全局注册 + 安全清理</strong><br><span style="color:var(--dim);font-size:.8rem">已完成：全局关键词过滤、.env.example API key 移除</span></div>
     <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>交付页状态展示细化</strong> — 前端交付页绑定 Build 状态、进度条、错误提示</div>
     <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>历史快照 UI</strong> — Demo 版本历史浏览和手动回滚界面</div>
     <div class="item"><span class="dot" style="background:var(--dim)"></span> <strong>案例复盘 + 经验推荐</strong> — CaseReview / ExperienceRecommendation 完整闭环</div>

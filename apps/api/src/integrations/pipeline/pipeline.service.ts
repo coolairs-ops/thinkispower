@@ -9,6 +9,8 @@ import { HtmlValidatorService } from '../../services/html-validator.service';
 import { ErrorMatcherService } from '../../services/error-matcher.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
+import { DeploymentService } from '../../modules/deployment/deployment.service';
+import { createZipBuffer } from '../../common/utils/zip';
 import { EVENTS, TasksCreatedPayload, TasksCompletedPayload } from '../../events/event-types';
 
 const BACKOFF_MS = [1000, 2000, 4000];
@@ -27,6 +29,7 @@ export class PipelineService {
     private errorMatcher: ErrorMatcherService,
     private htmlExtractor: HtmlModuleExtractorService,
     private demoSnapshotService: DemoSnapshotService,
+    private deploymentService: DeploymentService,
   ) {}
 
   @OnEvent(EVENTS.TASKS_CREATED)
@@ -73,8 +76,14 @@ export class PipelineService {
     }
 
     // Export tasks → 导出处理
-    if (task.type.startsWith('export_') || task.type === 'deploy') {
+    if (task.type.startsWith('export_')) {
       await this.handleExportTask(task, projectId);
+      return;
+    }
+
+    // Deploy task → 部署处理
+    if (task.type === 'deploy') {
+      await this.handleDeployTask(task, projectId);
       return;
     }
 
@@ -172,89 +181,146 @@ export class PipelineService {
 
     await this.taskService.updateStatus(task.id, 'running');
 
-    try {
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { demoHtml: true, planSummary: true, structuredRequirement: true },
-      });
-      if (!project) throw new Error(`Project ${projectId} not found`);
+    for (let attempt = 0; attempt <= 3; attempt++) {
+      try {
+        const project = await this.prisma.project.findUnique({
+          where: { id: projectId },
+          select: { name: true, demoHtml: true, planSummary: true, structuredRequirement: true },
+        });
+        if (!project) throw new Error(`Project ${projectId} not found`);
 
-      // 找关联的 Build（PipelineService 是降级路径，Build 由 confirmDelivery 预先创建）
-      const build = await this.buildService.getLatestBuild(projectId);
-      if (!build) {
-        throw new Error('No build record found — cannot upload export artifact');
-      }
+        // 找关联的 Build（PipelineService 是降级路径，Build 由 confirmDelivery 预先创建）
+        const build = await this.buildService.getLatestBuild(projectId);
+        if (!build) {
+          throw new Error('No build record found — cannot upload export artifact');
+        }
 
-      let buffer: Buffer;
-      let filename: string;
-      let contentType: string;
+        let buffer: Buffer;
+        let filename: string;
+        let contentType: string;
 
-      if (task.type === 'export_source' || task.type === 'export_package') {
-        // 打包现有资产
-        const content = JSON.stringify(
-          {
-            projectId,
-            exportType,
-            generatedAt: new Date().toISOString(),
+        if (task.type === 'export_source' || task.type === 'export_package') {
+          // 生成完整项目结构（不再导出 JSON）
+          const files = await this.cloudecode.generateProject({
+            name: project.name || undefined,
             demoHtml: project.demoHtml,
             planSummary: project.planSummary,
             structuredRequirement: project.structuredRequirement,
-          },
-          null,
-          2,
+          });
+          buffer = await createZipBuffer(project.name || 'project', files);
+          filename = `${project.name || 'project'}-${exportType}.zip`;
+          contentType = 'application/zip';
+        } else {
+          // AI 生成内容（仓库代码 / 数据库 SQL / 部署配置）
+          const result = await this.cloudecode.generateAsset(task.type, {
+            planSummary: project.planSummary as string | null,
+            structuredRequirement: project.structuredRequirement,
+            demoHtml: project.demoHtml,
+          });
+          buffer = Buffer.from(result.content, 'utf-8');
+          filename = result.fileName;
+          contentType = result.contentType;
+        }
+
+        const url = await this.buildService.uploadArtifact(
+          build.id,
+          projectId,
+          exportType,
+          buffer,
+          filename,
+          contentType,
         );
-        buffer = Buffer.from(content, 'utf-8');
-        filename = `${exportType}-${projectId.slice(0, 8)}.json`;
-        contentType = 'application/json';
-      } else {
-        // AI 生成内容（仓库代码 / 数据库 SQL / 部署配置）
-        const result = await this.cloudecode.generateAsset(task.type, {
-          planSummary: project.planSummary as string | null,
-          structuredRequirement: project.structuredRequirement,
-          demoHtml: project.demoHtml,
+
+        await this.taskService.updateStatus(task.id, 'completed', {
+          resultPayload: { url, filename, exportType },
         });
-        buffer = Buffer.from(result.content, 'utf-8');
-        filename = result.fileName;
-        contentType = result.contentType;
+
+        await this.logDecision(task.id, projectId, 'export_complete', {
+          success: true,
+          exportType,
+          url,
+          filename,
+        });
+
+        this.logger.log(`Export task ${task.id} completed: ${filename} → ${url}`);
+        return; // 成功 — 退出循环
+
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Export task ${task.id} failed (attempt ${attempt}): ${msg}`);
+
+        if (attempt < 3) {
+          await this.sleep(this.getBackoff(attempt));
+          continue;
+        }
+
+        // 重试耗尽
+        await this.taskService.updateStatus(task.id, 'failed', { errorMessage: msg });
+        await this.logDecision(task.id, projectId, 'export_failed', {
+          success: false,
+          exportType: task.type,
+          error: msg,
+        });
+
+        this.eventEmitter.emit(EVENTS.TASK_FAILED, {
+          projectId,
+          taskId: task.id,
+          error: msg,
+        });
       }
+    }
+  }
 
-      const url = await this.buildService.uploadArtifact(
-        build.id,
-        projectId,
-        exportType,
-        buffer,
-        filename,
-        contentType,
-      );
+  /**
+   * 处理部署类型任务 — 将当前 demoHtml 部署为不可变快照。
+   */
+  private async handleDeployTask(task: any, projectId: string) {
+    this.logger.log(`Handling deploy task ${task.id} for project ${projectId}`);
+    await this.taskService.updateStatus(task.id, 'running');
 
-      await this.taskService.updateStatus(task.id, 'completed', {
-        resultPayload: { url, filename, exportType },
-      });
+    for (let attempt = 0; attempt <= 3; attempt++) {
+      try {
+        const build = await this.buildService.getLatestBuild(projectId);
+        const result = await this.deploymentService.deploy(projectId, build?.id);
 
-      await this.logDecision(task.id, projectId, 'export_complete', {
-        success: true,
-        exportType,
-        url,
-        filename,
-      });
+        await this.taskService.updateStatus(task.id, 'completed', {
+          resultPayload: {
+            deploymentId: result.deploymentId,
+            productionUrl: result.productionUrl,
+          },
+        });
 
-      this.logger.log(`Export task ${task.id} completed: ${filename} → ${url}`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Export task ${task.id} failed: ${msg}`);
+        await this.logDecision(task.id, projectId, 'deploy_complete', {
+          success: true,
+          deploymentId: result.deploymentId,
+          productionUrl: result.productionUrl,
+        });
 
-      await this.taskService.updateStatus(task.id, 'failed', { errorMessage: msg });
-      await this.logDecision(task.id, projectId, 'export_failed', {
-        success: false,
-        exportType: task.type,
-        error: msg,
-      });
+        this.logger.log(`Deploy task ${task.id} completed: ${result.productionUrl}`);
+        return; // 成功 — 退出循环
 
-      this.eventEmitter.emit(EVENTS.TASK_FAILED, {
-        projectId,
-        taskId: task.id,
-        error: msg,
-      });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Deploy task ${task.id} failed (attempt ${attempt}): ${msg}`);
+
+        if (attempt < 3) {
+          await this.sleep(this.getBackoff(attempt));
+          continue;
+        }
+
+        // 重试耗尽
+        await this.taskService.updateStatus(task.id, 'failed', { errorMessage: msg });
+        await this.logDecision(task.id, projectId, 'deploy_failed', {
+          success: false,
+          error: msg,
+        });
+
+        this.eventEmitter.emit(EVENTS.TASK_FAILED, {
+          projectId,
+          taskId: task.id,
+          error: msg,
+        });
+      }
     }
   }
 
@@ -376,4 +442,5 @@ export class PipelineService {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
 }

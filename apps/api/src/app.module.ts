@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './database/prisma.module';
 import { EventModule } from './events/event.module';
@@ -8,6 +9,7 @@ import { MessageModule } from './modules/message/message.module';
 import { PlanModule } from './modules/plan/plan.module';
 import { DemoModule } from './modules/demo/demo.module';
 import { DemoSnapshotModule } from './modules/demo-snapshot/demo-snapshot.module';
+import { DeploymentModule } from './modules/deployment/deployment.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
 import { TaskModule } from './modules/task/task.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
@@ -22,6 +24,7 @@ import { ExperienceRecommendationModule } from './modules/experience-recommendat
 import { HealthController } from './modules/health/health.controller';
 import { SanitizeService } from './services/sanitize.service';
 import { StatusMapperService } from './services/status-mapper.service';
+import { SanitizeInterceptor } from './common/interceptors/sanitize.interceptor';
 import { DeepseekService } from './services/deepseek.service';
 import { ClarifyService } from './services/clarify.service';
 import { PlanGeneratorService } from './services/plan-generator.service';
@@ -48,6 +51,7 @@ import { HermesQualityService } from './services/hermes-quality.service';
     FeedbackModule,
     TaskModule,
     DemoSnapshotModule,
+    DeploymentModule,
     DeliveryModule,
     HermesModule,
     CloudecodeModule,
@@ -59,7 +63,13 @@ import { HermesQualityService } from './services/hermes-quality.service';
     ExperienceRecommendationModule,
   ],
   controllers: [HealthController],
-  providers: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, DeliveryOrchestrator, ProductDiscoveryService, HermesQualityService],
+  providers: [
+    SanitizeService, StatusMapperService, DeepseekService, ClarifyService,
+    PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService,
+    HtmlValidatorService, ErrorMatcherService, BuildService,
+    DeliveryOrchestrator, ProductDiscoveryService, HermesQualityService,
+    { provide: APP_INTERCEPTOR, useClass: SanitizeInterceptor },
+  ],
   exports: [SanitizeService, StatusMapperService, DeepseekService, ClarifyService, PlanGeneratorService, DemoGeneratorService, HtmlModuleExtractorService, HtmlValidatorService, ErrorMatcherService, BuildService, ProductDiscoveryService, HermesQualityService],
 })
 export class AppModule {}

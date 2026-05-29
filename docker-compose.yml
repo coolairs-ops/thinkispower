@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,7 +5,8 @@ services:
       POSTGRES_USER: platform
       POSTGRES_PASSWORD: platform_secret
       POSTGRES_DB: platform
-    # ports: 移除主机映射避免冲突，N8N 通过内部网络访问 postgres:5432
+    ports:
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -35,10 +34,11 @@ services:
   n8n:
     image: n8nio/n8n:latest
     environment:
-      N8N_HOST: localhost
+      N8N_HOST: 192.168.124.126
       N8N_PORT: 5678
       N8N_PROTOCOL: http
-      WEBHOOK_URL: http://localhost:5678/
+      WEBHOOK_URL: http://192.168.124.126:5678/
+      PLATFORM_API_URL: http://api:3001
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: 5432
@@ -47,6 +47,7 @@ services:
       DB_POSTGRESDB_PASSWORD: platform_secret
       N8N_METRICS: false
       N8N_PERSONALIZATION_ENABLED: false
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: false
     ports:
       - "5678:5678"
     volumes:
@@ -54,6 +55,33 @@ services:
       - ./internal/n8n-workflows:/workflows
     depends_on:
       - postgres
+    restart: unless-stopped
+
+  api:
+    build:
+      context: apps/api
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3001
+      DATABASE_URL: "postgresql://platform:platform_secret@postgres:5432/platform"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin_secret
+      MINIO_BUCKET: platform-assets
+      MINIO_PUBLIC_URL: http://localhost:9000
+      JWT_SECRET: change-me-to-a-random-string
+      N8N_URL: http://192.168.124.126:15678
+      CLOUDECODE_API_URL: http://cloudecode:5000
+    env_file:
+      - apps/api/.env
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - redis
+      - minio
     restart: unless-stopped
 
 volumes:

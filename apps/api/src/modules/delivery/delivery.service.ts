@@ -8,7 +8,8 @@ import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { N8nClient } from '../../integrations/n8n/n8n.client';
 import { CaseReviewService } from '../case-review/case-review.service';
 import { ExperienceRecommendationService } from '../experience-recommendation/experience-recommendation.service';
-import { EVENTS, DeliveryExportRequestedPayload, ExportType, TasksCreatedPayload, TasksCompletedPayload } from '../../events/event-types';
+import { DeploymentService } from '../deployment/deployment.service';
+import { EVENTS, DeliveryExportRequestedPayload, DeliveryExportCompletedPayload, DeliveryExportFailedPayload, ExportType, TasksCreatedPayload, TasksCompletedPayload } from '../../events/event-types';
 
 @Injectable()
 export class DeliveryService {
@@ -24,6 +25,7 @@ export class DeliveryService {
     private n8n: N8nClient,
     private caseReviewService: CaseReviewService,
     private experienceService: ExperienceRecommendationService,
+    private deploymentService: DeploymentService,
   ) {}
 
   async getDelivery(userId: string, projectId: string) {
@@ -67,6 +69,7 @@ export class DeliveryService {
             databaseSchemaUrl: latestBuild.databaseSchemaUrl,
             deploymentConfigUrl: latestBuild.deploymentConfigUrl,
             productionUrl: latestBuild.productionUrl,
+            testReport: latestBuild.testReport,
             createdAt: latestBuild.createdAt,
           }
         : null,
@@ -104,6 +107,7 @@ export class DeliveryService {
     );
 
     // ─── 阶段 2：状态转换 — 标记为交付中 ───
+    this.statusMapper.assertValidTransition(project.status, 'exporting');
     await this.prisma.project.update({
       where: { id: projectId },
       data: {
@@ -140,8 +144,8 @@ export class DeliveryService {
     } else {
       // 没有任务需要执行，直接标记为完成
       this.logger.log(`[完成] 无交付任务，直接标记完成`);
-      const baseUrl = this.config.get<string>('APP_BASE_URL', 'http://localhost:3001');
-      const productionUrl = `${baseUrl}/api/projects/${projectId}/demo`;
+      const { productionUrl } = await this.deploymentService.deploy(projectId, build.id);
+      this.statusMapper.assertValidTransition('exporting', 'completed');
       await this.prisma.project.update({
         where: { id: projectId },
         data: {
@@ -178,7 +182,9 @@ export class DeliveryService {
     // 1. 创建 Build 记录
     const build = await this.buildService.createBuild(projectId, exportType);
 
-    // 2. 更新项目状态为 exporting
+    // 2. 更新项目状态为 exporting（带状态机校验）
+    const currentStatus = project.status;
+    this.statusMapper.assertValidTransition(currentStatus, 'exporting');
     await this.prisma.project.update({
       where: { id: projectId },
       data: {
@@ -220,9 +226,28 @@ export class DeliveryService {
     });
 
     if (project?.status === 'exporting') {
-      const baseUrl = this.config.get<string>('APP_BASE_URL', 'http://localhost:3001');
-      const productionUrl = `${baseUrl}/api/projects/${projectId}/demo`;
+      // 更新最新 Build 记录
+      const latestBuild = await this.prisma.build.findFirst({
+        where: { projectId },
+        orderBy: { version: 'desc' },
+        select: { id: true },
+      });
 
+      // 检查是否已通过 deploy task 部署
+      const existingDeployment = await this.prisma.deployment.findFirst({
+        where: { projectId, status: 'deployed' },
+      });
+
+      let productionUrl: string;
+      if (existingDeployment) {
+        const baseUrl = this.config.get<string>('APP_BASE_URL', 'http://localhost:3001');
+        productionUrl = `${baseUrl}/api/deploy/${projectId}`;
+      } else {
+        const deployResult = await this.deploymentService.deploy(projectId, latestBuild?.id);
+        productionUrl = deployResult.productionUrl;
+      }
+
+      this.statusMapper.assertValidTransition('exporting', 'completed');
       await this.prisma.project.update({
         where: { id: projectId },
         data: {
@@ -230,13 +255,6 @@ export class DeliveryService {
           publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('completed'),
           productionUrl,
         },
-      });
-
-      // 更新最新 Build 记录
-      const latestBuild = await this.prisma.build.findFirst({
-        where: { projectId },
-        orderBy: { version: 'desc' },
-        select: { id: true },
       });
       if (latestBuild) {
         await this.prisma.build.update({
@@ -262,9 +280,31 @@ export class DeliveryService {
     }
   }
 
+  @OnEvent(EVENTS.DELIVERY_EXPORT_COMPLETED)
+  async handleExportCompleted(payload: DeliveryExportCompletedPayload) {
+    const { projectId, buildId, exportType } = payload;
+    this.logger.log(`[交付] 导出完成: ${exportType} project=${projectId} build=${buildId}`);
+
+    await this.buildService.updateBuildStatus(buildId, 'success');
+
+    if (['source', 'package', 'deployment'].includes(exportType)) {
+      this.caseReviewService.generateReview(projectId).catch(err => {
+        this.logger.error(`[复盘] 项目 ${projectId} 复盘生成失败: ${err.message}`);
+      });
+    }
+  }
+
+  @OnEvent(EVENTS.DELIVERY_EXPORT_FAILED)
+  async handleExportFailed(payload: DeliveryExportFailedPayload) {
+    const { projectId, buildId, exportType, error } = payload;
+    this.logger.error(`[交付] 导出失败: ${exportType} project=${projectId} build=${buildId}: ${error}`);
+
+    await this.buildService.updateBuildStatus(buildId, 'failed');
+  }
+
   private async checkN8nAvailability(): Promise<boolean> {
     try {
-      const url = process.env.N8N_URL || 'http://192.168.124.126:15678';
+      const url = process.env.N8N_URL || 'http://localhost:5678';
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
 

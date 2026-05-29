@@ -155,4 +155,122 @@ describe('CloudecodeClient', () => {
       );
     });
   });
+
+  describe('generateProject', () => {
+    it('should return 8 files with correct structure', async () => {
+      const files = await client.generateProject({
+        name: 'My App',
+        demoHtml: '<html><body>Hello</body></html>',
+        planSummary: { summary: 'A test app' },
+      });
+
+      expect(files).toHaveLength(8);
+      files.forEach(f => {
+        expect(f).toHaveProperty('path');
+        expect(f).toHaveProperty('content');
+        expect(typeof f.path).toBe('string');
+        expect(typeof f.content).toBe('string');
+      });
+    });
+
+    it('should put demoHtml as index.html', async () => {
+      const files = await client.generateProject({
+        demoHtml: '<html><body>Custom Content</body></html>',
+      });
+
+      const index = files.find(f => f.path === 'index.html');
+      expect(index).toBeDefined();
+      expect(index!.content).toBe('<html><body>Custom Content</body></html>');
+    });
+
+    it('should sanitize project name for package.json', async () => {
+      const files = await client.generateProject({
+        name: 'My Special App!!!',
+        demoHtml: '<html></html>',
+      });
+
+      const pkg = files.find(f => f.path === 'package.json');
+      expect(pkg).toBeDefined();
+      const parsed = JSON.parse(pkg!.content);
+      expect(parsed.name).toBe('my-special-app');
+    });
+
+    it('should use planSummary.summary as README description', async () => {
+      const files = await client.generateProject({
+        name: 'test',
+        demoHtml: '<html></html>',
+        planSummary: { summary: 'Custom description' },
+      });
+
+      const readme = files.find(f => f.path === 'README.md');
+      expect(readme).toBeDefined();
+      expect(readme!.content).toContain('Custom description');
+    });
+
+    it('should use fallback description when planSummary is empty', async () => {
+      const files = await client.generateProject({
+        name: 'test',
+        demoHtml: '<html></html>',
+      });
+
+      const readme = files.find(f => f.path === 'README.md');
+      expect(readme).toBeDefined();
+      expect(readme!.content).not.toContain('Custom description');
+    });
+
+    it('should use fallback HTML when demoHtml is null', async () => {
+      const files = await client.generateProject({});
+
+      const index = files.find(f => f.path === 'index.html');
+      expect(index).toBeDefined();
+      expect(index!.content).toContain('<!DOCTYPE html>');
+    });
+
+    it('should generate valid JSON in package.json', async () => {
+      const files = await client.generateProject({
+        name: 'test-app',
+        demoHtml: '<html></html>',
+        planSummary: { summary: 'Test' },
+      });
+
+      const pkg = files.find(f => f.path === 'package.json');
+      expect(pkg).toBeDefined();
+      const parsed = JSON.parse(pkg!.content);
+      expect(parsed.name).toBe('test-app');
+      expect(parsed.scripts).toBeDefined();
+      expect(parsed.scripts.start).toContain('serve');
+    });
+
+    it('should generate all expected file paths', async () => {
+      const files = await client.generateProject({
+        name: 'test',
+        demoHtml: '<html></html>',
+      });
+
+      const paths = files.map(f => f.path).sort();
+      expect(paths).toEqual([
+        '.gitignore',
+        'Dockerfile',
+        'README.md',
+        'docker-compose.yml',
+        'index.html',
+        'nginx.conf',
+        'package.json',
+        'tests/smoke.test.js',
+      ]);
+    });
+
+    it('should handle structuredRequirement without crashing', async () => {
+      const files = await client.generateProject({
+        name: 'test',
+        demoHtml: '<html></html>',
+        structuredRequirement: { prd: { productName: 'Test' } },
+      });
+
+      const pkg = files.find(f => f.path === 'package.json');
+      expect(pkg).toBeDefined();
+      const parsed = JSON.parse(pkg!.content);
+      expect(parsed.name).toBe('test');
+    });
+  });
 });

@@ -9,6 +9,7 @@ import { HtmlValidatorService } from '../../services/html-validator.service';
 import { ErrorMatcherService } from '../../services/error-matcher.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
+import { DeploymentService } from '../../modules/deployment/deployment.service';
 
 describe('PipelineService', () => {
   let service: PipelineService;
@@ -70,6 +71,10 @@ describe('PipelineService', () => {
     getLatestBuild: jest.fn(),
   };
 
+  const mockDeploymentService = {
+    deploy: jest.fn(),
+  };
+
   const pendingTask = {
     id: 'task-1',
     projectId: 'project-1',
@@ -104,6 +109,7 @@ describe('PipelineService', () => {
         { provide: HtmlModuleExtractorService, useValue: mockHtmlExtractor },
         { provide: BuildService, useValue: mockBuildService },
         { provide: DemoSnapshotService, useValue: mockDemoSnapshotService },
+        { provide: DeploymentService, useValue: mockDeploymentService },
       ],
     }).compile();
 

@@ -1,13 +1,39 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 
 @Injectable()
 export class ProjectService {
+  private readonly logger = new Logger(ProjectService.name);
+
   constructor(
     private prisma: PrismaService,
     private statusMapper: StatusMapperService,
   ) {}
+
+  /**
+   * 带状态机校验的项目状态更新。
+   * 替换所有散布在各处的直接 prisma.project.update({ data: { status } })。
+   */
+  async updateProjectStatus(projectId: string, nextStatus: string): Promise<void> {
+    const current = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { status: true },
+    });
+    if (!current) throw new NotFoundException('项目不存在');
+
+    this.statusMapper.assertValidTransition(current.status, nextStatus);
+
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        status: nextStatus,
+        publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel(nextStatus),
+      },
+    });
+
+    this.logger.log(`项目 ${projectId} 状态: ${current.status} → ${nextStatus}`);
+  }
 
   async create(userId: string, data: { name: string; description?: string }) {
     const project = await this.prisma.project.create({

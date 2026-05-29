@@ -52,21 +52,26 @@ export class SanitizeService {
   /**
    * 递归清理 JSON 响应中的字符串字段
    */
-  sanitizeResponseBody(obj: unknown): unknown {
+  sanitizeResponseBody(obj: unknown, visited?: WeakSet<object>): unknown {
     if (typeof obj === 'string') {
       return this.sanitizePublicText(obj);
     }
+    if (obj === null || typeof obj !== 'object') {
+      return obj;
+    }
+    visited = visited || new WeakSet();
+    if (visited.has(obj)) {
+      return '[Circular]' as unknown;
+    }
+    visited.add(obj);
     if (Array.isArray(obj)) {
-      return obj.map((item) => this.sanitizeResponseBody(item));
+      return obj.map((item) => this.sanitizeResponseBody(item, visited));
     }
-    if (obj !== null && typeof obj === 'object') {
-      const sanitized: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(obj)) {
-        sanitized[key] = this.sanitizeResponseBody(value);
-      }
-      return sanitized;
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = this.sanitizeResponseBody(value, visited);
     }
-    return obj;
+    return sanitized;
   }
 
   getBannedTerms(): string[] {

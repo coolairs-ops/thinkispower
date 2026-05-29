@@ -1,24 +1,21 @@
 import { Controller, Get, Param, Res, NotFoundException } from '@nestjs/common';
 import { Response } from 'express';
-import { PrismaService } from '../../database/prisma.service';
 import { Public } from '../../common/decorators/public.decorator';
+import { DeploymentService } from './deployment.service';
 
-@Controller('api/demo-view')
-export class DemoViewController {
-  constructor(private prisma: PrismaService) {}
+@Controller('api/deploy')
+export class DeployController {
+  constructor(private deploymentService: DeploymentService) {}
 
   @Public()
   @Get(':projectId')
-  async serveDemo(@Param('projectId') projectId: string, @Res() res: Response) {
+  async serveDeploy(@Param('projectId') projectId: string, @Res() res: Response) {
     try {
-      const project = await this.prisma.project.findUnique({
-        where: { id: projectId },
-        select: { demoHtml: true },
-      });
+      const html = await this.deploymentService.getDeployedHtml(projectId);
 
-      if (!project?.demoHtml) {
+      if (!html) {
         return res.status(404).type('application/json').json({
-          message: '该应用尚未就绪',
+          message: '该应用尚未部署',
           statusCode: 404,
         });
       }
@@ -27,10 +24,10 @@ export class DemoViewController {
         .set('Content-Type', 'text/html; charset=utf-8')
         .set('X-Content-Type-Options', 'nosniff')
         .set('X-Frame-Options', 'SAMEORIGIN')
-        .send(project.demoHtml);
+        .send(html);
     } catch {
       return res.status(404).type('application/json').json({
-        message: '该应用尚未就绪',
+        message: '该应用尚未部署',
         statusCode: 404,
       });
     }

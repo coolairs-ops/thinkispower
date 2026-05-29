@@ -5,9 +5,11 @@ import { PrismaService } from '../database/prisma.service';
 import { BuildService } from './build.service';
 import { StatusMapperService } from './status-mapper.service';
 import { DeepseekService } from './deepseek.service';
+import { CloudecodeClient } from '../integrations/cloudecode/cloudecode.client';
 import { HermesClient } from '../integrations/hermes/hermes.client';
 import { N8nClient } from '../integrations/n8n/n8n.client';
 import { MinioService } from '../integrations/minio/minio.service';
+import { createZipBuffer } from '../common/utils/zip';
 import {
   EVENTS,
   DeliveryExportRequestedPayload,
@@ -54,6 +56,7 @@ export class DeliveryOrchestrator {
     private buildService: BuildService,
     private statusMapper: StatusMapperService,
     private deepseek: DeepseekService,
+    private cloudecode: CloudecodeClient,
     private hermes: HermesClient,
     private n8n: N8nClient,
     private minio: MinioService,
@@ -68,17 +71,16 @@ export class DeliveryOrchestrator {
       // 1. 更新 Build 状态为 building
       await this.buildService.updateBuildStatus(buildId, 'building');
 
-      // 2. 异步导出类型（N8N 工作流）— 触发后不等结果，由 webhook 回调完成
-      if (exportType === 'repository' || exportType === 'database') {
-        await this.handleN8nWorkflow(payload);
-        // 对于异步类型，不在此处标记完成；webhook 回调会处理
-        return;
-      }
-
-      // 3. 同步导出类型 — 等待执行结果
       let artifactUrl: string | undefined;
 
-      switch (exportType) {
+      // 2. 异步导出类型（N8N 工作流）— 触发后不等结果，由 webhook 回调完成
+      if (exportType === 'repository' || exportType === 'database') {
+        artifactUrl = await this.handleN8nWorkflow(payload);
+        if (artifactUrl === undefined) return; // N8N 异步路径：webhook 回调处理完成
+        // 降级路径：本地生成完成，跳过 switch，流入完成逻辑
+      } else {
+        // 3. 同步导出类型 — 等待执行结果
+        switch (exportType) {
         case 'source':
         case 'deployment':
           artifactUrl = await this.handleCodeGeneration(payload);
@@ -90,6 +92,7 @@ export class DeliveryOrchestrator {
 
         default:
           throw new Error(`Unknown export type: ${exportType}`);
+        }
       }
 
       // 4. 更新 Build artifact
@@ -131,20 +134,19 @@ export class DeliveryOrchestrator {
     }
   }
 
-  // ═══════════ 执行机构 1：代码生成（Cloudecode + DeepSeek）═══════════
+  // ═══════════ 执行机构 1：真实项目代码生成（不再是仅优化 HTML）═══════════
   /**
-   * 工程控制论 — 被控对象驱动。
-   * 输入：project + demoHtml
-   * 输出：优化后的生产级 HTML → MinIO → artifactUrl
-   * 反馈：DELIVERY_EXPORT_COMPLETED 事件
+   * 使用 CloudecodeClient.generateProject() 生成完整项目结构：
+   * index.html + package.json + Dockerfile + nginx.conf + README + .gitignore + 测试
+   * 打包为 zip 上传到 MinIO。
    */
   private async handleCodeGeneration(payload: DeliveryExportRequestedPayload): Promise<string | undefined> {
     const { projectId, buildId, exportType } = payload;
-    this.logger.log(`[执行机构] 代码生成: ${exportType} 项目 ${projectId}`);
+    this.logger.log(`[执行机构] 源码生成: ${exportType} 项目 ${projectId}`);
 
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { demoHtml: true, planSummary: true },
+      select: { demoHtml: true, planSummary: true, name: true, structuredRequirement: true },
     });
 
     if (!project?.demoHtml) {
@@ -152,51 +154,36 @@ export class DeliveryOrchestrator {
       return undefined;
     }
 
-    // 调用 DeepSeek 做最终优化 — 控制律：temperature=0.3 保证确定性输出
-    const optimizationPrompt = `你是一个前端工程师，负责将项目的 Demo HTML 优化为生产可用的最终版本。要求：
-1. 清理所有 debug 代码、console.log、TODO 注释
-2. 确保所有交互功能（按钮点击、表单提交、路由切换等）正常工作
-3. 优化样式，确保在所有屏幕尺寸下显示良好（响应式）
-4. 添加适当的加载状态和错误处理
-5. 保持原有的所有功能不变
-6. 直接返回完整的优化后的 HTML，不要用 markdown 包裹`;
-
-    const response = await this.deepseek.chat(
-      [
-        { role: 'system', content: optimizationPrompt },
-        { role: 'user', content: `请优化以下 Demo HTML：\n\n${project.demoHtml}` },
-      ],
-      { temperature: 0.3, maxTokens: 8192 },
-    );
-
-    const optimizedHtml = this.extractHtml(response) || response;
-    const buffer = Buffer.from(optimizedHtml, 'utf-8');
-
-    // 上传到 MinIO 并记录 artifactUrl
-    const url = await this.buildService.uploadArtifact(buildId, projectId, exportType, buffer, 'index.html', 'text/html');
-
-    // 同时更新项目的 demoHtml 为优化版本
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { demoHtml: optimizedHtml },
+    // 1. 生成完整的多文件项目
+    const files = await this.cloudecode.generateProject({
+      name: project.name || undefined,
+      demoHtml: project.demoHtml,
+      planSummary: project.planSummary,
+      structuredRequirement: project.structuredRequirement,
     });
 
-    this.logger.log(`[执行机构] 代码生成完成: ${url || '无 MinIO'}`);
+    // 2. 打包为 zip
+    const zipBuffer = await createZipBuffer(project.name || 'project', files);
+
+    // 3. 上传到 MinIO
+    const url = await this.buildService.uploadArtifact(
+      buildId, projectId, exportType,
+      zipBuffer, `${project.name || 'project'}-source.zip`,
+      'application/zip',
+    );
+
+    this.logger.log(`[执行机构] 源码生成完成: ${url || '无 MinIO'} (${zipBuffer.length} bytes, ${files.length} files)`);
     return url;
   }
 
-  // ═══════════ 执行机构 2：打包导出 ═══════════
-  /**
-   * 将 Demo HTML 打包为可下载的文件。
-   * 简单场景：直接上传 HTML；复杂场景：调用 Hermes 分解为子任务。
-   */
+  // ═══════════ 执行机构 2：项目包导出（完整项目 zip，而非仅 HTML）═══════════
   private async handlePackageExport(payload: DeliveryExportRequestedPayload): Promise<string | undefined> {
     const { projectId, buildId } = payload;
-    this.logger.log(`[执行机构] 打包导出: 项目 ${projectId}`);
+    this.logger.log(`[执行机构] 项目包导出: 项目 ${projectId}`);
 
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { demoHtml: true, name: true },
+      select: { demoHtml: true, name: true, planSummary: true, structuredRequirement: true },
     });
 
     if (!project?.demoHtml) {
@@ -204,11 +191,23 @@ export class DeliveryOrchestrator {
       return undefined;
     }
 
-    // 简打包：将 HTML 上传到 MinIO
-    const buffer = Buffer.from(project.demoHtml, 'utf-8');
-    const url = await this.buildService.uploadArtifact(buildId, projectId, 'package', buffer, `${project.name || 'project'}.html`, 'text/html');
+    // 生成完整项目结构
+    const files = await this.cloudecode.generateProject({
+      name: project.name || undefined,
+      demoHtml: project.demoHtml,
+      planSummary: project.planSummary,
+      structuredRequirement: project.structuredRequirement,
+    });
 
-    this.logger.log(`[执行机构] 打包导出完成: ${url || '无 MinIO'}`);
+    // 打包为 zip
+    const zipBuffer = await createZipBuffer(project.name || 'project', files);
+    const url = await this.buildService.uploadArtifact(
+      buildId, projectId, 'package',
+      zipBuffer, `${project.name || 'project'}-package.zip`,
+      'application/zip',
+    );
+
+    this.logger.log(`[执行机构] 项目包导出完成: ${url || '无 MinIO'} (${zipBuffer.length} bytes)`);
     return url;
   }
 
@@ -230,28 +229,34 @@ export class DeliveryOrchestrator {
 
     const result = await this.n8n.triggerDeliveryExportWorkflow(projectId, exportType);
 
-    if (!result.success) {
-      throw new Error(`N8N 工作流触发失败: ${exportType}`);
+    if (result.success) {
+      this.logger.log(`[前向通道] N8N 工作流已触发: runId=${result.runId} build=${buildId}`);
+      return undefined; // webhook 回调处理完成，不在此处返回 URL
     }
 
-    this.logger.log(`[前向通道] N8N 工作流已触发: runId=${result.runId} build=${buildId}`);
-    // 异步执行，结果由 webhook 回调反馈 — 不在此处返回 artifactUrl
-    return undefined;
+    // 降级路径：N8N 不可用时本地生成资产
+    this.logger.warn(`[降级] N8N 不可用，本地生成 ${exportType} 资产`);
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { name: true, demoHtml: true, planSummary: true, structuredRequirement: true },
+    });
+    if (!project) throw new Error(`Project ${projectId} not found`);
+
+    const assetTaskType = exportType === 'database' ? 'export_database_schema' : `export_${exportType}`;
+    const asset = await this.cloudecode.generateAsset(assetTaskType, {
+      planSummary: project.planSummary as string | null,
+      structuredRequirement: project.structuredRequirement,
+      demoHtml: project.demoHtml,
+    });
+
+    const buffer = Buffer.from(asset.content, 'utf-8');
+    const url = await this.buildService.uploadArtifact(
+      buildId, projectId, exportType,
+      buffer, asset.fileName, asset.contentType,
+    );
+
+    this.logger.log(`[降级] 本地 ${exportType} 资产生成完成: ${url}`);
+    return url;
   }
 
-  // ═══════════ 工具方法 ═══════════
-  private extractHtml(response: string): string | null {
-    // Try markdown code block first
-    const htmlBlock = response.match(/```html\s*([\s\S]*?)```/);
-    if (htmlBlock) return htmlBlock[1].trim();
-
-    // Try any code block
-    const codeBlock = response.match(/```\s*([\s\S]*?)```/);
-    if (codeBlock) return codeBlock[1].trim();
-
-    // If response looks like HTML, use it directly
-    if (response.trim().startsWith('<')) return response.trim();
-
-    return null;
-  }
 }

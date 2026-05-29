@@ -34,6 +34,12 @@ export default function NavBar({ projectId, projectName }: NavBarProps) {
               预览
             </Link>
             <Link
+              href={`/projects/${projectId}/snapshots`}
+              className="text-sm text-gray-600 hover:text-blue-600 transition-colors"
+            >
+              版本
+            </Link>
+            <Link
               href={`/projects/${projectId}/delivery`}
               className="text-sm text-gray-600 hover:text-blue-600 transition-colors"
             >
