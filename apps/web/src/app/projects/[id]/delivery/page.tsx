@@ -1,11 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import NavBar from '@/lib/nav-bar';
+
+// ─── Types ───
+
+interface ExportState {
+  loading: boolean;
+  done: boolean;
+  failed: boolean;
+  url?: string;
+  error?: string;
+}
+
+// ─── Constants ───
 
 const EXPORT_BUTTONS = [
   { key: 'source-download', label: '下载源码', endpoint: 'request-source-download' },
@@ -23,6 +35,24 @@ const EXPORT_FIELD_MAP: Record<string, string> = {
   'deployment-config': 'deploymentConfigUrl',
 };
 
+/** 将内部错误转换为用户可理解的消息 */
+function sanitizeExportError(err: unknown, fallback: string): string {
+  if (!err) return fallback;
+  const msg = (typeof err === 'string' ? err :
+    err instanceof Error ? err.message : '').toLowerCase();
+
+  if (msg.includes('upgrade') || msg.includes('升级套餐')) return '该服务需升级套餐才能使用。';
+  if (msg.includes('timeout') || msg.includes('超时')) return '处理超时，请稍后重试。';
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('econnrefused')) return '网络异常，请检查连接后重试。';
+  if (msg.includes('429') || msg.includes('rate limit')) return '请求过于频繁，请稍后重试。';
+  if (msg.includes('403') || msg.includes('forbidden')) return '暂无权限执行此操作。';
+  if (msg.includes('404') || msg.includes('not found')) return '项目数据异常，请刷新页面。';
+
+  return fallback;
+}
+
+// ─── Component ───
+
 export default function DeliveryPage() {
   const params = useParams();
   const router = useRouter();
@@ -35,31 +65,40 @@ export default function DeliveryPage() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [exportStates, setExportStates] = useState<Record<string, { loading: boolean; done: boolean; url?: string }>>({});
+  const [exportStates, setExportStates] = useState<Record<string, ExportState>>({});
   const [caseReview, setCaseReview] = useState<any>(null);
   const [recommendations, setRecommendations] = useState<any[]>([]);
 
-  // 轮询交付进度
-  const pollInterval = 5000;
+  const deliveryRef = useRef(delivery);
+  deliveryRef.current = delivery;
 
-  const fetchReviewAndRecs = async () => {
-    try {
-      const [review, recs] = await Promise.all([
-        api.get(`/api/projects/${projectId}/case-review`),
-        api.get(`/api/projects/${projectId}/experience-recommendations`),
-      ]);
-      setCaseReview(review);
-      setRecommendations(recs || []);
-    } catch {
-      // Review/recommendations may not exist yet (being generated async)
-    }
-  };
+  // ── 从 delivery.latestBuild 推导各导出项状态 ──
+  const syncExportStatesFromDelivery = useCallback((d: any) => {
+    if (!d?.latestBuild) return;
+    const build = d.latestBuild;
+    setExportStates(prev => {
+      let changed = false;
+      const next: Record<string, ExportState> = {};
+      for (const key of Object.keys(prev)) {
+        next[key] = { ...prev[key] };
+      }
+      for (const [key, field] of Object.entries(EXPORT_FIELD_MAP)) {
+        const url = build[field];
+        if (url && !prev[key]?.loading) {
+          next[key] = { loading: false, done: true, failed: false, url };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
 
+  // ── 基本面加载 + 轮询 ──
   useEffect(() => {
     if (isLoading) return;
     if (!token) { router.push('/'); return; }
 
-    const fetchDelivery = () =>
+    const initLoading = () =>
       Promise.all([
         api.get(`/api/projects/${projectId}/delivery`),
         api.get(`/api/projects/${projectId}`),
@@ -69,6 +108,7 @@ export default function DeliveryPage() {
           setProjectName(proj.name || '');
           setLoading(false);
           setError(null);
+          syncExportStatesFromDelivery(d);
           if (d.status === 'completed') {
             fetchReviewAndRecs();
           }
@@ -78,12 +118,12 @@ export default function DeliveryPage() {
           setError(err.message || '加载失败');
         });
 
-    fetchDelivery();
+    initLoading();
 
-    // 如果项目正在交付中，轮询状态变化
     const timer = setInterval(() => {
       api.get(`/api/projects/${projectId}/delivery`).then((d) => {
         setDelivery(d);
+        syncExportStatesFromDelivery(d);
         if (d.status === 'completed' || d.status === 'build_failed') {
           clearInterval(timer);
         }
@@ -91,11 +131,26 @@ export default function DeliveryPage() {
           fetchReviewAndRecs();
         }
       }).catch(() => {});
-    }, pollInterval);
+    }, 5000);
 
     return () => clearInterval(timer);
-  }, [projectId, token, isLoading, router]);
+  }, [projectId, token, isLoading, router, syncExportStatesFromDelivery]);
 
+  // ── 案例复盘 & 经验推荐 ──
+  const fetchReviewAndRecs = async () => {
+    try {
+      const [review, recs] = await Promise.all([
+        api.get(`/api/projects/${projectId}/case-review`),
+        api.get(`/api/projects/${projectId}/experience-recommendations`),
+      ]);
+      setCaseReview(review);
+      setRecommendations(recs || []);
+    } catch {
+      // Review/recommendations may not exist yet
+    }
+  };
+
+  // ── 主交付流程 ──
   const handleStartDelivery = async () => {
     if (starting) return;
     setStarting(true);
@@ -123,19 +178,20 @@ export default function DeliveryPage() {
     handleStartDelivery();
   };
 
+  // ── 单导出项 ──
   const handleExport = async (buttonKey: string, endpoint: string) => {
     if (!delivery?.isPro) {
       toast('高级交付服务需升级套餐，请联系平台顾问。', 'info');
       return;
     }
 
-    setExportStates(prev => ({ ...prev, [buttonKey]: { loading: true, done: false } }));
+    setExportStates(prev => ({ ...prev, [buttonKey]: { loading: true, done: false, failed: false } }));
 
     try {
       const result = await api.post(`/api/projects/${projectId}/delivery/${endpoint}`);
       if (result.upgradeRequired) {
         toast(result.message, 'info');
-        setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false } }));
+        setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false, failed: false } }));
         return;
       }
 
@@ -144,7 +200,7 @@ export default function DeliveryPage() {
       // 轮询等待导出完成（最多等 30 秒）
       let attempts = 0;
       const maxAttempts = 10;
-      const pollForExport = async (): Promise<void> => {
+      const pollFn = async (): Promise<void> => {
         attempts++;
         try {
           const d = await api.get(`/api/projects/${projectId}/delivery`);
@@ -154,7 +210,7 @@ export default function DeliveryPage() {
           if (url) {
             setExportStates(prev => ({
               ...prev,
-              [buttonKey]: { loading: false, done: true, url },
+              [buttonKey]: { loading: false, done: true, failed: false, url },
             }));
             toast('导出完成', 'success');
             return;
@@ -163,21 +219,43 @@ export default function DeliveryPage() {
           // 继续轮询
         }
         if (attempts < maxAttempts) {
-          setTimeout(pollForExport, 3000);
+          setTimeout(pollFn, 3000);
         } else {
           setExportStates(prev => ({
             ...prev,
-            [buttonKey]: { loading: false, done: false },
+            [buttonKey]: { loading: false, done: false, failed: false },
           }));
           toast('导出处理中，请稍后刷新页面查看', 'info');
         }
       };
-      setTimeout(pollForExport, 3000);
+      setTimeout(pollFn, 3000);
     } catch (err: any) {
-      toast(err.message || '导出失败', 'error');
-      setExportStates(prev => ({ ...prev, [buttonKey]: { loading: false, done: false } }));
+      const friendly = sanitizeExportError(err, '导出失败，请稍后重试。');
+      toast(friendly, 'error');
+      setExportStates(prev => ({
+        ...prev,
+        [buttonKey]: { loading: false, done: false, failed: true, error: friendly },
+      }));
     }
   };
+
+  // ── 复制链接 ──
+  const handleCopyUrl = async (url: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(`${label} 链接已复制`, 'success');
+    } catch {
+      toast('复制失败，请手动复制', 'error');
+    }
+  };
+
+  // ═══════════ 计算导出进度 ═══════════
+
+  const completedCount = EXPORT_BUTTONS.filter(b => exportStates[b.key]?.done).length;
+  const totalExportCount = EXPORT_BUTTONS.length;
+  const progressPercent = totalExportCount > 0 ? Math.round((completedCount / totalExportCount) * 100) : 0;
+
+  // ═══════════ 渲染 ═══════════
 
   if (isLoading) return null;
   if (loading) return <div className="p-8 text-gray-500">加载中...</div>;
@@ -195,25 +273,57 @@ export default function DeliveryPage() {
         <div className="mx-auto max-w-3xl">
           <h1 className="mb-6 text-2xl font-bold text-gray-900">交付</h1>
 
-          {/* ─── 交付进度 ─── */}
+          {/* ─── 交付进度 — 详细状态面板 ─── */}
           {isDelivering && (
             <section className="mb-6 rounded-xl bg-blue-50 p-6 shadow-sm border border-blue-200">
               <h2 className="mb-3 text-lg font-semibold text-blue-800">交付进行中</h2>
-              <div className="flex items-center gap-3">
-                <div className="h-2 w-full rounded-full bg-blue-200">
-                  <div
-                    className="h-2 animate-pulse rounded-full bg-blue-600 transition-all duration-700"
-                    style={{ width: `${delivery?.latestBuild?.status === 'building' ? 60 : delivery?.latestBuild?.status === 'success' ? 90 : 35}%` }}
-                  ></div>
+
+              {/* 整体进度条 */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between text-sm text-blue-700 mb-1">
+                  <span>已完成 {completedCount}/{totalExportCount}</span>
+                  <span>{progressPercent}%</span>
                 </div>
-                <span className="text-sm text-blue-600 shrink-0">
-                  {delivery?.latestBuild?.status === 'building' ? '正在打包生成...' : '正在分析处理...'}
-                </span>
+                <div className="h-2.5 w-full rounded-full bg-blue-200">
+                  <div
+                    className="h-2.5 rounded-full bg-blue-600 transition-all duration-700"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
               </div>
-              <div className="mt-2 text-sm text-blue-600 space-y-1">
-                <p>系统正在自动处理交付流程，请耐心等待。页面将自动刷新进度。</p>
+
+              {/* 逐项状态 */}
+              <ul className="space-y-2 text-sm">
+                {EXPORT_BUTTONS.map((item) => {
+                  const state = exportStates[item.key];
+                  let indicator: { color: string; label: string };
+                  if (state?.done) {
+                    indicator = { color: 'text-green-700', label: '已完成' };
+                  } else if (state?.loading) {
+                    indicator = { color: 'text-blue-700', label: '处理中...' };
+                  } else if (state?.failed) {
+                    indicator = { color: 'text-red-600', label: '失败' };
+                  } else {
+                    indicator = { color: 'text-gray-400', label: '等待中' };
+                  }
+                  return (
+                    <li key={item.key} className="flex items-center gap-2">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        state?.done ? 'bg-green-500' :
+                        state?.loading ? 'bg-blue-500 animate-pulse' :
+                        state?.failed ? 'bg-red-500' : 'bg-gray-300'
+                      }`} />
+                      <span className="text-gray-700">{item.label}</span>
+                      <span className={`ml-auto ${indicator.color}`}>{indicator.label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div className="mt-3 text-sm text-blue-600">
+                <p>系统正在自动处理，页面将实时更新进度。</p>
                 {delivery?.latestBuild?.version && (
-                  <p className="text-xs text-blue-400">构建版本 #{delivery.latestBuild.version}</p>
+                  <p className="mt-1 text-xs text-blue-400">构建版本 #{delivery.latestBuild.version}</p>
                 )}
               </div>
             </section>
@@ -240,7 +350,7 @@ export default function DeliveryPage() {
                   )}
                   {delivery?.latestBuild && !delivery.latestBuild.testReport?.error && (
                     <p className="mt-2 text-xs text-red-400">
-                      构建版本 #{delivery.latestBuild.version} — 状态: {delivery.latestBuild.status}
+                      构建版本 #{delivery.latestBuild.version}
                     </p>
                   )}
                 </div>
@@ -258,18 +368,29 @@ export default function DeliveryPage() {
           {/* ─── 已完成 ─── */}
           {isCompleted && (
             <section className="mb-6 rounded-xl bg-green-50 p-6 shadow-sm border border-green-200">
-              <h2 className="mb-3 text-lg font-semibold text-green-800">✅ 已交付</h2>
+              <h2 className="mb-3 text-lg font-semibold text-green-800">已交付</h2>
               {delivery?.productionUrl && (
                 <div className="space-y-2">
                   <p className="text-sm text-green-700">软件已上线，可通过以下地址访问：</p>
-                  <a
-                    href={delivery.productionUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700 transition-colors"
-                  >
-                    打开软件
-                  </a>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={delivery.productionUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700 transition-colors"
+                    >
+                      打开软件
+                    </a>
+                    <button
+                      onClick={() => handleCopyUrl(delivery.productionUrl, '访问地址')}
+                      className="rounded-lg border border-green-400 bg-white px-3 py-2 text-sm text-green-700 hover:bg-green-100 transition-colors"
+                    >
+                      复制链接
+                    </button>
+                  </div>
+                  {delivery?.productionUrl && (
+                    <p className="text-xs text-green-500 break-all">{delivery.productionUrl}</p>
+                  )}
                 </div>
               )}
               {delivery?.deliveryAnalysis && (
@@ -292,16 +413,24 @@ export default function DeliveryPage() {
             <h2 className="mb-3 text-lg font-semibold text-gray-800">在线访问</h2>
             {delivery?.productionUrl ? (
               <div>
-                <a
-                  href={delivery.productionUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline"
-                >
-                  {delivery.productionUrl}
-                </a>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={delivery.productionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    {delivery.productionUrl}
+                  </a>
+                  <button
+                    onClick={() => handleCopyUrl(delivery.productionUrl, '访问地址')}
+                    className="text-xs text-gray-400 hover:text-gray-600 border px-2 py-0.5 rounded transition-colors"
+                  >
+                    复制
+                  </button>
+                </div>
                 <p className="mt-2 text-sm text-gray-500">
-                  管理员账号：{delivery.adminEmail || 'admin@example.com'} / 密码请联系平台
+                  管理员账号：{delivery.adminEmail || 'admin@example.com'}
                 </p>
               </div>
             ) : (
@@ -337,7 +466,7 @@ export default function DeliveryPage() {
                 }`}
               >
                 {isCompleted
-                  ? '✅ 已交付'
+                  ? '已交付'
                   : isDelivering
                   ? '交付中...'
                   : starting
@@ -375,7 +504,7 @@ export default function DeliveryPage() {
             )}
           </section>
 
-          {/* ─── 高级交付服务 ─── */}
+          {/* ─── 高级交付服务 — 逐项导出卡片 ─── */}
           <section className="mb-6 rounded-xl bg-white p-6 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold text-gray-800">高级交付服务</h2>
             <div className="grid grid-cols-2 gap-3">
@@ -383,45 +512,106 @@ export default function DeliveryPage() {
                 const state = exportStates[item.key];
                 const isLoading = state?.loading;
                 const isDone = state?.done;
+                const isFailedState = state?.failed;
                 const downloadUrl = state?.url;
 
+                // 已完成 → 显示链接 + 复制按钮
+                if (isDone && downloadUrl) {
+                  return (
+                    <div
+                      key={item.key}
+                      className="rounded-lg border border-green-300 bg-green-50 p-4"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-green-700 font-medium">{item.label}</span>
+                        <span className="text-xs text-green-600">已完成</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <a
+                          href={downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block rounded bg-green-600 px-3 py-1.5 text-xs text-white hover:bg-green-700 transition-colors"
+                        >
+                          下载
+                        </a>
+                        <button
+                          onClick={() => handleCopyUrl(downloadUrl, item.label)}
+                          className="rounded border border-green-400 bg-white px-3 py-1.5 text-xs text-green-700 hover:bg-green-100 transition-colors"
+                        >
+                          复制链接
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // 失败 → 显示错误 + 重试
+                if (isFailedState) {
+                  return (
+                    <div
+                      key={item.key}
+                      className="rounded-lg border border-red-200 bg-red-50 p-4"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-red-700 font-medium">{item.label}</span>
+                        <button
+                          onClick={() => handleExport(item.key, item.endpoint)}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          重试
+                        </button>
+                      </div>
+                      <p className="text-xs text-red-500">{state?.error || '处理失败'}</p>
+                    </div>
+                  );
+                }
+
+                // 加载中
+                if (isLoading) {
+                  return (
+                    <div
+                      key={item.key}
+                      className="rounded-lg border border-blue-200 bg-blue-50 p-4"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+                        <span className="text-blue-700 font-medium">{item.label}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-blue-600">处理中...</p>
+                    </div>
+                  );
+                }
+
+                // 已完成但无下载链接（边缘情况：show "已完成" 但不提供下载）
+                if (isDone && !downloadUrl) {
+                  return (
+                    <div
+                      key={item.key}
+                      className="rounded-lg border border-green-200 bg-green-50 p-4"
+                    >
+                      <span className="text-green-700 font-medium">{item.label}</span>
+                      <p className="mt-1 text-xs text-green-600">已完成</p>
+                    </div>
+                  );
+                }
+
+                // 默认：可点击的按钮
                 return (
                   <button
                     key={item.key}
                     onClick={() => handleExport(item.key, item.endpoint)}
                     disabled={isLoading || isDelivering || !delivery?.isPro}
                     className={`rounded-lg border p-4 text-left text-sm transition-colors ${
-                      isDone
-                        ? 'border-green-300 bg-green-50'
-                        : isLoading
-                        ? 'border-blue-200 bg-blue-50'
-                        : 'text-gray-700 hover:bg-gray-50'
+                      'text-gray-700 hover:bg-gray-50'
                     } disabled:opacity-60 disabled:cursor-not-allowed`}
                   >
-                    <div className="flex items-center gap-2">
-                      {isLoading && <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />}
-                      {isDone && <span className="text-green-600">✅</span>}
-                      <span className={isDone ? 'text-green-700' : ''}>{item.label}</span>
-                    </div>
-                    {isDone && downloadUrl && (
-                      <a
-                        href={downloadUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-1 inline-block text-xs text-blue-600 hover:underline"
-                      >
-                        下载文件 ↗
-                      </a>
+                    <span>{item.label}</span>
+                    {!delivery?.isPro && (
+                      <p className="mt-1 text-xs text-gray-400">需升级套餐</p>
                     )}
-                    {isDone && !downloadUrl && (
-                      <p className="mt-1 text-xs text-green-600">已完成</p>
-                    )}
-                    {isLoading && (
-                      <p className="mt-1 text-xs text-blue-600">处理中...</p>
-                    )}
-                    {!isLoading && !isDone && !delivery?.isPro && (
-                      <p className="mt-1 text-xs text-gray-400">这是高级交付服务，如需开通请联系平台顾问。</p>
+                    {delivery?.isPro && (
+                      <p className="mt-1 text-xs text-gray-400">点击开始导出</p>
                     )}
                   </button>
                 );
@@ -432,7 +622,7 @@ export default function DeliveryPage() {
           {/* ─── 复盘报告 ─── */}
           {caseReview && (
             <section className="mb-6 rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-3 text-lg font-semibold text-gray-800">📋 项目复盘</h2>
+              <h2 className="mb-3 text-lg font-semibold text-gray-800">项目复盘</h2>
               <div className="space-y-3 text-sm text-gray-700">
                 {caseReview.summary && (
                   <p className="text-gray-600">{caseReview.summary}</p>
@@ -469,7 +659,7 @@ export default function DeliveryPage() {
           {/* ─── 经验推荐 ─── */}
           {recommendations.length > 0 && (
             <section className="rounded-xl bg-white p-6 shadow-sm">
-              <h2 className="mb-3 text-lg font-semibold text-gray-800">💡 经验推荐</h2>
+              <h2 className="mb-3 text-lg font-semibold text-gray-800">经验推荐</h2>
               <div className="space-y-3">
                 {recommendations.map((rec: any, i: number) => (
                   <div key={i} className="rounded-lg bg-gray-50 p-3">
