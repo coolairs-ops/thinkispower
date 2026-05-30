@@ -1,5 +1,5 @@
 {
-  "name": "\u4ea4\u4ed8\u5bfc\u51fa\u5de5\u4f5c\u6d41",
+  "name": "交付导出工作流",
   "nodes": [
     {
       "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -13,17 +13,52 @@
       "parameters": {
         "path": "delivery-export",
         "responseMode": "lastNode",
-        "options": {}
+        "options": {},
+        "httpMethod": "GET"
       }
     },
     {
-      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-      "name": "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf",
+      "id": "cc-bridge-gen",
+      "name": "调用 Claude Code 生成代码",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         450,
-        300
+        250
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5001/execute",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "task",
+              "value": "=生成完整项目代码，项目ID: {{ $json.body.projectId }}"
+            },
+            {
+              "name": "context",
+              "value": "=交付类型: {{ $json.body.deliveryType }}。生成包含 index.html、package.json、Dockerfile、nginx.conf、README.md、.gitignore、tests/ 的完整项目"
+            },
+            {
+              "name": "taskType",
+              "value": "delivery"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "触发平台任务管线",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        450,
+        380
       ],
       "parameters": {
         "method": "POST",
@@ -46,7 +81,7 @@
     },
     {
       "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-      "name": "\u8fd4\u56de\u7ed3\u679c",
+      "name": "返回结果",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
@@ -55,7 +90,7 @@
       ],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ $json }}"
+        "responseBody": "={{ { success: true, ccResult: $json.result, pipelineResult: $json } }}"
       }
     }
   ],
@@ -64,18 +99,34 @@
       "main": [
         [
           {
-            "node": "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf",
+            "node": "调用 Claude Code 生成代码",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "触发平台任务管线",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf": {
+    "调用 Claude Code 生成代码": {
       "main": [
         [
           {
-            "node": "\u8fd4\u56de\u7ed3\u679c",
+            "node": "返回结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "触发平台任务管线": {
+      "main": [
+        [
+          {
+            "node": "返回结果",
             "type": "main",
             "index": 0
           }
@@ -85,5 +136,6 @@
   },
   "settings": {},
   "staticData": null,
-  "tags": []
+  "tags": [],
+  "active": true
 }

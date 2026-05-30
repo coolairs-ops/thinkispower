@@ -1,21 +1,57 @@
 {
-  "name": "\u6f14\u793a\u751f\u6210\u5de5\u4f5c\u6d41",
+  "name": "演示生成工作流",
+  "active": true,
   "nodes": [
     {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567891",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
       "parameters": {
         "path": "demo-generate",
-        "responseMode": "lastNode"
-      },
-      "position": [
-        0,
-        0
-      ]
+        "httpMethod": "GET",
+        "responseMode": "lastNode",
+        "options": {}
+      }
     },
     {
-      "name": "\u89e6\u53d1\u5e73\u53f0\u751f\u6210",
+      "id": "cc-bridge-demo",
+      "name": "调用 Claude Code 生成 Demo",
       "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 250],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5001/execute",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "task",
+              "value": "=生成完整Demo HTML预览，项目ID: {{ $json.query.projectId }}。要求：单文件HTML SPA，左侧导航+右侧内容区，标注data-module-key和data-element-path"
+            },
+            {
+              "name": "taskType",
+              "value": "demo"
+            },
+            {
+              "name": "context",
+              "value": "=项目ID: {{ $json.query.projectId }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      }
+    },
+    {
+      "id": "save-to-api",
+      "name": "保存 Demo HTML",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 300],
       "parameters": {
         "method": "POST",
         "url": "={{ $env.PLATFORM_API_URL }}/internal/workflows/demo-generate",
@@ -24,51 +60,53 @@
           "parameters": [
             {
               "name": "projectId",
-              "value": "={{ $json.body.projectId }}"
+              "value": "={{ $json.query.projectId }}"
+            },
+            {
+              "name": "html",
+              "value": "={{ $json.result }}"
             }
           ]
-        }
-      },
-      "position": [
-        250,
-        0
-      ]
+        },
+        "options": {}
+      }
     },
     {
-      "name": "\u8fd4\u56de\u7ed3\u679c",
+      "id": "return-result",
+      "name": "返回结果",
       "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 300],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ $json }}"
-      },
-      "position": [
-        500,
-        0
-      ]
+        "responseBody": "={{ { success: true, htmlLength: $json.result ? $json.result.length : 0 } }}"
+      }
     }
   ],
   "connections": {
     "Webhook": {
       "main": [
         [
-          {
-            "node": "\u89e6\u53d1\u5e73\u53f0\u751f\u6210",
-            "type": "main",
-            "index": 0
-          }
+          { "node": "调用 Claude Code 生成 Demo", "type": "main", "index": 0 }
         ]
       ]
     },
-    "\u89e6\u53d1\u5e73\u53f0\u751f\u6210": {
+    "调用 Claude Code 生成 Demo": {
       "main": [
         [
-          {
-            "node": "\u8fd4\u56de\u7ed3\u679c",
-            "type": "main",
-            "index": 0
-          }
+          { "node": "保存 Demo HTML", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "保存 Demo HTML": {
+      "main": [
+        [
+          { "node": "返回结果", "type": "main", "index": 0 }
         ]
       ]
     }
-  }
+  },
+  "settings": {},
+  "staticData": null,
+  "tags": []
 }

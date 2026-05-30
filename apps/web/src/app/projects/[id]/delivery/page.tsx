@@ -68,6 +68,10 @@ export default function DeliveryPage() {
   const [exportStates, setExportStates] = useState<Record<string, ExportState>>({});
   const [caseReview, setCaseReview] = useState<any>(null);
   const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [progressLines, setProgressLines] = useState<string[]>([]);
+  const [deliveryStatus, setDeliveryStatus] = useState('');
+  const [deliveryTimer, setDeliveryTimer] = useState(0);
+  const [showProgress, setShowProgress] = useState(false);
 
   const deliveryRef = useRef(delivery);
   deliveryRef.current = delivery;
@@ -153,23 +157,35 @@ export default function DeliveryPage() {
   // ── 主交付流程 ──
   const handleStartDelivery = async () => {
     if (starting) return;
-    setStarting(true);
-    setError(null);
+    setStarting(true); setError(null);
+    setProgressLines([]); setShowProgress(true); setDeliveryStatus('🔄 启动中...'); setDeliveryTimer(0);
+    const startTime = Date.now();
+    const timer = setInterval(() => setDeliveryTimer(Math.floor((Date.now()-startTime)/1000)), 1000);
     try {
-      const result = await api.post(`/api/projects/${projectId}/delivery/confirm`);
-      setDelivery((prev: any) => ({ ...prev, status: 'exporting' }));
-      toast('交付流程已启动，正在分析项目...', 'success');
-
-      if (result.analysis?.risks?.length > 0) {
-        const highRisks = result.analysis.risks.filter((r: any) => r.severity === 'high');
-        if (highRisks.length > 0) {
-          toast(`发现 ${highRisks.length} 个高风险项，请关注交付进度`, 'info');
-        }
+      const proj = await api.get(`/api/projects/${projectId}`);
+      const r = await api.post(`/api/projects/${projectId}/delivery/production-deliver`, {
+        projectName, planSummary: proj.planSummary, demoHtml: proj.demoHtml, structuredRequirement: proj.structuredRequirement,
+      });
+      if (r.deliveryId) {
+        const es = new EventSource(`/api/projects/${projectId}/delivery/delivery-progress/${r.deliveryId}`);
+        es.onmessage = (e) => {
+          const d = JSON.parse(e.data);
+          let l = '';
+          switch(d.step) {
+            case 'info': l = `ℹ ${d.text}`; break;
+            case 'step': l = `[${d.name}] ${d.text}`; setDeliveryStatus(`🔄 ${d.name}`); break;
+            case 'gen': l = `  ✦ ${d.file} ${d.text}`; break;
+            case 'check': l = `  ${d.text.includes('✅')?'✅':'❌'} ${d.name}: ${d.text}`; break;
+            case 'test': l = `  ${d.text.includes('✅')?'✅':'❌'} ${d.file}`; break;
+            case 'deploy': l = `🚀 ${d.text}`; setDeliveryStatus('🚀 部署'); break;
+            case 'done': setDeliveryStatus('✅ 已上线'); setDelivery((p:any)=>({...p,status:'completed',productionUrl:d.productionUrl})); es.close(); clearInterval(timer); break;
+            case 'error': setDeliveryStatus('❌ 失败'); es.close(); clearInterval(timer); break;
+          }
+          if (l) setProgressLines((p: any) => [...p, l]);
+        };
+        es.onerror = () => { es.close(); clearInterval(timer); };
       }
-    } catch (err: any) {
-      toast(err.message || '启动交付失败，请重试', 'error');
-      setError(err.message || '启动交付失败');
-    }
+    } catch (err: any) { toast(err.message||'失败','error'); }
     setStarting(false);
   };
 
@@ -325,6 +341,33 @@ export default function DeliveryPage() {
                 {delivery?.latestBuild?.version && (
                   <p className="mt-1 text-xs text-blue-400">构建版本 #{delivery.latestBuild.version}</p>
                 )}
+              </div>
+            </section>
+          )}
+
+          {/* ─── 实时进度面板 ─── */}
+          {showProgress && (
+            <section className="mb-6 rounded-lg overflow-hidden border border-gray-700" style={{ background: '#0d1117' }}>
+              <div className="flex items-center gap-2 px-4 py-2" style={{ background: '#161b22', borderBottom: '1px solid #30363d' }}>
+                <span className="w-3 h-3 rounded-full" style={{ background: '#ff5f56' }}></span>
+                <span className="w-3 h-3 rounded-full" style={{ background: '#ffbd2e' }}></span>
+                <span className="w-3 h-3 rounded-full" style={{ background: '#27c93f' }}></span>
+                <span className="flex-1 text-center text-xs" style={{ color: '#8b949e' }}>终稿交付 · {projectName}</span>
+                <span className="text-xs" style={{ color: deliveryStatus.includes('✅') ? '#3fb950' : deliveryStatus.includes('❌') ? '#f85149' : '#58a6ff' }}>{deliveryStatus}</span>
+              </div>
+              <div className="p-4 font-mono text-xs leading-relaxed overflow-y-auto" style={{ maxHeight: '380px', color: '#c9d1d9' }}>
+                {progressLines.map((line, i) => (
+                  <div key={i} className="py-0.5" style={{ color: line.includes('✅') ? '#3fb950' : line.includes('❌') ? '#f85149' : line.includes('🚀') ? '#d29922' : line.includes('✦') ? '#58a6ff' : '#8b949e' }}>
+                    {line}
+                  </div>
+                ))}
+                {progressLines.length === 0 && <div style={{ color: '#58a6ff' }}>▸ 连接中...<span className="animate-pulse">█</span></div>}
+              </div>
+              <div className="px-4 py-1.5 flex justify-between" style={{ background: '#161b22', borderTop: '1px solid #30363d' }}>
+                <span className="text-xs" style={{ color: '#484f58' }}>{deliveryTimer}s</span>
+                <div className="flex-1 mx-4 h-0.5 mt-1.5 rounded" style={{ background: '#21262d' }}>
+                  <div className="h-0.5 rounded bg-green-500 transition-all" style={{ width: `${Math.min(deliveryTimer / 30 * 100, 100)}%` }}></div>
+                </div>
               </div>
             </section>
           )}

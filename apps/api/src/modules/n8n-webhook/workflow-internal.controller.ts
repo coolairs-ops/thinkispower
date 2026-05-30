@@ -14,11 +14,16 @@ export class WorkflowInternalController {
   constructor(private demoService: DemoService) {}
 
   @Post('demo-generate')
-  async handleDemoGenerate(@Body('projectId') projectId: string) {
-    this.logger.log(`[N8N→API] Demo generate triggered for project ${projectId}`);
+  async handleDemoGenerate(
+    @Body('projectId') projectId: string,
+    @Body('html') html?: string,
+  ) {
+    this.logger.log(`[N8N→API] Demo generate callback for project ${projectId}, html=${html ? html.length + ' bytes' : 'none'}`);
     if (!projectId) return { error: 'projectId required' };
-
-    // 调用 DemoService 重新生成（绕过鉴权，使用 system 身份）
+    if (html) {
+      await this.demoService.saveDemoHtml(projectId, html);
+      return { success: true, status: 'saved' };
+    }
     await this.demoService.generateDemoInternal(projectId);
     return { success: true, status: 'generating' };
   }

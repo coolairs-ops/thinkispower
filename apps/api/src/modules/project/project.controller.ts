@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ProjectService } from './project.service';
 import { DeliveryService } from '../delivery/delivery.service';
@@ -29,6 +29,12 @@ export class ProjectController {
   @Patch(':projectId')
   async update(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { name?: string; description?: string; appType?: string; structuredRequirement?: any }) {
     return this.projectService.update(req.user.id, projectId, body);
+  }
+
+  @Delete(':projectId')
+  async remove(@Req() req: any, @Param('projectId') projectId: string) {
+    await this.projectService.remove(req.user.id, projectId);
+    return { success: true };
   }
 
   @Post(':projectId/confirm-plan')

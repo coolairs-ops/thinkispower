@@ -9,6 +9,7 @@ import { CloudecodeClient } from '../integrations/cloudecode/cloudecode.client';
 import { HermesClient } from '../integrations/hermes/hermes.client';
 import { N8nClient } from '../integrations/n8n/n8n.client';
 import { MinioService } from '../integrations/minio/minio.service';
+import { DeploymentService } from '../modules/deployment/deployment.service';
 import { createZipBuffer } from '../common/utils/zip';
 import {
   EVENTS,
@@ -60,6 +61,7 @@ export class DeliveryOrchestrator {
     private hermes: HermesClient,
     private n8n: N8nClient,
     private minio: MinioService,
+    private deploymentService: DeploymentService,
   ) {}
 
   @OnEvent(EVENTS.DELIVERY_EXPORT_REQUESTED)
@@ -109,6 +111,14 @@ export class DeliveryOrchestrator {
           publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('demo_ready'),
         },
       });
+
+      // 5.5 自动部署到在线访问
+      try {
+        const deployResult = await this.deploymentService.deploy(projectId, buildId);
+        this.logger.log(`[部署] 项目 ${projectId} 已上线: ${deployResult.productionUrl}`);
+      } catch (deployErr) {
+        this.logger.warn(`[部署] 项目 ${projectId} 部署失败(不阻断交付): ${deployErr}`);
+      }
 
       // 6. 发出完成事件 — 正向通道完成
       const completedPayload: DeliveryExportCompletedPayload = { projectId, buildId, exportType, artifactUrl };

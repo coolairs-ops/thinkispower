@@ -130,4 +130,11 @@ export class ProjectService {
       hasPlan: !!planSummary,
     };
   }
+
+  async remove(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('项目不存在');
+    if (project.userId !== userId) throw new ForbiddenException('无权操作');
+    await this.prisma.project.delete({ where: { id: projectId } });
+  }
 }

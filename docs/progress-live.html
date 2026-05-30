@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Think-is-power · 进度看板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem;max-width:1000px;margin:auto}
+h1{font-size:1.6rem;background:linear-gradient(135deg,#38bdf8,#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:.5rem}
+.sub{color:#94a3b8;margin-bottom:2rem;font-size:.85rem}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:1.25rem}
+.card.full{grid-column:1/-1}
+.card h2{font-size:1rem;margin-bottom:1rem;color:#38bdf8}
+.progress-bar{height:8px;background:#334155;border-radius:4px;overflow:hidden;margin:1rem 0}
+.progress-fill{height:100%;border-radius:4px;transition:width 1s}
+.stat-row{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.stat{flex:1;min-width:90px;text-align:center;padding:.75rem;background:rgba(255,255,255,.03);border-radius:8px}
+.stat .num{font-size:1.8rem;font-weight:700}
+.stat .label{font-size:.75rem;color:#94a3b8;margin-top:.2rem}
+.item{display:flex;align-items:flex-start;gap:.6rem;padding:.5rem 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:.85rem}
+.item:last-child{border:none}
+.dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+.tag{font-size:.7rem;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.08);color:#94a3b8;flex-shrink:0}
+.dot.green{background:#22c55e} .dot.yellow{background:#eab308} .dot.red{background:#ef4444} .dot.blue{background:#3b82f6}
+.table{width:100%;border-collapse:collapse;font-size:.82rem}
+.table th{color:#94a3b8;border-bottom:1px solid #334155;text-align:left;padding:.4rem}
+.table td{border-bottom:1px solid rgba(255,255,255,.04);padding:.4rem}
+@media(max-width:768px){.grid{grid-template-columns:1fr}body{padding:1rem}}
+</style>
+</head>
+<body>
+<h1>Think-is-power · 项目进度看板</h1>
+<p class="sub">2026-05-29 · 工程控制论驱动的软件交付平台</p>
+
+<div class="stat-row">
+<div class="stat"><div class="num" style="color:#22c55e">2</div><div class="label">项目总数</div></div>
+<div class="stat"><div class="num" style="color:#3b82f6">28K</div><div class="label">Demo HTML</div></div>
+<div class="stat"><div class="num" style="color:#eab308">4</div><div class="label">交付待完成</div></div>
+<div class="stat"><div class="num" style="color:#22c55e">✅</div><div class="label">已部署上线</div></div>
+</div>
+
+<div class="grid">
+
+<div class="card">
+<h2>📊 客户管理系统</h2>
+<div class="progress-bar"><div class="progress-fill" style="width:50%;background:#eab308"></div></div>
+<div class="item"><span class="dot green"></span> 需求澄清 ✅</div>
+<div class="item"><span class="dot green"></span> 方案生成 ✅</div>
+<div class="item"><span class="dot green"></span> Demo 预览 ✅ 28KB AI生成</div>
+<div class="item"><span class="dot green"></span> 批注功能 ✅ 细粒度点击</div>
+<div class="item"><span class="dot yellow"></span> 交付导出 <span class="tag">进行中</span></div>
+</div>
+
+<div class="card">
+<h2>📦 交付任务明细</h2>
+<div class="item"><span class="dot green"></span> 创建 Git 仓库 <span class="tag">已完成</span></div>
+<div class="item"><span class="dot green"></span> 编写部署配置 <span class="tag">已完成</span></div>
+<div class="item"><span class="dot blue"></span> 打包可部署包 <span class="tag">运行中</span></div>
+<div class="item"><span class="dot yellow"></span> 导出源代码 <span class="tag">等待</span></div>
+<div class="item"><span class="dot yellow"></span> 导出数据库Schema <span class="tag">等待</span></div>
+<div class="item"><span class="dot yellow"></span> 部署到测试环境 <span class="tag">等待</span></div>
+</div>
+
+<div class="card full">
+<h2>🔧 今日修复记录</h2>
+<table class="table">
+<tr><th>提交</th><th>内容</th></tr>
+<tr><td style="color:#38bdf8">033a57d</td><td>Demo 生成走 Hermes→Pipeline→Cloudecode + 批注细粒度 + Docker 部署</td></tr>
+<tr><td style="color:#38bdf8">e94ecc2</td><td>Demo N8N优先+Pipeline降级, Cloudecode首次生成</td></tr>
+<tr><td style="color:#38bdf8">3b79c6c</td><td>Demo 超时降级 45s 保底</td></tr>
+<tr><td style="color:#38bdf8">fe3a1a4</td><td>WSL Prisma 兼容 + delivery TS 修复</td></tr>
+<tr><td style="color:#38bdf8">7240307</td><td>Cloudecode 运行时 + Dockerfile + docker-compose 注册</td></tr>
+<tr><td style="color:#38bdf8">407771f</td><td>交付页状态细化 — 进度条+逐项状态+复制链接</td></tr>
+</table>
+</div>
+
+<div class="card full">
+<h2>🐱 系统架构状态</h2>
+<table class="table">
+<tr><th>服务</th><th>位置</th><th>状态</th></tr>
+<tr><td>API (NestJS)</td><td>Docker :3002</td><td style="color:#22c55e">✅ 运行中</td></tr>
+<tr><td>前端 (Next.js)</td><td>WSL :3003</td><td style="color:#22c55e">✅ 运行中</td></tr>
+<tr><td>PostgreSQL</td><td>Docker :5433</td><td style="color:#22c55e">✅ 运行中</td></tr>
+<tr><td>Redis</td><td>Docker</td><td style="color:#22c55e">✅ 运行中</td></tr>
+<tr><td>MinIO</td><td>Docker :9000</td><td style="color:#22c55e">✅ 运行中</td></tr>
+<tr><td>N8N</td><td>Docker :5678</td><td style="color:#eab308">⚠ 工作流未激活</td></tr>
+<tr><td>DeepSeek</td><td>api.deepseek.com</td><td style="color:#22c55e">✅ deepseek-chat</td></tr>
+</table>
+</div>
+
+</div>
+</body>
+</html>

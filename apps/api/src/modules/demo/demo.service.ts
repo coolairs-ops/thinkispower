@@ -1,10 +1,8 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
-import { N8nClient } from '../../integrations/n8n/n8n.client';
-import { EVENTS, TasksCreatedPayload } from '../../events/event-types';
+import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 
 @Injectable()
 export class DemoService {
@@ -14,8 +12,7 @@ export class DemoService {
     private prisma: PrismaService,
     private statusMapper: StatusMapperService,
     private demoSnapshotService: DemoSnapshotService,
-    private n8n: N8nClient,
-    private eventEmitter: EventEmitter2,
+    private cloudecode: CloudecodeClient,
   ) {}
 
   async getDemo(userId: string, projectId: string) {
@@ -42,6 +39,15 @@ export class DemoService {
     return this.doGenerate(p);
   }
 
+  /** N8N 回调：保存已生成的 Demo HTML */
+  async saveDemoHtml(projectId: string, html: string) {
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { demoHtml: html, demoUrl: `/demo/${projectId}`, status: 'demo_ready', publicStatusLabel: '预览已生成' },
+    });
+    this.logger.log(`Demo HTML saved for ${projectId}: ${html.length} bytes`);
+  }
+
   private async doGenerate(p: { id: string; status: string; planSummary: any }) {
     const allowed = ['prd_ready', 'plan_ready', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback'];
     if (!allowed.includes(p.status)) throw new BadRequestException('当前状态不允许');
@@ -54,14 +60,34 @@ export class DemoService {
 
   private async generateAsync(projectId: string, planSummary: any) {
     try {
-      // N8N 优先
-      const n8nOk = await this.n8n.triggerDemoGenerateWorkflow(projectId);
-      if (n8nOk.success) { this.logger.log(`N8N触发(${projectId})`); return; }
+      // Demo 生成直调 Cloudecode（快，27s），交付走 CC Bridge（全栈）
+      const result = await this.cloudecode.generateDemoHtmlDirect(projectId, planSummary);
+      if (!result.success) {
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: { status: 'demo_failed', publicStatusLabel: '预览生成失败' },
+        });
+      }
+    } catch (err) {
+      this.logger.error(`Demo失败(${projectId}):`, err);
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'demo_failed', publicStatusLabel: '预览生成失败' },
+      });
+    }
+  }
 
-      // Pipeline 降级
-      this.logger.warn(`N8N不可用,Pipeline(${projectId})`);
-      await this.prisma.task.create({ data: { projectId, type: 'frontend', title: 'Demo预览', description: `生成Demo HTML。\n${planSummary.summary||''}\n页面:${(planSummary.pages||[]).join('、')}`, priority: 100, status: 'pending', inputPayload: { planSummary, source: 'demo_generate' } } });
-      this.eventEmitter.emit(EVENTS.TASKS_CREATED, { projectId, taskIds: [] } as TasksCreatedPayload);
-    } catch (err) { this.logger.error(`异常(${projectId}):`, err); }
+  /** 从 Claude Code 输出中提取 HTML */
+  private extractHtmlFromClaude(text: string): string {
+    // 尝试提取 ```html 代码块
+    const match = text.match(/```html\s*([\s\S]*?)\s*```/);
+    if (match) return match[1].trim();
+    // 尝试提取 ``` 代码块
+    const match2 = text.match(/```\s*([\s\S]*?)\s*```/);
+    if (match2) return match2[1].trim();
+    // 检查是否直接是 HTML
+    if (/<!DOCTYPE|<html/i.test(text)) return text.trim();
+    // 返回原文
+    return text.trim();
   }
 }

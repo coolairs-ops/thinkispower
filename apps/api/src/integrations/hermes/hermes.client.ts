@@ -6,27 +6,31 @@ import { DeepseekService } from '../../services/deepseek.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { EVENTS } from '../../events/event-types';
 
-const DELIVERY_DECOMPOSITION_PROMPT = `你是一个软件项目技术负责人（总工），负责项目的交付评估和任务分解。
+const DELIVERY_DECOMPOSITION_PROMPT = `你是软件项目交付评估专家。用户给了你一个项目的 Demo HTML 和计划，你需要逐项分析并给出详细可操作的修复建议。
 
-你需要：
-1. 分析项目的完整性 — 评估 Demo 对原始需求的覆盖程度
-2. 识别风险点 — 哪些功能还不完整、不够健壮或有潜在问题
-3. 生成交付任务清单 — 确保项目可以顺利交付
+严格要求：
+1. 必须逐页逐功能检查 Demo HTML，找出每个缺失/不完整的功能
+2. 不少于 5 条风险项（能多则多）
+3. 每条风险必须对应 Demo 中具体的位置/功能
+4. 绝对不能返回"AI分析失败"——直接分析 HTML 内容
 
-请用 JSON 格式输出，严格遵循以下结构（不要 markdown 包裹，纯 JSON）：
+JSON 结构：
 {
-  "completeness": 0-100之间的整数（评估完成度百分比），
-  "risks": [{"severity": "high|medium|low", "description": "风险描述"}],
-  "recommendations": ["建议1", "建议2"],
-  "tasks": [
-    {
-      "type": "deploy|export_source|export_package|export_repository|export_database_schema|export_deployment_config",
-      "title": "任务标题",
-      "description": "任务详细描述",
-      "moduleKey": "对应的模块key（如适用）",
-      "priority": 100
-    }
-  ]
+  "completeness": 0-100,
+  "risks": [{
+    "severity": "high|medium|low",
+    "description": "具体描述哪个页面/功能的什么问题",
+    "fixTitle": "修复方案标题（具体到添加什么功能）",
+    "fixDescription": "修复后对用户的价值",
+    "fixContent": "分步骤的具体实现方案"
+  }],
+  "recommendations": ["建议"],
+  "suggestions": [{
+    "id": "sug-1", "type": "module|feature|improvement",
+    "title": "建议标题", "description": "价值描述",
+    "content": "具体内容", "autoImport": true
+  }],
+  "tasks": [{"type":"deploy|export_source|...","title":"任务","priority":100}]
 }`;
 
 const TASK_DECOMPOSITION_PROMPT = `你是一个软件项目技术负责人（总工）。用户对 Demo 页面提出了修改意见。你需要：
@@ -67,6 +71,16 @@ export class HermesClient {
     private statusMapper: StatusMapperService,
   ) {}
 
+  /** 项目质量分析（用于 Demo 生成链路中的前期分析） */
+  async analyzeProject(projectId: string): Promise<{ summary: string }> {
+    this.logger.log(`Hermes analyzing project ${projectId}`);
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, name: true, status: true },
+    });
+    return { summary: project ? `项目「${project.name}」状态: ${project.status}` : '项目不存在' };
+  }
+
   async handleFeedback(feedbackId: string): Promise<string[]> {
     this.logger.log(`Hermes analyzing feedback ${feedbackId}`);
 
@@ -89,8 +103,8 @@ export class HermesClient {
       feedback.moduleKey ? `模块: ${feedback.moduleKey}` : '未指定',
       feedback.elementPath ? `元素路径: ${feedback.elementPath}` : '',
       ``,
-      `## 当前 Demo HTML 结构`,
-      project.demoHtml ? project.demoHtml.slice(0, 3000) : '（暂无 Demo）',
+      `## Demo HTML（前 8000 字符）`,
+            project.demoHtml ? project.demoHtml.slice(0, 8000) : '（暂无 Demo）',
     ].filter(Boolean).join('\n');
 
     const response = await this.deepseek.chat(
@@ -111,7 +125,7 @@ export class HermesClient {
           projectId: feedback.projectId,
           type: task.type,
           title: task.title,
-          description: task.description,
+          description: task.description || task.title,
           priority: task.priority ?? 100,
           inputPayload: { feedbackId, moduleKey: feedback.moduleKey || undefined, elementPath: feedback.elementPath || undefined },
         },
@@ -127,7 +141,67 @@ export class HermesClient {
       });
     }
 
+    // 发射事件通知 Pipeline 处理
+    if (taskIds.length > 0) {
+      this.eventEmitter.emit(EVENTS.TASKS_CREATED, {
+        projectId: feedback.projectId,
+        taskIds,
+        source: 'feedback',
+      } as any);
+      this.logger.log(`Emitted TASKS_CREATED for ${taskIds.length} feedback tasks`);
+    }
+
     return taskIds;
+  }
+
+  /** 静默分析 — 只分析不创建任务，供评估页使用 */
+  async analyzeSilent(projectId: string, demoHtml: string, planSummary: any, description: string | null) {
+    const userMessage = [
+      `## 项目描述`,
+      description || '（未提供）',
+      ``,
+      `## 项目计划`,
+      typeof planSummary === 'object' ? JSON.stringify(planSummary, null, 2) : (String(planSummary || '')),
+      ``,
+      `## Demo HTML（前 8000 字符）`,
+            demoHtml.slice(0, 8000),
+    ].join('\n');
+
+    try {
+      const response = await this.deepseek.chat(
+        [
+          { role: 'system', content: DELIVERY_DECOMPOSITION_PROMPT },
+          { role: 'user', content: userMessage },
+        ],
+        { temperature: 0.3, maxTokens: 4096, jsonOnly: true },
+      );
+
+      const result = this.parseDeliveryResponse(response);
+
+      // 如果解析出 fallback（说明 DeepSeek 返回了非评估内容），重试一次
+      if (result.risks.length <= 1 && result.risks[0]?.description?.includes('AI 分析失败')) {
+        this.logger.warn(`analyzeSilent got fallback, retrying...`);
+        const retryResponse = await this.deepseek.chat(
+          [
+            { role: 'system', content: DELIVERY_DECOMPOSITION_PROMPT },
+            { role: 'user', content: userMessage },
+          ],
+          { temperature: 0.5, maxTokens: 4096 },
+        );
+        return this.parseDeliveryResponse(retryResponse);
+      }
+
+      return result;
+    } catch (e) {
+      this.logger.error(`analyzeSilent failed: ${e}`);
+      return {
+        completeness: 0,
+        risks: [{ severity: 'high' as const, description: '评估服务暂时不可用，请稍后点击"重新评估"重试', fixTitle: '重试', fixDescription: '', fixContent: '' }],
+        recommendations: [],
+        suggestions: [],
+        tasks: [],
+      };
+    }
   }
 
   async handleDeliveryExport(projectId: string): Promise<{
@@ -156,8 +230,8 @@ export class HermesClient {
       `## 模块映射`,
       typeof project.moduleMap === 'object' ? JSON.stringify(project.moduleMap, null, 2) : (project.moduleMap || '（未提供）'),
       ``,
-      `## 当前 Demo HTML（前 5000 字符）`,
-      project.demoHtml ? project.demoHtml.slice(0, 5000) : '（暂无 Demo）',
+      `## Demo HTML（前 8000 字符）`,
+            project.demoHtml ? project.demoHtml.slice(0, 8000) : '（暂无 Demo）',
     ].join('\n');
 
     const response = await this.deepseek.chat(
@@ -179,7 +253,7 @@ export class HermesClient {
           projectId,
           type: task.type,
           title: task.title,
-          description: task.description,
+          description: task.description || task.title,
           priority: task.priority ?? 100,
           inputPayload: { moduleKey: task.moduleKey || undefined, source: 'delivery-export' },
         },
@@ -211,12 +285,14 @@ export class HermesClient {
     completeness: number;
     risks: Array<{ severity: string; description: string }>;
     recommendations: string[];
+    suggestions: Array<{ id: string; type: string; title: string; description: string; content: string; autoImport: boolean }>;
     tasks: Array<{ type: string; title: string; description: string; moduleKey?: string; priority?: number }>;
   } {
     const fallback = {
       completeness: 50,
       risks: [{ severity: 'medium' as const, description: 'AI 分析失败，请人工检查项目完整性' }],
       recommendations: ['人工检查交付物'],
+      suggestions: [],
       tasks: [{
         type: 'deploy' as const,
         title: '最终部署',
@@ -233,10 +309,25 @@ export class HermesClient {
         completeness: typeof parsed.completeness === 'number' ? Math.max(0, Math.min(100, parsed.completeness)) : fallback.completeness,
         risks: Array.isArray(parsed.risks) ? parsed.risks : fallback.risks,
         recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : fallback.recommendations,
+        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
         tasks: Array.isArray(parsed.tasks) ? parsed.tasks : fallback.tasks,
       };
-    } catch {
-      this.logger.error('Failed to parse delivery decomposition response, using fallback');
+    } catch (e) {
+      // 尝试从响应中提取 JSON 片段
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            completeness: typeof parsed.completeness === 'number' ? Math.max(0, Math.min(100, parsed.completeness)) : fallback.completeness,
+            risks: Array.isArray(parsed.risks) ? parsed.risks : fallback.risks,
+            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : fallback.recommendations,
+            suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+            tasks: Array.isArray(parsed.tasks) ? parsed.tasks : fallback.tasks,
+          };
+        } catch {}
+      }
+      this.logger.error(`Failed to parse delivery decomposition, response[${response.length}]: ${response.substring(0, 200)}`);
       return fallback;
     }
   }

@@ -9,6 +9,7 @@ import { CloudecodeClient } from '../integrations/cloudecode/cloudecode.client';
 import { HermesClient } from '../integrations/hermes/hermes.client';
 import { N8nClient } from '../integrations/n8n/n8n.client';
 import { MinioService } from '../integrations/minio/minio.service';
+import { DeploymentService } from '../modules/deployment/deployment.service';
 import { EVENTS } from '../events/event-types';
 
 jest.mock('../common/utils/zip', () => ({
@@ -47,6 +48,7 @@ describe('DeliveryOrchestrator', () => {
     triggerDeliveryExportWorkflow: jest.fn().mockResolvedValue({ success: true, runId: 'run-1' }),
   };
   const mockMinio = {};
+  const mockDeploymentService = {};
 
   const basePayload = {
     projectId: 'project-1',
@@ -69,6 +71,7 @@ describe('DeliveryOrchestrator', () => {
         { provide: HermesClient, useValue: mockHermes },
         { provide: N8nClient, useValue: mockN8n },
         { provide: MinioService, useValue: mockMinio },
+        { provide: DeploymentService, useValue: mockDeploymentService },
       ],
     }).compile();
 

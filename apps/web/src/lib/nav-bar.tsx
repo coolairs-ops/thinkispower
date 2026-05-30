@@ -40,10 +40,16 @@ export default function NavBar({ projectId, projectName }: NavBarProps) {
               版本
             </Link>
             <Link
+              href={`/projects/${projectId}/evaluation`}
+              className="text-sm text-gray-600 hover:text-blue-600 transition-colors"
+            >
+              项目评估
+            </Link>
+            <Link
               href={`/projects/${projectId}/delivery`}
               className="text-sm text-gray-600 hover:text-blue-600 transition-colors"
             >
-              交付
+              终稿交付
             </Link>
           </>
         )}

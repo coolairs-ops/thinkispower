@@ -18,7 +18,22 @@ export default function DashboardPage() {
   const router = useRouter();
   const { token, isLoading } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const handleDelete = async (e: React.MouseEvent, projectId: string, projectName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`确定删除项目"${projectName}"？此操作不可撤销。`)) return;
+    setDeleting(projectId);
+    try {
+      await api.delete(`/api/projects/${projectId}`);
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+    } catch {
+      alert('删除失败');
+    }
+    setDeleting(null);
+  };
 
   useEffect(() => {
     if (isLoading) return;
@@ -64,12 +79,20 @@ export default function DashboardPage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (
-              <Link
+              <div
                 key={project.id}
-                href={`/projects/${project.id}`}
-                className="rounded-xl border bg-white p-5 hover:shadow-md transition-shadow"
+                onClick={() => router.push(`/projects/${project.id}`)}
+                className="relative rounded-xl border bg-white p-5 hover:shadow-md transition-shadow cursor-pointer group"
               >
-                <h3 className="mb-2 font-medium text-gray-900">{project.name}</h3>
+                <button
+                  onClick={(e) => handleDelete(e, project.id, project.name)}
+                  disabled={deleting === project.id}
+                  className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                  title="删除项目"
+                >
+                  {deleting === project.id ? '...' : '×'}
+                </button>
+                <h3 className="mb-2 font-medium text-gray-900 pr-6">{project.name}</h3>
                 {project.appType && (
                   <span className="mb-2 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
                     {project.appType}
@@ -79,7 +102,7 @@ export default function DashboardPage() {
                 <p className="mt-2 text-xs text-gray-400">
                   {new Date(project.createdAt).toLocaleDateString('zh-CN')}
                 </p>
-              </Link>
+              </div>
             ))}
           </div>
         )}

@@ -1,22 +1,64 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { DeepseekService } from './deepseek.service';
+import * as https from 'node:https';
+
+jest.mock('node:https', () => ({
+  request: jest.fn(),
+}));
 
 describe('DeepseekService', () => {
   let service: DeepseekService;
-  let originalFetch: typeof global.fetch;
+  let mockReq: any;
 
   const mockConfigService = {
     get: jest.fn(),
   };
 
-  beforeAll(() => {
-    originalFetch = global.fetch;
-  });
+  /** Configure https.request to return a mock response with given statusCode and body */
+  function mockHttpsSuccess(body: any) {
+    const res = {
+      on: jest.fn((event: string, cb: Function) => {
+        if (event === 'data') cb(Buffer.from(JSON.stringify(body)));
+        if (event === 'end') cb();
+      }),
+      statusCode: 200,
+    };
+    mockReq = { on: jest.fn(), write: jest.fn(), end: jest.fn(), destroy: jest.fn() };
+    (https.request as jest.Mock).mockImplementation((_opts: any, callback: (r: any) => void) => {
+      callback(res);
+      return mockReq;
+    });
+  }
 
-  afterAll(() => {
-    global.fetch = originalFetch;
-  });
+  function mockHttpsErrorStatus(statusCode: number) {
+    const res = {
+      on: jest.fn((event: string, cb: Function) => {
+        if (event === 'end') cb();
+      }),
+      statusCode,
+    };
+    mockReq = { on: jest.fn(), write: jest.fn(), end: jest.fn(), destroy: jest.fn() };
+    (https.request as jest.Mock).mockImplementation((_opts: any, callback: (r: any) => void) => {
+      callback(res);
+      return mockReq;
+    });
+  }
+
+  function mockHttpsNetworkError() {
+    let errorCb: Function | undefined;
+    mockReq = {
+      on: jest.fn((event: string, cb: Function) => {
+        if (event === 'error') errorCb = cb;
+      }),
+      write: jest.fn(),
+      end: jest.fn().mockImplementation(() => {
+        if (errorCb) errorCb(new Error('Network error'));
+      }),
+      destroy: jest.fn(),
+    };
+    (https.request as jest.Mock).mockReturnValue(mockReq);
+  }
 
   afterEach(() => {
     jest.clearAllMocks();
@@ -111,58 +153,43 @@ describe('DeepseekService', () => {
     });
 
     it('should call DeepSeek API and return response content', async () => {
-      const mockResponse = {
-        ok: true,
-        json: jest.fn().mockResolvedValue({
-          choices: [{ message: { content: '你好，有什么可以帮助你的？' } }],
-        }),
-      };
-      global.fetch = jest.fn().mockResolvedValue(mockResponse);
+      mockHttpsSuccess({ choices: [{ message: { content: '你好，有什么可以帮助你的？' } }] });
 
       const result = await service.chat([
         { role: 'user', content: '你好' },
       ]);
 
       expect(result).toBe('你好，有什么可以帮助你的？');
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.deepseek.com/v1/chat/completions',
+      expect(https.request).toHaveBeenCalledWith(
         expect.objectContaining({
+          hostname: 'api.deepseek.com',
           method: 'POST',
           headers: expect.objectContaining({
             Authorization: 'Bearer sk-test-key-12345',
           }),
         }),
+        expect.any(Function),
       );
     });
 
     it('should use custom model and temperature options', async () => {
-      const mockResponse = {
-        ok: true,
-        json: jest.fn().mockResolvedValue({
-          choices: [{ message: { content: 'ok' } }],
-        }),
-      };
-      global.fetch = jest.fn().mockResolvedValue(mockResponse);
+      mockHttpsSuccess({ choices: [{ message: { content: 'ok' } }] });
 
       await service.chat(
         [{ role: 'user', content: 'hi' }],
         { temperature: 0.1, maxTokens: 512, model: 'deepseek-coder' },
       );
 
-      const callArg = (global.fetch as jest.Mock).mock.calls[0][1];
-      const body = JSON.parse(callArg.body);
+      expect(mockReq.write).toHaveBeenCalled();
+      const written = mockReq.write.mock.calls[0][0];
+      const body = JSON.parse(written);
       expect(body.temperature).toBe(0.1);
       expect(body.max_tokens).toBe(512);
       expect(body.model).toBe('deepseek-coder');
     });
 
     it('should fallback when API returns non-ok status', async () => {
-      const mockResponse = {
-        ok: false,
-        status: 429,
-        text: jest.fn().mockResolvedValue('Rate limit exceeded'),
-      };
-      global.fetch = jest.fn().mockResolvedValue(mockResponse);
+      mockHttpsErrorStatus(429);
 
       const result = await service.chat([
         { role: 'user', content: '你好' },
@@ -173,7 +200,7 @@ describe('DeepseekService', () => {
     });
 
     it('should fallback when API throws', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+      mockHttpsNetworkError();
 
       const result = await service.chat([
         { role: 'user', content: '你好' },

@@ -13,6 +13,7 @@ export interface DeepseekOptions {
   temperature?: number;
   maxTokens?: number;
   model?: string;
+  jsonOnly?: boolean;
 }
 
 @Injectable()
@@ -42,6 +43,7 @@ export class DeepseekService {
           messages,
           temperature: options?.temperature ?? 0.7,
           max_tokens: options?.maxTokens ?? 2048,
+          ...(options?.jsonOnly ? { response_format: { type: 'json_object' } } : {}),
         },
         60_000,
       );
@@ -70,8 +72,10 @@ export class DeepseekService {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Length': Buffer.byteLength(data),
+          'Connection': 'keep-alive',
         },
         timeout: timeoutMs,
+        agent: new https.Agent({ keepAlive: true, maxSockets: 5 }),
       };
 
       const req = mod.request(options, (res) => {

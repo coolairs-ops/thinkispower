@@ -174,10 +174,10 @@ export default function DemoPage() {
                 历史版本
               </a>
               <a
-                href={`/projects/${projectId}/delivery`}
-                className="rounded-lg border border-green-300 px-4 py-1.5 text-sm text-green-700 hover:bg-green-50 transition-colors"
+                href={`/projects/${projectId}/evaluation`}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700 transition-colors"
               >
-                交付
+                项目评估
               </a>
             </>
           )}

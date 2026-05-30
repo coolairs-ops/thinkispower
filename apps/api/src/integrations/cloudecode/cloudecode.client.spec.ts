@@ -113,6 +113,7 @@ describe('CloudecodeClient', () => {
     it('should return failure when project has no demo HTML', async () => {
       const taskWithNoDemo = {
         ...mockTask,
+        type: 'backend',
         project: { id: 'project-1', demoHtml: null },
       };
       mockPrismaService.task.findUnique.mockResolvedValue(taskWithNoDemo);

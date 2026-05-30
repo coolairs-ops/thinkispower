@@ -1,20 +1,22 @@
 {
-  "name": "\u6279\u6ce8\u53cd\u9988\u5de5\u4f5c\u6d41",
+  "name": "批注反馈工作流",
   "nodes": [
     {
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "parameters": {
         "path": "feedback",
-        "responseMode": "lastNode"
+        "responseMode": "lastNode",
+        "httpMethod": "GET"
       },
       "position": [
         0,
         0
-      ]
+      ],
+      "typeVersion": 1
     },
     {
-      "name": "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf",
+      "name": "触发平台任务管线",
       "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
@@ -36,10 +38,11 @@
       "position": [
         250,
         0
-      ]
+      ],
+      "typeVersion": 4.2
     },
     {
-      "name": "\u8fd4\u56de\u7ed3\u679c",
+      "name": "返回结果",
       "type": "n8n-nodes-base.respondToWebhook",
       "parameters": {
         "respondWith": "json",
@@ -48,7 +51,8 @@
       "position": [
         500,
         0
-      ]
+      ],
+      "typeVersion": 1
     }
   ],
   "connections": {
@@ -56,23 +60,24 @@
       "main": [
         [
           {
-            "node": "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf",
+            "node": "触发平台任务管线",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "\u89e6\u53d1\u5e73\u53f0\u4efb\u52a1\u7ba1\u7ebf": {
+    "触发平台任务管线": {
       "main": [
         [
           {
-            "node": "\u8fd4\u56de\u7ed3\u679c",
+            "node": "返回结果",
             "type": "main",
             "index": 0
           }
         ]
       ]
     }
-  }
+  },
+  "active": true
 }

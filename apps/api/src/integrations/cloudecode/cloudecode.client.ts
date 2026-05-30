@@ -121,8 +121,46 @@ export class CloudecodeClient {
   }
 
   /**
-   * 首次 Demo 生成 — 从 plan 信息生成完整 HTML。
+   * 首次 Demo 生成 — 从 plan 信息生成完整 HTML（无需 Task，供 DemoService 直调）。
    */
+  async generateDemoHtmlDirect(projectId: string, planSummary: any): Promise<{
+    success: boolean;
+    summary?: string;
+    rawError?: string;
+  }> {
+    this.logger.log(`Cloudecode directly generating demo HTML for project ${projectId}`);
+
+    const pages = Array.isArray(planSummary.pages) ? planSummary.pages : ['首页', '列表页'];
+    const features = Array.isArray(planSummary.features) ? planSummary.features : [];
+    const name = planSummary.summary || '应用';
+
+    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p: string) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f: string) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
+
+    const response = await this.deepseek.chat(
+      [
+        { role: 'system', content: HTML_MODIFICATION_PROMPT },
+        { role: 'user', content: prompt },
+      ],
+      { temperature: 0.3, maxTokens: 8192 },
+    );
+
+    const html = this.extractHtml(response);
+    if (!html) {
+      return { success: false, rawError: 'Failed to extract HTML from DeepSeek response' };
+    }
+
+    const finalHtml = this.injectAnnotationSupport(html);
+
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { demoHtml: finalHtml, demoUrl: `/demo/${projectId}`, status: 'demo_ready', publicStatusLabel: '预览已生成' },
+    });
+
+    this.logger.log(`Demo HTML direct generated for project ${projectId}: ${finalHtml.length} bytes`);
+    return { success: true, summary: 'Demo HTML generated' };
+  }
+
+  /** @deprecated 保留兼容 Pipeline（通过 executeTask 首次生成），新链路请用 generateDemoHtmlDirect */
   private async generateDemoHtml(task: any, project: any): Promise<{
     success: boolean;
     summary?: string;
@@ -503,5 +541,73 @@ check();
     }
 
     return null;
+  }
+
+  /** 直接修改 Demo HTML — 绕过 Pipeline，供评估页调用 */
+  async executeTaskForProject(projectId: string, fixDescription: string): Promise<{ success: boolean }> {
+    try {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: { demoHtml: true },
+      });
+      if (!project?.demoHtml) return { success: false };
+
+      const prompt = `修改以下HTML Demo：\n\n修改需求：${fixDescription}\n\n只修改相关部分，保持其他内容不变。输出完整的修改后HTML。\n\n原始HTML：\n${project.demoHtml.slice(0, 20000)}`;
+
+      const response = await this.deepseek.chat(
+        [{ role: 'user', content: prompt }],
+        { temperature: 0.3, maxTokens: 16384 }
+      );
+
+      const newHtml = this.extractHtml(response);
+      if (!newHtml) return { success: false };
+
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { demoHtml: newHtml, status: 'demo_ready' },
+      });
+
+      this.logger.log(`Demo修改完成(${projectId}): ${project.demoHtml.length}→${newHtml.length} bytes`);
+      return { success: true };
+    } catch (e) {
+      this.logger.error(`Demo修改失败: ${e}`);
+      return { success: false };
+    }
+  }
+
+  /** 全栈交付 — 生成完整可运行项目代码 */
+  async deliverFullstack(projectId: string, opts: { projectName: string; planSummary: any; demoHtml: string }) {
+    const prompt = `为项目"${opts.projectName}"生成完整的全栈可运行代码。
+
+计划：${JSON.stringify(opts.planSummary || {}).substring(0, 1500)}
+Demo HTML：${opts.demoHtml.substring(0, 1500)}
+
+必须输出以下文件内容，用 \`\`\`文件路径 标记每个文件：
+
+1. database/schema.sql — PostgreSQL 建表语句
+2. backend/src/index.ts — Express API 入口
+3. backend/src/routes/ — 所有 API 路由
+4. backend/package.json — 依赖配置
+5. frontend/index.html — 从 Demo 改进的前端
+6. docker-compose.yml — 完整部署配置
+7. README.md — 使用说明
+
+每个文件必须是完整可运行代码。`;
+
+    const response = await this.deepseek.chat(
+      [{ role: 'user', content: prompt }],
+      { temperature: 0.3, maxTokens: 16384 },
+    );
+
+    // 解析生成的文件
+    const filePattern = /\`\`\`(\S+)\n([\s\S]*?)\`\`\`/g;
+    const files: Array<{ path: string; content: string }> = [];
+    let match;
+    while ((match = filePattern.exec(response)) !== null) {
+      files.push({ path: match[1], content: match[2].trim() });
+    }
+
+    this.logger.log(`全栈交付(${projectId}): ${files.length} 个文件`);
+    return { files, success: files.length > 0 };
   }
 }
