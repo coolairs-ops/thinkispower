@@ -6,6 +6,8 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import { useToast } from '@/lib/toast';
 import NavBar from '@/lib/nav-bar';
+import FileTreeView, { FileTreeFile } from '@/components/file-tree-view';
+import PhaseTreeView, { PhaseState } from '@/components/phase-tree-view';
 
 // ─── Types ───
 
@@ -73,6 +75,15 @@ export default function DeliveryPage() {
   const [deliveryTimer, setDeliveryTimer] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
 
+  const [treeView, setTreeView] = useState<'file' | 'phase'>('file');
+  const [genFiles, setGenFiles] = useState<FileTreeFile[]>([]);
+  const [phaseStates, setPhaseStates] = useState<PhaseState[]>([
+    { id: 'gen', label: '代码生成', status: 'pending', color: '#22c55e' },
+    { id: 'check', label: '质量检查', status: 'pending', color: '#f97316' },
+    { id: 'test', label: '测试验证', status: 'pending', color: '#ec4899' },
+    { id: 'deploy', label: '部署上线', status: 'pending', color: '#14b8a6' },
+  ]);
+
   const deliveryRef = useRef(delivery);
   deliveryRef.current = delivery;
 
@@ -113,8 +124,17 @@ export default function DeliveryPage() {
           setLoading(false);
           setError(null);
           syncExportStatesFromDelivery(d);
+          // 重置进度面板（避免上次会话残留）
+          setShowProgress(false);
+          setDeliveryStatus('');
           if (d.status === 'completed') {
             fetchReviewAndRecs();
+            setPhaseStates([
+              { id: 'gen', label: '代码生成', status: 'done', color: '#22c55e' },
+              { id: 'check', label: '质量检查', status: 'done', color: '#f97316' },
+              { id: 'test', label: '测试验证', status: 'done', color: '#ec4899' },
+              { id: 'deploy', label: '部署上线', status: 'done', color: '#14b8a6' },
+            ]);
           }
         })
         .catch((err) => {
@@ -159,11 +179,18 @@ export default function DeliveryPage() {
     if (starting) return;
     setStarting(true); setError(null);
     setProgressLines([]); setShowProgress(true); setDeliveryStatus('🔄 启动中...'); setDeliveryTimer(0);
+    setGenFiles([]);
+    setPhaseStates([
+      { id: 'gen', label: '代码生成', status: 'pending', color: '#22c55e' },
+      { id: 'check', label: '质量检查', status: 'pending', color: '#f97316' },
+      { id: 'test', label: '测试验证', status: 'pending', color: '#ec4899' },
+      { id: 'deploy', label: '部署上线', status: 'pending', color: '#14b8a6' },
+    ]);
     const startTime = Date.now();
     const timer = setInterval(() => setDeliveryTimer(Math.floor((Date.now()-startTime)/1000)), 1000);
     try {
       const proj = await api.get(`/api/projects/${projectId}`);
-      const r = await api.post(`/api/projects/${projectId}/delivery/production-deliver`, {
+      const r = await api.post(`/api/projects/${projectId}/delivery/deliver`, {
         projectName, planSummary: proj.planSummary, demoHtml: proj.demoHtml, structuredRequirement: proj.structuredRequirement,
       });
       if (r.deliveryId) {
@@ -174,12 +201,44 @@ export default function DeliveryPage() {
           switch(d.step) {
             case 'info': l = `ℹ ${d.text}`; break;
             case 'step': l = `[${d.name}] ${d.text}`; setDeliveryStatus(`🔄 ${d.name}`); break;
-            case 'gen': l = `  ✦ ${d.file} ${d.text}`; break;
-            case 'check': l = `  ${d.text.includes('✅')?'✅':'❌'} ${d.name}: ${d.text}`; break;
-            case 'test': l = `  ${d.text.includes('✅')?'✅':'❌'} ${d.file}`; break;
-            case 'deploy': l = `🚀 ${d.text}`; setDeliveryStatus('🚀 部署'); break;
-            case 'done': setDeliveryStatus('✅ 已上线'); setDelivery((p:any)=>({...p,status:'completed',productionUrl:d.productionUrl})); es.close(); clearInterval(timer); break;
-            case 'error': setDeliveryStatus('❌ 失败'); es.close(); clearInterval(timer); break;
+            case 'gen':
+              setGenFiles(prev => [...prev, { path: d.file, status: 'done' }]);
+              setPhaseStates(prev => prev.map(p => p.id === 'gen' ? { ...p, status: 'active' } : p));
+              l = `  ✦ ${d.file} ${d.text}`;
+              break;
+            case 'check':
+              setPhaseStates(prev => prev.map(p =>
+                p.id === 'gen' ? { ...p, status: 'done' } :
+                p.id === 'check' ? { ...p, status: 'active' } : p
+              ));
+              l = `  ${d.text.includes('✅')?'✅':'❌'} ${d.name}: ${d.text}`;
+              break;
+            case 'test':
+              setPhaseStates(prev => prev.map(p =>
+                p.id === 'check' ? { ...p, status: 'done' } :
+                p.id === 'test' ? { ...p, status: 'active' } : p
+              ));
+              l = `  ${d.text.includes('✅')?'✅':'❌'} ${d.file}`;
+              break;
+            case 'deploy':
+              setPhaseStates(prev => prev.map(p =>
+                p.id === 'test' ? { ...p, status: 'done' } :
+                p.id === 'deploy' ? { ...p, status: 'active' } : p
+              ));
+              l = `🚀 ${d.text}`;
+              setDeliveryStatus('🚀 部署');
+              break;
+            case 'done':
+              setPhaseStates(prev => prev.map(p => p.status === 'active' ? { ...p, status: 'done' } : p));
+              setDeliveryStatus('✅ 已上线');
+              setDelivery((p:any)=>({...p,status:'completed',productionUrl:d.productionUrl}));
+              es.close(); clearInterval(timer);
+              break;
+            case 'error':
+              setPhaseStates(prev => prev.map(p => p.status === 'active' ? { ...p, status: 'failed' } : p));
+              setDeliveryStatus('❌ 失败');
+              es.close(); clearInterval(timer);
+              break;
           }
           if (l) setProgressLines((p: any) => [...p, l]);
         };
@@ -288,6 +347,36 @@ export default function DeliveryPage() {
       <div className="px-6 py-8">
         <div className="mx-auto max-w-3xl">
           <h1 className="mb-6 text-2xl font-bold text-gray-900">交付</h1>
+
+          {/* ─── 生成树面板 ─── */}
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xl">🌳</span>
+              <h2 className="text-base font-semibold text-gray-700">生成树</h2>
+              {!isDelivering && !isCompleted && (
+                <span className="text-xs text-gray-400 ml-2">— 启动交付后将在此展示实时进度</span>
+              )}
+            </div>
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
+            <div className="flex border-b border-gray-100">
+              <button onClick={() => setTreeView('file')}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors ${treeView === 'file' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                文件结构树
+              </button>
+              <button onClick={() => setTreeView('phase')}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors ${treeView === 'phase' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                阶段流程树
+              </button>
+            </div>
+            <div className="p-4 max-h-[320px] overflow-y-auto">
+              {treeView === 'file' ? (
+                <FileTreeView files={genFiles} />
+              ) : (
+                <PhaseTreeView phases={phaseStates} />
+              )}
+            </div>
+          </div>
+          </div>
 
           {/* ─── 交付进度 — 详细状态面板 ─── */}
           {isDelivering && (

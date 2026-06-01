@@ -14,7 +14,7 @@
         "path": "delivery-export",
         "responseMode": "lastNode",
         "options": {},
-        "httpMethod": "GET"
+        "httpMethod": "POST"
       }
     },
     {

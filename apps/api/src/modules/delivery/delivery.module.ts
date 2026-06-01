@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { DeliveryController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
+import { DeliveryEvaluationService } from './delivery-evaluation.service';
+import { DeliveryIterationService } from './delivery-iteration.service';
 import { HermesModule } from '../../integrations/hermes/hermes.module';
-import { N8nModule } from '../../integrations/n8n/n8n.module';
 import { CaseReviewModule } from '../case-review/case-review.module';
 import { ExperienceRecommendationModule } from '../experience-recommendation/experience-recommendation.module';
 import { DeploymentModule } from '../deployment/deployment.module';
@@ -11,10 +12,9 @@ import { DemoModule } from '../demo/demo.module';
 import { CloudecodeModule } from '../../integrations/cloudecode/cloudecode.module';
 
 @Module({
-  imports: [HermesModule, N8nModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule],
+  imports: [HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule],
   controllers: [DeliveryController],
-  providers: [DeliveryService, QualityGateService],
-  exports: [DeliveryService],
+  providers: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, QualityGateService],
+  exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService],
 })
 export class DeliveryModule {}
-

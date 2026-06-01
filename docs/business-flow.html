@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Think-is-power 业务流程图</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#f5f7fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:40px 20px}
+  .container{max-width:1400px;margin:0 auto}
+  h1{font-size:28px;color:#1a1a2e;margin-bottom:8px}
+  .subtitle{color:#64748b;font-size:15px;margin-bottom:32px}
+  .flow-section{margin-bottom:48px;background:#fff;border-radius:12px;padding:32px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .flow-section h2{font-size:20px;color:#1a1a2e;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+  .flow-section h2 .badge{font-size:12px;background:#e2e8f0;color:#475569;padding:2px 10px;border-radius:10px;font-weight:500}
+  .flow-section .desc{color:#64748b;font-size:14px;margin-bottom:16px;line-height:1.6}
+  .flow-section .desc strong{color:#334155}
+  .mermaid-wrap{overflow-x:auto;padding:8px 0}
+  .legend{display:flex;gap:24px;flex-wrap:wrap;margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0}
+  .legend-item{display:flex;align-items:center;gap:8px;font-size:13px;color:#475569}
+  .legend-item .dot{width:14px;height:14px;border-radius:4px;flex-shrink:0}
+  .state-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+  .state-table th,.state-table td{padding:8px 12px;text-align:left;border-bottom:1px solid #f1f5f9}
+  .state-table th{background:#f8fafc;color:#475569;font-weight:600;font-size:12px}
+  .state-table td:first-child{font-family:monospace;color:#1a1a2e;font-weight:500}
+  .state-table td:nth-child(2){color:#64748b}
+  .state-tag{padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500;white-space:nowrap}
+  .state-tag.user{background:#dbeafe;color:#1d4ed8}
+  .state-tag.auto{background:#fef3c7;color:#b45309}
+  .state-tag.done{background:#dcfce7;color:#15803d}
+  .state-tag.err{background:#fee2e2;color:#b91c1c}
+  .state-tag.pro{background:#ede9fe;color:#6d28d9}
+  .notes{margin-top:24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+  .note-card{background:#f8fafc;border-radius:8px;padding:16px;border:1px solid #e2e8f0}
+  .note-card h4{font-size:13px;color:#1e293b;margin-bottom:4px}
+  .note-card p{font-size:12px;color:#64748b;line-height:1.5}
+  @media(max-width:768px){.flow-section{padding:20px}}
+</style>
+<!-- mermaid -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'base',themeVariables:{
+  background:'#fff',primaryColor:'#3b82f6',primaryTextColor:'#1e293b',
+  primaryBorderColor:'#93c5fd',lineColor:'#94a3b8',secondaryColor:'#f1f5f9',
+  tertiaryColor:'#f8fafc',fontSize:'13px'
+}})</script>
+</head>
+<body>
+<div class="container">
+<h1>🧭 Think-is-power 完整业务流程图</h1>
+<p class="subtitle">AI驱动软件生成与交付平台 — 面向普通人的闭环软件生产系统</p>
+
+<!-- ═══════════ 流程 1：需求澄清 ═══════════ -->
+<div class="flow-section">
+  <h2>① 需求澄清 <span class="badge">Discovery Module</span></h2>
+  <p class="desc">
+    通过<strong>AI多轮自然对话</strong>探索用户真实需求。系统扮演产品经理角色，每轮只问<strong>一个</strong>关键问题，
+    覆盖 <strong>8 个维度</strong>（目标用户、痛点、场景、核心价值、产品形态、MVP范围、成功标准、参考约束）。
+    ≥7 维度完备或对话 ≥12 轮后自动输出结构化 PRD。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart TB
+    A0[用户注册/登录] --> A1[创建项目]
+    A1 --> A2[填写初始需求描述]
+    A2 --> A3{AI Discovery 引擎}
+
+    A3 -->|信息不足| A4{8维完备度评估}
+    A4 -->|＜7 维| A5[AI 追问一个关键问题]
+    A5 --> A6[用户回复补充]
+    A6 --> A3
+
+    A4 -->|≥7 维 或 ≥12轮| A7[生成结构化 PRD]
+    A7 --> A8[产品名称/背景/目标用户/痛点/场景/核心价值/形态/功能/页面/角色/数据对象]
+
+    A8 --> A9{"completeness ≥ 60?"}
+    A9 -->|是| A10[状态 → prd_ready]
+    A9 -->|否| A11[降级生成基础PRD]
+    A11 --> A10
+
+    style A3 fill:#dbeafe,stroke:#3b82f6
+    style A7 fill:#dcfce7,stroke:#22c55e
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 流程 2：方案设计 + 规格确认 ═══════════ -->
+<div class="flow-section">
+  <h2>② 方案设计 &amp; 规格确认 <span class="badge">Plan + Specification</span></h2>
+  <p class="desc">
+    基于 PRD 生成<strong>软件方案</strong>（页面清单、功能列表、角色权限、数据对象、估算工期/费用），
+    用户确认后进入<strong>规格确认</strong>阶段 — 生成包含完整数据模型、业务规则、验收场景、
+    成本/工期预测的结构化规格书，用户<strong>冻结规格</strong>后不可随意变更。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart TB
+    P0[prd_ready] --> P1[PlanGenerator 生成方案]
+    P1 --> P2[页面清单 / 功能列表 / 角色权限 / 数据对象 / 估算工期·费用 / 验收标准]
+    P2 --> P3[Design Advisor 生成设计建议<br/>风格·布局·组件]
+    P3 --> P4{用户确认方案?}
+    P4 -->|否| P5[用户手动修改方案]
+    P5 --> P4
+    P4 -->|是| P6[状态 → plan_ready / awaiting_plan_confirmation]
+
+    P6 --> S1[SpecService 生成规格草案]
+    S1 --> S2[目标用户 / 核心功能+优先级 / 范围界定 / 页面路由 / 角色+权限]
+    S2 --> S3[数据模型+字段 / 业务规则+触发 / 验收场景GWT / 成本+工期 / 风险]
+    S3 --> S4{用户确认规格?}
+    S4 -->|退回修改| S5[版本+1 / 记录变更日志 / 解冻]
+    S5 --> S2
+    S4 -->|冻结确认| S6[规格冻结 / 记录 frozenAt]
+    S6 --> S7[状态 → spec_confirmed]
+
+    S7 --> D0[触发 Demo 生成]
+    P6 -.->|跳过规格| D0
+
+    style P1 fill:#dbeafe,stroke:#3b82f6
+    style S6 fill:#dcfce7,stroke:#22c55e
+    style D0 fill:#fef3c7,stroke:#f59e0b
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 流程 3：Demo 生成 ═══════════ -->
+<div class="flow-section">
+  <h2>③ Demo 原型生成 <span class="badge">Demo + Cloudecode</span></h2>
+  <p class="desc">
+    生成可交互的<strong>单文件 SPA HTML</strong> 应用预览。支持<strong>主/备生成链路</strong>：
+    优先直调 DeepSeek（快速，~27s），失败时降级到 N8N 工作流或 Cloudecode 引擎。
+    产物包含多页面路由、角色模拟、CRUD 操作、批注标注属性。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart TB
+    G0[spec_confirmed / plan_ready] --> G1{生成链路选择}
+    G1 -->|主路径| G2[DeepSeek 直调 · 27s timeout]
+    G2 --> G6
+
+    G1 -->|备选| G3[Cloudecode Client]
+    G3 --> G6
+
+    G1 -->|N8N 编排| G4[N8N delivery-export 工作流]
+    G4 --> G5[回调 /api/n8n-webhook/execute-task]
+    G5 --> G6
+
+    G6[生成单文件 SPA HTML] --> G7{质量检测}
+    G7 --> G8[检查 data-module-key 批注标注]
+    G7 --> G9[检查 HTML 标准结构]
+    G7 --> G10[检查页面路由完整性]
+
+    G8 --> G11{通过?}
+    G9 --> G11
+    G10 --> G11
+    G11 -->|是| G12[状态 → demo_ready]
+    G11 -->|否| G13[状态 → demo_failed]
+    G13 -->|重试| G1
+
+    style G2 fill:#dbeafe,stroke:#3b82f6
+    style G12 fill:#dcfce7,stroke:#22c55e
+    style G13 fill:#fee2e2,stroke:#ef4444
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 流程 4：批注反馈闭环 ═══════════ -->
+<div class="flow-section">
+  <h2>④ 批注反馈闭环 <span class="badge">Feedback → Pipeline</span></h2>
+  <p class="desc">
+    用户在<strong>预览 Demo</strong> 中点选任一有 <code>data-module-key</code> 的元素弹出批注框，
+    提交意见后 AI <strong>自动判定</strong>是 Bug 还是变更请求，然后<strong>拆解为可执行任务</strong>，
+    经由 Pipeline / Cloudecode 执行修改，<strong>自动快照</strong>回滚点，最后更新 Demo。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart TB
+    F0[Demo Ready] --> F1[用户浏览 Demo SPA]
+    F1 --> F2[点击带 data-module-key 的元素]
+    F2 --> F3[iframe postMessage 通知父窗口]
+    F3 --> F4[弹出批注面板 + 高亮选中元素]
+
+    F4 --> F5[用户填写意见并提交]
+    F5 --> F6{AI 类型判定}
+
+    F6 -->|基于冻结规格比对| F7{isBugWithinSpec?}
+    F7 -->|是, 在验收场景/核心功能内| F8[标记为 bug]
+    F7 -->|否, 在 outOfScope 或含"新增"关键词| F9[标记为 change_request]
+
+    F8 --> F10[FeedbackService.create → 状态 new]
+    F9 --> F10
+    F10 --> F11[状态 → awaiting_demo_feedback]
+    F11 --> F12[Hermes.handleFeedback → AI 拆解任务]
+
+    F12 --> F13[生成 1-N 个 Task]
+    F13 --> F14[自动快照当前 DemoHtml → DemoSnapshot]
+    F14 --> F15{Tasks 执行引擎}
+
+    F15 -->|CC Bridge| F16[全栈交付流水线<br/>internal/cc-bridge]
+    F15 -->|Cloudecode| F17[Cloudecode 代码生成]
+    F15 -->|N8N| F18[N8N 工作流 + 回调]
+
+    F16 --> F19[修改 DemoHtml]
+    F17 --> F19
+    F18 --> F19
+
+    F19 --> F20[更新 Project.demoHtml]
+    F20 --> F21{所有任务完成?}
+    F21 -->|是| F22[FeedbackItem → resolved]
+    F22 --> F23[状态 → demo_ready]
+    F21 -->|否| F24[TaskFailed → processing]
+    F24 --> F12
+
+    F23 --> F1
+
+    style F2 fill:#dbeafe,stroke:#3b82f6
+    style F6 fill:#fef3c7,stroke:#f59e0b
+    style F12 fill:#ede9fe,stroke:#7c3aed
+    style F23 fill:#dcfce7,stroke:#22c55e
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 流程 5：自迭代质量评估 ═══════════ -->
+<div class="flow-section">
+  <h2>⑤ 自迭代质量评估 <span class="badge">L1/L2/L3 Sensors + Sensor Fusion</span></h2>
+  <p class="desc">
+    基于<strong>工程控制论</strong>的三级传感器融合评分系统，模拟自动控制系统的"测量-比较-执行"闭环。
+    <strong>L1</strong> 静态分析 (HTML结构/语法/质量门禁/标注覆盖率) →
+    <strong>L2</strong> 运行时检测 (截图对比/运行健康度) →
+    <strong>L3</strong> 语义评估 (Qwen交叉验证/需求追溯/反馈闭环)。
+    融合评分 ≥ 85 或连续 2 轮无提升时停止。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart TB
+    I0[Demo Ready] --> I1[开始自迭代循环]
+
+    I1 --> SENSE["🧬 传感器采集阶段"]
+
+    SENSE --> L1["L1 静态传感器"]
+    subgraph L1S["L1 — 静态分析"]
+        L1A[QualityGateService<br/>12项检查: 结构/安全/UX/代码/部署]
+        L1B[CompileValidator<br/>HTML 语法校验]
+        L1C[L1StaticSensor<br/>HTML结构/标注覆盖率]
+    end
+
+    SENSE --> L2["L2 运行时传感器"]
+    subgraph L2S["L2 — 运行时检测"]
+        L2A[ScreenshotComparator<br/>前后截图像素对比]
+        L2B[L2RuntimeSensor<br/>运行环境健康度]
+    end
+
+    SENSE --> L3["L3 语义传感器"]
+    subgraph L3S["L3 — 语义评估"]
+        L3A[CrossValidator<br/>Qwen 交叉验证需求实现度]
+        L3B[TraceabilityValidator<br/>需求追溯 — 从PRD到代码]
+        L3C[L3SemanticSensor<br/>反馈闭环状态/项目健康度]
+    end
+
+    L1 --> FUSE[🧠 SensorFusionService<br/>加权融合评分]
+    L2 --> FUSE
+    L3 --> FUSE
+
+    FUSE --> DECIDE{融合分 ≥ 85?}
+
+    DECIDE -->|是| DONE[✅ 达标退出]
+    DECIDE -->|否| FIXABLE{有可修复项?}
+
+    FIXABLE -->|否| STOP[⏹ 无修复项 → 退出]
+    FIXABLE -->|是, Top5| FIX[🔧 AI 自动修复<br/>Hermes 分析 → DeepSeek 修改]
+
+    FIX --> FIX_OK{修复有效?<br/>含 DOCTYPE + 长度≥500}
+    FIX_OK -->|是| UPDATE[更新 demoHtml + status]
+    FIX_OK -->|否| RETRY[修复失败计数+1]
+
+    UPDATE --> CHECK2{连续 2 轮无提升?}
+    CHECK2 -->|是| STOP2[⏹ 停止迭代]
+    CHECK2 -->|否| I1
+
+    RETRY -->|连续3次失败| HUMAN[🛑 需人工介入<br/>状态 → paused]
+    RETRY -->|＜3次| I1
+
+    style SENSE fill:#f0f9ff,stroke:#0284c7
+    style FUSE fill:#ede9fe,stroke:#7c3aed
+    style DONE fill:#dcfce7,stroke:#22c55e
+    style HUMAN fill:#fee2e2,stroke:#ef4444
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 流程 6：交付导出 ═══════════ -->
+<div class="flow-section">
+  <h2>⑥ 交付导出 <span class="badge">Delivery + CC Bridge</span></h2>
+  <p class="desc">
+    通过<strong>DeliveryOrchestrator</strong> 编排 3 种执行机构：<strong>代码生成</strong>（全栈项目：
+    index.html + Express API + DB Schema + Docker + Nginx + README）、
+    <strong>包导出</strong>（可下载 ZIP）、<strong>N8N 工作流</strong>（异步编排，webhook 回调完成）。
+    产物上传到 <strong>MinIO</strong>，构建成功触发<strong>自动部署</strong>到在线 URL。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart TB
+    E0[demo_ready / 用户点击确认交付] --> E1[Hermes 交付就绪分析<br/>认知分析 + AI 风险评估]
+
+    E1 --> E2[创建 Build 记录]
+    E2 --> E3[状态 → exporting]
+
+    E3 --> E4{交付类型选择}
+    E4 -->|source 源码| E5[Cloudecode.generateFullstackProject]
+    E4 -->|package 包| E6[全栈代码 + ZIP 打包]
+    E4 -->|deployment 部署配置| E7[Docker + Nginx + 企业模板]
+    E4 -->|repository 仓库| E8[N8N 工作流编排]
+    E4 -->|database 数据库| E8
+
+    subgraph FULLSTACK["全栈生成内容"]
+        FS1[index.html SPA 前端]
+        FS2[backend/package.json + Express API]
+        FS3[database/schema.sql]
+        FS4[docker-compose.yml + nginx.conf]
+        FS5[Dockerfile + .gitignore + README]
+    end
+
+    E5 --> FULLSTACK
+    E6 --> FULLSTACK
+    E7 --> FULLSTACK
+
+    FULLSTACK --> E9[上传产物到 MinIO S3]
+    E8 --> E9
+
+    E9 --> QG[质量门禁检查<br/>12项 > 得分]
+    QG --> DEPLOY{自动部署}
+
+    DEPLOY -->|成功| DEPLOY_OK[DeploymentService.deploy]
+    DEPLOY_OK --> ONLINE[生成 productionUrl]
+    DEPLOY -->|失败| WARN[记录警告, 不阻断]
+
+    ONLINE --> COMPLETE[状态 → completed]
+    E9 --> FAIL{构建状态}
+    FAIL -->|成功| BUILD_OK[Build → success]
+    FAIL -->|失败| BUILD_FAIL[Build → failed]
+    BUILD_FAIL --> RETRY_DEPLOY[重试导出]
+
+    COMPLETE --> REVIEW[触发案例复盘<br/>CaseReviewService.generateReview]
+    COMPLETE --> EXP[触发经验推荐<br/>ExperienceRecommendationService]
+
+    style E1 fill:#dbeafe,stroke:#3b82f6
+    style E5 fill:#ede9fe,stroke:#7c3aed
+    style COMPLETE fill:#dcfce7,stroke:#22c55e
+    style BUILD_FAIL fill:#fee2e2,stroke:#ef4444
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 流程 7：生产交付全栈链路 ═══════════ -->
+<div class="flow-section">
+  <h2>⑦ 生产交付（Enterprise）<span class="badge">Enterprise Plan</span></h2>
+  <p class="desc">
+    Enterprise 用户的<strong>终稿生产交付</strong>流程：Cloudecode 全栈生成 →
+    注入企业级模板（Helmet 安全中间件、O11y 可观测性、多阶段构建 Dockerfile、
+    Nginx 最佳实践配置）→ 部署上线 → 提供访问 URL。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart TB
+    ENT0[用户触发 productionDeliver] --> ENT1[CloudecodeClient.deliverFullstack]
+    ENT1 --> ENT2[生成完整项目文件列表]
+
+    ENT2 --> ENT3[🧩 injectEnterprisePack 企业模板注入]
+    ENT3 --> ENT4[注入 security.ts<br/>Helmet + CORS + RateLimit]
+    ENT3 --> ENT5[注入 observability.ts<br/>结构化日志 + Trace ID + Graceful Shutdown]
+    ENT3 --> ENT6[注入 Dockerfile.prod<br/>多阶段构建 + HEALTHCHECK]
+    ENT3 --> ENT7[增强 nginx.conf<br/>Gzip + API代理 + 健康端点]
+
+    ENT4 --> ENT8[DeploymentService.deploy]
+    ENT5 --> ENT8
+    ENT6 --> ENT8
+    ENT7 --> ENT8
+
+    ENT8 --> ENT9{部署成功?}
+    ENT9 -->|是| ENT10[状态 → completed]
+    ENT10 --> ENT11[记录 productionUrl]
+    ENT9 -->|否| ENT12[记录部署失败日志<br/>但不阻断交付完成]
+
+    style ENT3 fill:#fef3c7,stroke:#f59e0b
+    style ENT10 fill:#dcfce7,stroke:#22c55e
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 流程 8：全生命周期概览 ═══════════ -->
+<div class="flow-section">
+  <h2>⑧ 全生命周期状态流转 <span class="badge">Status Machine</span></h2>
+  <p class="desc">
+    平台定义了 <strong>27 个内部状态</strong>和严格的<strong>合法转换表</strong>，确保业务流程的
+    有序推进。以下为主流程的状态机（详细转换见 <code>status-mapper.service.ts</code>）。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+stateDiagram-v2
+    [*] --> needs_input: 创建项目
+    needs_input --> clarifying: AI开始对话
+    clarifying --> prd_ready: PRD生成完成
+    clarifying --> needs_input: 用户重新描述
+
+    prd_ready --> plan_ready: 方案生成
+    prd_ready --> clarifying: 需求变更重来
+
+    plan_ready --> spec_drafting: 生成规格
+    plan_ready --> demo_generating: 跳过规格直出Demo
+
+    spec_drafting --> spec_ready: 规格草案就绪
+    spec_ready --> spec_confirmed: 用户冻结确认
+    spec_confirmed --> demo_generating: 开始开发
+
+    demo_generating --> demo_ready: ✅ 生成成功
+    demo_generating --> demo_failed: ❌ 生成失败
+    demo_failed --> demo_generating: 重试生成
+
+    demo_ready --> awaiting_demo_feedback: 用户提交批注
+    awaiting_demo_feedback --> fixing: AI处理批注
+    fixing --> demo_ready: ✅ 修改完成
+
+    demo_ready --> exporting: 用户确认交付
+    exporting --> completed: ✅ 交付+部署完成
+    exporting --> build_failed: ❌ 构建失败
+    build_failed --> exporting: 重试构建
+
+    demo_ready --> developing: 全栈开发
+    developing --> testing: 自动测试
+    testing --> completed: ✅ 测试通过
+    testing --> fixing: 发现问题
+
+    exporting --> deploying: 自动部署
+    deploying --> completed: ✅ 部署完成
+
+    failed --> clarifying: 从失败恢复
+    paused --> plan_ready: 从暂停继续
+  </pre>
+  <div class="legend">
+    <div class="legend-item"><span class="dot" style="background:#22c55e"></span> 终态</div>
+    <div class="legend-item"><span class="dot" style="background:#3b82f6"></span> 用户交互</div>
+    <div class="legend-item"><span class="dot" style="background:#f59e0b"></span> 自动处理</div>
+    <div class="legend-item"><span class="dot" style="background:#ef4444"></span> 异常状态</div>
+  </div>
+</div>
+
+<!-- ═══════════ 架构角色映射 ═══════════ -->
+<div class="flow-section">
+  <h2>⑨ 工程控制论架构映射 <span class="badge">Cybernetics</span></h2>
+  <p class="desc">
+    平台设计遵循<strong>工程控制论</strong>闭环模型，以下为各组件在控制论中的角色映射及关系。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+flowchart LR
+    subgraph CTRL["🎮 控制器 (Controller)"]
+        C1[ProductDiscovery<br/>需求探索]
+        C2[ClarifyService<br/>对话澄清]
+        C3[PlanGenerator<br/>方案生成]
+        C4[HermesClient<br/>AI 分析引擎]
+    end
+
+    subgraph PLANT["🏭 被控对象 (Plant)"]
+        P1[Project<br/>项目实体]
+        P2[DemoHtml<br/>原型 HTML]
+        P3[Build<br/>构建产物]
+        P4[Deployment<br/>部署实例]
+    end
+
+    subgraph ACTUATOR["🔧 执行机构 (Actuator)"]
+        A1[CloudecodeClient<br/>代码生成引擎]
+        A2[CC Bridge<br/>全栈交付流水线]
+        A3[PipelineService<br/>任务管线]
+        A4[N8nClient<br/>工作流引擎]
+    end
+
+    subgraph SENSOR["📡 传感器 (Sensor)"]
+        S1[L1StaticSensor<br/>静态结构分析]
+        S2[L2RuntimeSensor<br/>运行时健康检查]
+        S3[L3SemanticSensor<br/>语义交叉验证]
+        S4[SensorFusionService<br/>融合评分]
+    end
+
+    subgraph FEEDBACK["🔁 反馈信道"]
+        F1[EventEmitter<br/>事件总线]
+        F2[SSE Stream<br/>实时进度推送]
+        F3[Webhook Callback<br/>N8N 回调]
+    end
+
+    CTRL -->|指令| ACTUATOR
+    ACTUATOR -->|修改| PLANT
+    PLANT -->|状态| SENSOR
+    SENSOR -->|评分| FEEDBACK
+    FEEDBACK -->|事件| CTRL
+
+    USER[👤 用户] -->|需求/反馈| CTRL
+    USER -->|批注| PLANT
+
+    style CTRL fill:#dbeafe,stroke:#3b82f6
+    style PLANT fill:#f0fdf4,stroke:#22c55e
+    style ACTUATOR fill:#fef3c7,stroke:#f59e0b
+    style SENSOR fill:#ede9fe,stroke:#7c3aed
+    style FEEDBACK fill:#fce7f3,stroke:#ec4899
+  </pre>
+</div>
+</div>
+
+<!-- ═══════════ 数据模型总览 ═══════════ -->
+<div class="flow-section">
+  <h2>⑩ 核心数据模型 <span class="badge">Prisma Schema</span></h2>
+  <p class="desc">
+    平台共 <strong>17 个数据模型</strong>，以下为核心模型及其业务关系。
+  </p>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+erDiagram
+    User ||--o{ Project : owns
+    Project ||--o{ ProjectMessage : has
+    Project ||--o{ Module : contains
+    Project ||--o{ Task : has
+    Project ||--o{ FeedbackItem : receives
+    Project ||--o{ Build : builds
+    Project ||--o{ Deployment : deploys
+    Project ||--o{ DemoSnapshot : versions
+    Project ||--o{ Specification : specifies
+    Project ||--o{ CaseReview : reviews
+    Project ||--o{ ExperienceRecommendation : learns
+    Project ||--o{ TestDeployment : test_deploys
+    Project ||--o{ DecisionLog : logs
+    Project ||--o{ ErrorEvent : errors
+
+    Module ||--o{ Task : requires
+    Module ||--o{ FeedbackItem : targets
+
+    Task ||--o{ DecisionLog : generates
+    Task ||--o{ ErrorEvent : produces
+    Task ||--o{ DemoSnapshot : triggers
+
+    Build ||--o{ Deployment : uses
+
+    ErrorPattern ||--o{ ErrorEvent : classifies
+    FeedbackItem ||--o| Task : resolves_with
+
+    Specification {
+        string status "draft | frozen"
+        json targetUsers "角色描述"
+        json coreFunctions "功能+优先级"
+        json acceptanceScenarios "GWT验收场景"
+        int estimatedCostRmb "成本预测"
+        int estimatedDays "工期预测"
+    }
+
+    Project {
+        string status "27个内部状态"
+        json structuredRequirement "PRD"
+        json planSummary "方案"
+        string demoHtml "原型HTML"
+        int specVersion "规格版本"
+    }
+
+    Task {
+        string type "frontend|backend|fix..."
+        string status "pending|running|completed|failed"
+        json inputPayload "输入"
+        json resultPayload "输出"
+    }
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 时间线概览 ═══════════ -->
+<div class="flow-section">
+  <h2>⑪ 用户旅程时间线 <span class="badge">User Journey</span></h2>
+  <div class="mermaid-wrap">
+  <pre class="mermaid">
+timeline
+    title Think-is-power 用户项目全旅程
+    需求阶段 : 创建项目
+             : AI 多轮对话澄清
+             : 输出 PRD 文档
+    设计阶段 : 生成软件方案
+             : AI 设计建议
+             : 用户确认方案
+    规格阶段 : 生成规格草案
+             : 确认冻结规格
+    Demo阶段 : AI 生成 SPA 原型
+             : 在线预览
+    反馈阶段 : 点击元素批注
+             : AI 拆解+执行
+             : Demo 自动更新
+    评估阶段 : L1/L2/L3传感器
+             : 自动修复优化
+             : 质量门禁检查
+    交付阶段 : 全栈代码生成
+             : 包导出 / 部署
+             : 案例复盘报告
+  </pre>
+  </div>
+</div>
+
+<!-- ═══════════ 核心机制说明 ═══════════ -->
+<div class="flow-section">
+  <h2>核心机制说明</h2>
+  <div class="notes">
+    <div class="note-card">
+      <h4>🔁 批注反馈闭环</h4>
+      <p>用户点选 Demo 中任意带 <code>data-module-key</code> 的元素 → 弹出批注框 → AI 自动判定 Bug/变更 → 拆解任务 → Pipeline 执行 → Demo 自动更新 → 可继续批注。每次修改前自动快照，支持回滚。</p>
+    </div>
+    <div class="note-card">
+      <h4>🧬 三级传感器融合</h4>
+      <p>L1 静态（HTML结构+语法+质量门禁+标注覆盖率）→ L2 运行时（截图像素对比+健康度）→ L3 语义（Qwen交叉验证+需求追溯+反馈闭环）。SensorFusion 加权综合评分。</p>
+    </div>
+    <div class="note-card">
+      <h4>🔧 多引擎生成链路</h4>
+      <p>Demo 生成优先级：DeepSeek 直调（快）→ Cloudecode → N8N 工作流。交付导出：CC Bridge 流水线 → Cloudecode → N8N。失败自动降级，不影响主流程。</p>
+    </div>
+    <div class="note-card">
+      <h4>📋 规格冻结机制</h4>
+      <p>规格冻结后创建的新反馈自动判定是 Bug（在验收场景/核心功能内）还是变更请求（在 outOfScope 或含"新增"关键词），防止范围蔓延。</p>
+    </div>
+    <div class="note-card">
+      <h4>🚦 全局迭代锁</h4>
+      <p>自迭代使用数据库全局锁 <code>SystemLock</code> 保证同一时间只有一个项目在迭代。30 分钟超时自动清除陈旧锁，避免死锁。</p>
+    </div>
+    <div class="note-card">
+      <h4>📊 案例复盘 &amp; 经验</h4>
+      <p>交付完成后自动生成 AI 复盘报告（主要错误、修复策略、可复用经验），并跨项目沉淀经验推荐（问题模板、测试用例、修复策略、风险预警）。</p>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

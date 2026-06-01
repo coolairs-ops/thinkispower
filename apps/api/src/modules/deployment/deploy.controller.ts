@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Res, Req, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Res, Req, Body, NotFoundException, UseGuards } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { DeploymentService } from './deployment.service';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -61,5 +62,16 @@ export class DeployController {
     } catch {
       return res.status(404).json({ message: '该应用尚未部署', statusCode: 404 });
     }
+  }
+
+  /** 预留部署启动端点 — 接收部署目标，返回访问 URL */
+  @UseGuards(JwtAuthGuard)
+  @Post(':projectId/launch')
+  async launchDeploy(
+    @Param('projectId') projectId: string,
+    @Body() body: { target?: string; host?: string; port?: number },
+  ) {
+    const result = await this.deploymentService.deploy(projectId);
+    return { success: true, productionUrl: result.productionUrl, deploymentId: result.deploymentId };
   }
 }

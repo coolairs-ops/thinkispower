@@ -7,7 +7,42 @@
   --background: #f8fafc;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 body {
   color: var(--foreground);
   background: var(--background);
+}
+
+/* 覆盖浏览器自动填充的白色/黄色背景 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: #1a1a2e;
+  transition: background-color 5000s ease-in-out 0s;
+  box-shadow: inset 0 0 0 1000px #ffffff;
+  caret-color: #1a1a2e;
 }

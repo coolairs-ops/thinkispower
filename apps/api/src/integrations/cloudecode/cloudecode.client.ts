@@ -599,12 +599,32 @@ Demo HTML：${opts.demoHtml.substring(0, 1500)}
       { temperature: 0.3, maxTokens: 16384 },
     );
 
-    // 解析生成的文件
-    const filePattern = /\`\`\`(\S+)\n([\s\S]*?)\`\`\`/g;
+    // 解析生成的文件 — 支持多种格式
+    const filePattern = /```(\S+)\s*\n([\s\S]*?)```/g;
     const files: Array<{ path: string; content: string }> = [];
     let match;
+    let unnamedIdx = 0;
     while ((match = filePattern.exec(response)) !== null) {
-      files.push({ path: match[1], content: match[2].trim() });
+      let filePath = match[1].trim();
+      const content = match[2].trim();
+      
+      // 跳过非代码块标记（如纯语言名）
+      if (filePath.length < 2 || filePath.length > 80) continue;
+      
+      // 如果是语言名而非路径（无 / 或 .），生成文件名
+      if (!filePath.includes('/') && !filePath.includes('.')) {
+        const extMap: Record<string, string> = {
+          'typescript': '.ts', 'javascript': '.js', 'python': '.py',
+          'sql': '.sql', 'html': '.html', 'css': '.css',
+          'json': '.json', 'yaml': '.yml', 'bash': '.sh',
+          'markdown': '.md', 'dockerfile': '', 'nginx': '.conf',
+          'env': '.env', 'xml': '.xml', 'text': '.txt',
+        };
+        const ext = extMap[filePath.toLowerCase()] || '.txt';
+        filePath = `generated/file_${++unnamedIdx}${ext}`;
+      }
+      
+      files.push({ path: filePath, content });
     }
 
     this.logger.log(`全栈交付(${projectId}): ${files.length} 个文件`);

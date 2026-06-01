@@ -10,6 +10,9 @@ RUN npx prisma generate
 COPY . .
 RUN npm run build
 
+# 只保留 production 依赖
+RUN npm prune --production
+
 # ─── Production stage ───
 FROM node:20-alpine
 WORKDIR /app
@@ -21,5 +24,4 @@ COPY --from=build /build/prisma ./prisma
 
 EXPOSE 3001
 
-# 启动时同步数据库结构，然后启动 API
 CMD npx prisma db push --skip-generate 2>&1 | tail -5 && node dist/main

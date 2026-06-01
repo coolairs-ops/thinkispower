@@ -1,16 +1,20 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
+import { SpecificationService } from '../specification/specification.service';
 import { EVENTS, TaskFailedPayload, TasksCompletedPayload } from '../../events/event-types';
 
 @Injectable()
 export class FeedbackService {
+  private readonly logger = new Logger(FeedbackService.name);
+
   constructor(
     private prisma: PrismaService,
     private statusMapper: StatusMapperService,
     private eventEmitter: EventEmitter2,
+    private specService: SpecificationService,
   ) {}
 
   async findAll(userId: string, projectId: string) {
@@ -30,6 +34,7 @@ export class FeedbackService {
         elementPath: true,
         pageUrl: true,
         comment: true,
+        feedbackType: true,
         status: true,
         createdAt: true,
       },
@@ -48,6 +53,17 @@ export class FeedbackService {
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
 
+    // 自动判定 bug vs 变更请求（基于冻结的规格）
+    let feedbackType = 'bug';
+    try {
+      const spec = await this.prisma.specification.findUnique({ where: { projectId } });
+      if (spec && spec.status === 'frozen') {
+        feedbackType = this.specService.isBugWithinSpec(spec, data.comment) ? 'bug' : 'change_request';
+      }
+    } catch (e) {
+      this.logger.warn(`规格判定失败，默认标记为bug: ${e}`);
+    }
+
     const feedback = await this.prisma.feedbackItem.create({
       data: {
         projectId,
@@ -55,6 +71,7 @@ export class FeedbackService {
         elementPath: data.elementPath || null,
         pageUrl: data.pageUrl || null,
         comment: data.comment,
+        feedbackType,
       },
     });
 

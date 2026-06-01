@@ -12,10 +12,13 @@ import { JwtStrategy } from './jwt.strategy';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET', 'dev-secret-change-in-production'),
-        signOptions: { expiresIn: '7d' },
-      }),
+      useFactory: (config: ConfigService) => {
+        const secret = config.get<string>('JWT_SECRET');
+        if (!secret) {
+          throw new Error('JWT_SECRET 未配置。请在 .env 中设置 JWT_SECRET 环境变量。');
+        }
+        return { secret, signOptions: { expiresIn: '7d' } };
+      },
     }),
   ],
   controllers: [AuthController],

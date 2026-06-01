@@ -31,16 +31,18 @@ export class UserFriendlyExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
-    // HttpException → 用预定义映射
+    // HttpException → 用预定义映射（但保留业务自定义消息）
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const defaultMsg = ERROR_MAP[status] || '操作失败，请重试';
-      
-      this.logger.warn(`HTTP ${status}: ${exception.message}`);
-      
+      const origMsg = typeof exception.message === 'string' ? exception.message : '';
+      const isGenericStatusText = /^(Unauthorized|Forbidden|Not Found|Conflict|Bad Request|Too Many Requests|Internal Server Error|Service Unavailable|Gateway Timeout)$/i.test(origMsg);
+
+      this.logger.warn(`HTTP ${status}: ${origMsg}`);
+
       return response.status(status).json({
         statusCode: status,
-        message: defaultMsg,
+        message: isGenericStatusText ? defaultMsg : origMsg,
       });
     }
 

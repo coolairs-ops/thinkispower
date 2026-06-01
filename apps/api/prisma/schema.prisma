@@ -46,6 +46,8 @@ model Project {
   sourceExportEnabled    Boolean  @default(false) @map("source_export_enabled")
   packageExportEnabled   Boolean  @default(false) @map("package_export_enabled")
   repositoryExportEnabled Boolean @default(false) @map("repository_export_enabled")
+  specConfirmedAt        DateTime? @map("spec_confirmed_at")
+  specVersion            Int       @default(0) @map("spec_version")
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
@@ -62,6 +64,9 @@ model Project {
   experienceRecommendations ExperienceRecommendation[]
   demoSnapshots             DemoSnapshot[]
   deployments               Deployment[]
+  systemLocks               SystemLock[]
+  specification             Specification?
+  testDeployments           TestDeployment[]
 
   @@index([userId])
   @@map("projects")
@@ -150,6 +155,7 @@ model FeedbackItem {
   pageUrl        String?  @map("page_url")
   screenshotUrl  String?  @map("screenshot_url")
   comment        String
+  feedbackType   String   @default("bug") @map("feedback_type") // bug | change_request
   status         String   @default("new") // new | processing | resolved
   generatedTaskId String? @map("generated_task_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at")
@@ -371,4 +377,90 @@ model ExperienceRecommendation {
   project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@map("experience_recommendations")
+}
+
+// ============ 系统锁（全局唯一） ============
+
+model SystemLock {
+  id        String   @id                      // 固定值 "auto_iteration" — 主键约束保证单例
+  projectId String   @map("project_id") @db.Uuid
+  taskId    String   @map("task_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("system_locks")
+}
+
+// ============ 规格确认 ============
+
+model Specification {
+  id              String   @id @default(uuid()) @db.Uuid
+  projectId       String   @unique @map("project_id") @db.Uuid
+  version         Int      @default(1)
+  status          String   @default("draft") // draft | frozen | revised
+  frozenAt        DateTime? @map("frozen_at")
+
+  // 确认内容（结构化 JSON）
+  targetUsers     Json?    @map("target_users")       // [{role, description}]
+  coreFunctions   Json?    @map("core_functions")     // [{name, description, priority: must|nice|later}]
+  outOfScope      Json?    @map("out_of_scope")       // [{name, reason}]
+  pages           Json?    @map("pages")              // [{name, route, description}]
+  roles           Json?    @map("roles")              // [{name, permissions[]}]
+  dataModels      Json?    @map("data_models")        // [{name, fields[{name,type,required}]}]
+  businessRules   Json?    @map("business_rules")     // [{name, description, trigger, outcome}]
+  acceptanceScenarios Json? @map("acceptance_scenarios") // [{name, given, when, then, priority}]
+
+  // 预测信息（冻结时的快照）
+  estimatedCostRmb Int?    @map("estimated_cost_rmb")
+  estimatedDays    Int?    @map("estimated_days")
+  primaryRisks     Json?   @map("primary_risks")
+
+  // 变更历史
+  changeLog       Json?    @map("change_log") // [{version, changedAt, field, oldValue, newValue, reason}]
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("specifications")
+}
+
+// ============ 测试环境部署 ============
+
+model TestDeployment {
+  id          String   @id @default(uuid()) @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  status      String   @default("preparing") // preparing | building | deploying | ready | failed | destroyed
+  version     Int      @default(1)
+
+  // 部署信息
+  containerId String?  @map("container_id")
+  testUrl     String?  @map("test_url")
+  adminUser   String?  @map("admin_user")
+  adminPass   String?  @map("admin_pass")
+  port        Int?     // 动态分配的端口
+
+  // 进度信息
+  currentStep String?  @map("current_step")  // 当前执行步骤
+  stepsLog    Json?    @map("steps_log")     // [{step, status, message, ts}]
+  progress    Int      @default(0)           // 0-100
+
+  // 健康检查
+  healthStatus String? @map("health_status") // healthy | unhealthy | unknown
+  lastHealthAt DateTime? @map("last_health_at")
+
+  errorMessage String?  @map("error_message")
+  startedAt    DateTime? @map("started_at")
+  readyAt      DateTime? @map("ready_at")
+  destroyedAt  DateTime? @map("destroyed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, status])
+  @@map("test_deployments")
 }

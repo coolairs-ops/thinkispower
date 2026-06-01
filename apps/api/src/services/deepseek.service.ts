@@ -22,11 +22,16 @@ export class DeepseekService {
   private apiKey: string;
   private baseUrl: string;
   private model: string;
+  private httpAgent: https.Agent;
 
   constructor(private config: ConfigService) {
     this.apiKey = this.config.get('DEEPSEEK_API_KEY', '');
     this.baseUrl = this.config.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1');
     this.model = this.config.get('DEEPSEEK_MODEL', 'deepseek-chat');
+    // keepAlive: false — DeepSeek CDN idle timeout (~30s) 比自迭代轮间间隔短，
+    // keepAlive 池子里过期连接被复用会导致 ECONNRESET/socket hang up。
+    // 每次新建连接虽然多一次 TLS 握手，但可靠性远高于复用死连接。
+    this.httpAgent = new https.Agent({ keepAlive: false });
   }
 
   async chat(messages: DeepseekMessage[], options?: DeepseekOptions): Promise<string> {
@@ -72,10 +77,10 @@ export class DeepseekService {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Length': Buffer.byteLength(data),
-          'Connection': 'keep-alive',
+          'Connection': 'close',
         },
         timeout: timeoutMs,
-        agent: new https.Agent({ keepAlive: true, maxSockets: 5 }),
+        agent: this.httpAgent,
       };
 
       const req = mod.request(options, (res) => {

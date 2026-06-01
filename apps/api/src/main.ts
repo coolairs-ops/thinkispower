@@ -15,9 +15,12 @@ async function bootstrap() {
         'http://localhost:3001',
         'http://localhost:3002',
         'http://localhost:3003',
+        'http://localhost:4200',
         process.env.CORS_ORIGIN,
       ].filter(Boolean);
-      if (!origin || allowed.includes(origin)) {
+      // WSL/NAT 环境：允许所有私有 IP 的请求（172.x, 192.168.x, 10.x）
+      const isPrivateIP = origin && /^https?:\/\/(172\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d+$/.test(origin);
+      if (!origin || allowed.includes(origin) || isPrivateIP) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));

@@ -36,15 +36,21 @@ export class CaseReviewService {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: {
+        id: true,
         description: true,
         planSummary: true,
         structuredRequirement: true,
+        createdAt: true,
+        specConfirmedAt: true,
         feedbackItems: {
           select: { comment: true, status: true, createdAt: true },
           orderBy: { createdAt: 'asc' },
         },
         tasks: {
-          select: { type: true, status: true, errorMessage: true },
+          select: { type: true, status: true, errorMessage: true, createdAt: true, updatedAt: true },
+        },
+        specification: {
+          select: { estimatedCostRmb: true, estimatedDays: true, primaryRisks: true },
         },
       },
     });
@@ -93,6 +99,29 @@ export class CaseReviewService {
       const cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
       const parsed = JSON.parse(cleaned);
 
+      // ── 预测校准 ──
+      const spec = project.specification;
+      const estimatedCost = spec?.estimatedCostRmb || 0;
+      const estimatedDays = spec?.estimatedDays || 0;
+
+      // 实际周期：从创建到 specConfirmedAt（如果存在）或到现在
+      const actualStart = new Date(project.createdAt).getTime();
+      const actualEnd = project.specConfirmedAt
+        ? new Date(project.specConfirmedAt).getTime()
+        : Date.now();
+      const actualDays = Math.round((actualEnd - actualStart) / (1000 * 60 * 60 * 24));
+
+      // 实际成本：按任务数估算（简化版，后续可接入实际计费）
+      const taskCount = project.tasks?.length || 0;
+      const failedTasks = project.tasks?.filter((t: any) => t.status === 'failed').length || 0;
+
+      const costAccuracy = estimatedCost > 0
+        ? `预测 ¥${estimatedCost} → 实际约 ${taskCount} 个任务执行`
+        : '无成本预测数据';
+      const daysAccuracy = estimatedDays > 0
+        ? `预测 ${estimatedDays} 天 → 实际 ${actualDays} 天 (偏差 ${Math.abs(actualDays - estimatedDays)} 天)`
+        : '无周期预测数据';
+
       return {
         projectId: project.id,
         appType: parsed.appType || null,
@@ -103,7 +132,12 @@ export class CaseReviewService {
         mainErrors: parsed.mainErrors || undefined,
         fixStrategies: parsed.fixStrategies || undefined,
         userAcceptanceResult: parsed.userAcceptanceResult || null,
-        reusableLessons: parsed.reusableLessons || undefined,
+        reusableLessons: [
+          ...(parsed.reusableLessons || []),
+          `[校准] ${costAccuracy}`,
+          `[校准] ${daysAccuracy}`,
+          `[校准] 任务成功率: ${taskCount > 0 ? Math.round((taskCount - failedTasks) / taskCount * 100) : 0}% (${taskCount - failedTasks}/${taskCount})`,
+        ],
       };
     } catch (error) {
       this.logger.error('Failed to parse case review response', error);

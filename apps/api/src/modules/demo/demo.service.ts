@@ -49,7 +49,7 @@ export class DemoService {
   }
 
   private async doGenerate(p: { id: string; status: string; planSummary: any }) {
-    const allowed = ['prd_ready', 'plan_ready', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback'];
+    const allowed = ['prd_ready', 'plan_ready', 'spec_confirmed', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback', 'demo_failed'];
     if (!allowed.includes(p.status)) throw new BadRequestException('当前状态不允许');
     if (!p.planSummary) throw new BadRequestException('方案尚未生成');
 

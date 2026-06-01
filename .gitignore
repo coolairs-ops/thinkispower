@@ -16,3 +16,8 @@ _r.ps1
 _r.vbs
 _repl2.vbs
 _test.txt
+
+# E2E tests
+e2e/.auth/
+playwright-report/
+test-results/

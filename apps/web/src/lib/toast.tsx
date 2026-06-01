@@ -16,6 +16,12 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 let nextId = 0;
 
+const borderColor = {
+  success: 'border-l-emerald-500',
+  error: 'border-l-red-500',
+  info: 'border-l-blue-500',
+};
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -30,25 +36,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast: addToast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`animate-slide-up rounded-lg px-4 py-2.5 text-sm text-white shadow-lg transition-opacity ${
-              t.type === 'success' ? 'bg-green-600' : t.type === 'error' ? 'bg-red-600' : 'bg-gray-800'
-            }`}
+            className={`border-l-4 bg-white px-4 py-2.5 text-sm text-gray-900 shadow-lg ${borderColor[t.type]}`}
           >
             {t.message}
           </div>
         ))}
       </div>
-      <style jsx global>{`
-        @keyframes slide-up {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .animate-slide-up { animation: slide-up 0.2s ease-out; }
-      `}</style>
     </ToastContext.Provider>
   );
 }

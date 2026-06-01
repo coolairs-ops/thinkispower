@@ -7,7 +7,7 @@
       "parameters": {
         "path": "feedback",
         "responseMode": "lastNode",
-        "httpMethod": "GET"
+        "httpMethod": "POST"
       },
       "position": [
         0,

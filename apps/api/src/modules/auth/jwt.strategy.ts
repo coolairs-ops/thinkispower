@@ -10,10 +10,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private prisma: PrismaService,
     config: ConfigService,
   ) {
+    const secret = config.get<string>('JWT_SECRET');
+    if (!secret) {
+      throw new Error('JWT_SECRET 未配置。请在 .env 中设置 JWT_SECRET 环境变量。');
+    }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_SECRET', 'dev-secret-change-in-production'),
+      secretOrKey: secret,
     });
   }
 

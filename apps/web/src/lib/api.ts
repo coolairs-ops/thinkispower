@@ -19,9 +19,20 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
   }
 
   const res = await fetch(path, { ...options, headers });
+
+  if (res.status === 401) {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+      window.location.href = '/';
+    }
+    throw new Error('登录已过期，请重新登录');
+  }
+
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: '请求失败' }));
-    throw new Error(error.message || '请求失败');
+    const body = await res.json().catch(() => ({ message: '请求失败' }));
+    const err = new Error(body.message || '请求失败');
+    (err as any).status = res.status;
+    throw err;
   }
   return res.json();
 }

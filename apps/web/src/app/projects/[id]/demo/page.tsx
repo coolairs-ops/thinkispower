@@ -140,7 +140,7 @@ export default function DemoPage() {
   };
 
   const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback';
-  const showGenerateButton = status === 'prd_ready' || status === 'plan_ready' || status === 'demo_ready' || status === 'demo_generating' || status === 'awaiting_demo_feedback';
+  const showGenerateButton = status === 'prd_ready' || status === 'plan_ready' || status === 'spec_confirmed' || status === 'demo_ready' || status === 'demo_generating' || status === 'awaiting_demo_feedback';
 
   if (isLoading) return null;
 
@@ -199,6 +199,7 @@ export default function DemoPage() {
               </div>
             </div>
           ) : showPreview && demoHtml ? (
+            <div className="relative h-full">
             <iframe
               ref={iframeRef}
               srcDoc={demoHtml}
@@ -206,6 +207,15 @@ export default function DemoPage() {
               title="预览"
               sandbox="allow-scripts allow-same-origin"
             />
+            {/* 反馈浮窗 */}
+            <button
+              onClick={() => setMode('annotation')}
+              className="absolute bottom-3 right-3 px-3 py-1.5 bg-white border border-gray-300 rounded-full shadow-lg text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-all"
+              title="这里有问题？点击反馈"
+            >
+              💬 这里有问题？
+            </button>
+            </div>
           ) : (
             <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed">
               <div className="text-center">

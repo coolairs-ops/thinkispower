@@ -35,8 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setToken(stored);
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
     fetch('/api/auth/me', {
       headers: { Authorization: `Bearer ${stored}` },
+      signal: controller.signal,
     })
       .then((res) => {
         if (!res.ok) throw new Error('invalid token');
@@ -50,7 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(null);
         setUser(null);
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        clearTimeout(timeout);
+        setIsLoading(false);
+      });
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {

@@ -39,9 +39,7 @@ export class ProjectController {
 
   @Post(':projectId/confirm-plan')
   async confirmPlan(@Req() req: any, @Param('projectId') projectId: string) {
-    // 1. Validate and update status to plan_ready
     await this.projectService.confirmPlan(req.user.id, projectId);
-    // 2. Start delivery pipeline
-    return this.deliveryService.confirmDelivery(req.user.id, projectId);
+    return { success: true, message: '方案已确认，可前往规格页或交付页继续' };
   }
 }

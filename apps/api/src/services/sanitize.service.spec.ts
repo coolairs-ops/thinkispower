@@ -26,10 +26,10 @@ describe('SanitizeService', () => {
     });
 
     it('should handle multiple replacements in one string', () => {
-      const input = 'n8n + GSD 协同工作';
+      const input = 'n8n + Cloudecode 协同工作';
       const result = service.sanitizePublicText(input);
       expect(result).toContain('业务流程引擎');
-      expect(result).toContain('平台引擎');
+      expect(result).toContain('AI 开发助手');
       expect(result).not.toContain('n8n');
     });
 

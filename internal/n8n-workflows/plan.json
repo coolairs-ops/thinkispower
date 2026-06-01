@@ -7,7 +7,7 @@
       "parameters": {
         "path": "plan",
         "responseMode": "lastNode",
-        "httpMethod": "GET"
+        "httpMethod": "POST"
       },
       "position": [
         0,

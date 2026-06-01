@@ -10,7 +10,7 @@
       "position": [250, 300],
       "parameters": {
         "path": "demo-generate",
-        "httpMethod": "GET",
+        "httpMethod": "POST",
         "responseMode": "lastNode",
         "options": {}
       }
