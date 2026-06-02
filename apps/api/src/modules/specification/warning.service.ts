@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../database/prisma.service';
+import { PrismaService } from '../../database/prisma.service';
 
 export interface ProjectWarning {
   patternKey: string;

@@ -235,7 +235,7 @@ export class DeliveryIterationService {
           coverage,
           missingRequirements: [],
           hallucinations: [],
-          recommendations: fused.recommendations,
+          recommendations: this.sanitizeRecommendations(fused.recommendations),
           passedChecks,
           totalChecks,
           stopIteration: fused.stopIteration,
@@ -336,13 +336,83 @@ export class DeliveryIterationService {
     }
   }
 
+  /** 过滤内部传感器诊断，转为用户可读的优化建议 */
+  private sanitizeRecommendations(raw: string[]): string[] {
+    return raw
+      .map(r => {
+        // 去掉传感器名前缀: "L1-静态分析/XXX: ..." → "XXX: ..."
+        let cleaned = r.replace(/^L\d+-[^/]+\//, '');
+
+        // 过滤 N8N 相关（已移除）
+        if (/n8n/i.test(cleaned)) return null;
+
+        // 过滤 JSON 解析错误
+        if (/Unexpected end of JSON|Empty response/i.test(cleaned)) return null;
+
+        // 翻译常见内部消息
+        const translations: [RegExp, string][] = [
+          [/HTML结构:?\s*未通过/, '页面结构需要优化'],
+          [/HTML结构检查:?\s*未通过/, '页面结构需要优化'],
+          [/Demo完整性.*?(\d+)%/, 'Demo 完整度为 $1%'],
+          [/完整度.*?(\d+)%/, '整体完整度 $1%'],
+          [/数据库连接.*/, '数据库连接异常，请检查服务状态'],
+          [/API.*超时/, '服务响应超时，请稍后重试'],
+          [/不可用.*降级/, '部分服务暂不可用，已自动降级'],
+          [/未通过/i, '需要优化'],
+        ];
+        for (const [pattern, replacement] of translations) {
+          if (pattern.test(cleaned)) {
+            return cleaned.replace(pattern, replacement);
+          }
+        }
+
+        // 进一步清理: 去掉技术细节后缀
+        cleaned = cleaned.replace(/\s*\(.*\)$/, '');
+        cleaned = cleaned.replace(/:\s*$/, '');
+
+        return cleaned || null;
+      })
+      .filter((r): r is string => r !== null && r.length > 0);
+  }
+
   private async autoFix(projectId: string, recommendations: string[]): Promise<string | null> {
     if (recommendations.length === 0) return null;
 
     const topRecs = recommendations.filter(r => !r.includes('整体质量')).slice(0, 5);
     if (topRecs.length === 0) return null;
 
-    const fixPrompt = `请修复以下 Demo HTML 中的问题，输出完整的修复后 HTML。\n\n修复建议：\n${topRecs.join('\n')}\n\n要求：保持原有结构，只修改有问题的部分，不要删除正常功能。`;
+    // 读取当前 Demo HTML
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { demoHtml: true },
+    });
+    const currentHtml = project?.demoHtml || '';
+    if (!currentHtml || currentHtml.length < 200) {
+      this.logger.warn(`autoFix 无有效Demo HTML (${currentHtml.length} bytes)，跳过`);
+      return null;
+    }
+
+    // 截断过长的HTML（保留头尾关键部分）
+    const maxHtmlLen = 20000;
+    const htmlSnippet = currentHtml.length > maxHtmlLen
+      ? currentHtml.slice(0, maxHtmlLen * 0.7) + '\n<!-- ...截断... -->\n' + currentHtml.slice(-maxHtmlLen * 0.3)
+      : currentHtml;
+
+    const fixPrompt = `请修复以下 Demo HTML 中的问题，输出完整的修复后 HTML。
+
+当前 HTML：
+\`\`\`html
+${htmlSnippet}
+\`\`\`
+
+修复建议：
+${topRecs.join('\n')}
+
+要求：
+1. 保持原有结构和功能不变
+2. 只修改有问题的部分
+3. 不要删除正常功能
+4. 输出完整HTML，用 \`\`\`html 包裹`;
 
     try {
       const response = await this.deepseek.chat(

@@ -4,11 +4,11 @@ import { TaskModule } from '../../modules/task/task.module';
 import { CloudecodeModule } from '../cloudecode/cloudecode.module';
 import { DemoSnapshotModule } from '../../modules/demo-snapshot/demo-snapshot.module';
 import { DeploymentModule } from '../../modules/deployment/deployment.module';
-import { BuildService } from '../../services/build.service';
+import { SharedCoreModule } from '../../shared/shared-core.module';
 
 @Module({
-  imports: [TaskModule, CloudecodeModule, DemoSnapshotModule, DeploymentModule],
-  providers: [PipelineService, BuildService],
+  imports: [SharedCoreModule, TaskModule, CloudecodeModule, DemoSnapshotModule, DeploymentModule],
+  providers: [PipelineService],
   exports: [PipelineService],
 })
 export class PipelineModule {}

@@ -15,6 +15,8 @@ model User {
   email        String   @unique
   name         String?
   hashedPassword String
+  role         String   @default("developer") // admin | developer | viewer
+  refreshToken String?  @map("refresh_token")
   avatarUrl    String?  @map("avatar_url")
   plan         String   @default("free") // free | pro | enterprise
   createdAt    DateTime @default(now()) @map("created_at")

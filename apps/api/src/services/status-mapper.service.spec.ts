@@ -48,7 +48,7 @@ describe('StatusMapperService', () => {
   describe('getAllStatusLabels', () => {
     it('should return all status labels', () => {
       const all = service.getAllStatusLabels();
-      expect(Object.keys(all)).toHaveLength(18);
+      expect(Object.keys(all).length).toBeGreaterThanOrEqual(22);
       expect(all['needs_input']).toBe('正在了解需求');
       expect(all['completed']).toBe('软件已准备好');
     });

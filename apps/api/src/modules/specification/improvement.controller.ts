@@ -1,6 +1,6 @@
 import { Controller, Get, Param, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { DecisionEngineService } from '../../services/decision-engine.service';
+import { DecisionEngineService } from './decision-engine.service';
 
 @Controller('api/projects/:projectId')
 @UseGuards(JwtAuthGuard)

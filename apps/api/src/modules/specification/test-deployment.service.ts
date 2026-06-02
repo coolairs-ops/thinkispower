@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
-import { PrismaService } from '../database/prisma.service';
+import { PrismaService } from '../../database/prisma.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as crypto from 'crypto';

@@ -1,6 +1,6 @@
 import { Controller, Post, Param, UseGuards, Req, Body } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { DiscoveryEngineService } from '../../services/discovery-engine.service';
+import { DiscoveryEngineService } from './discovery-engine.service';
 import { PrismaService } from '../../database/prisma.service';
 import { DiscoveryNextDto, DiscoveryEnrichDto } from './dto/discovery.dto';
 

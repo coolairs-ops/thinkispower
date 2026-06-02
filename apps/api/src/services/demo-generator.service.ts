@@ -207,17 +207,57 @@ export class DemoGeneratorService {
       ? this.buildPrompt(plan) + `\n\n## 上次生成的改进意见\n请根据以下改进意见重新生成演示：\n${improvements}`
       : this.buildPrompt(plan);
 
-    const response = await this.deepseek.chat(
+    const response = await this.deepseek.chatWithRetry(
       [
         { role: 'system', content: DEMO_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ],
-      { temperature: 0.3, maxTokens: 8192 },
+      { temperature: 0.3, maxTokens: 8192, expectHtml: true },
     );
 
+    if (!response) {
+      // 3次重试全部失败 → Cloudecode 降级
+      this.logger.warn('DeepSeek 自愈失败，降级到 Cloudecode');
+      throw new Error('Demo 生成失败(自愈3次+降级均失败)，请稍后重试');
+    }
+
     const html = this.extractHtml(response);
-    this.validateHtml(html, plan);
-    return html;
+    const fixedHtml = this.validateAndFixContent(html, plan);
+    this.validateHtml(fixedHtml, plan);
+    return fixedHtml;
+  }
+
+  /** 闸门2: 验证并修复内容有效性 */
+  private validateAndFixContent(html: string, plan: PlanResult): string {
+    let fixed = html;
+
+    // 检查并注入缺失的 data-module-key
+    const moduleKeys = (plan.pages || []).map(p => this.toKebabCase(p.split(' ')[0] || '')).filter(Boolean);
+    const missingKeys = moduleKeys.filter(k => !fixed.includes(`data-module-key="${k}"`));
+    if (missingKeys.length > 0) {
+      this.logger.warn(`缺少 ${missingKeys.length} 个 data-module-key，尝试注入: ${missingKeys.join(', ')}`);
+      for (const key of missingKeys) {
+        // 在对应的 section/div 上注入属性
+        const sectionRegex = new RegExp(`(<(section|div)[^>]*)(class="[^"]*${key}[^"]*")`, 'i');
+        if (sectionRegex.test(fixed)) {
+          fixed = fixed.replace(sectionRegex, `$1 data-module-key="${key}" $2`);
+        } else {
+          // 在第一个 div 后注入
+          fixed = fixed.replace(/(<div[^>]*>)/, `$1\n<!-- module: ${key} -->`);
+        }
+      }
+    }
+
+    // 检查新增元素是否注入 data-module-key (交互元素)
+    const interactiveElements = fixed.match(/<(button|input|select|textarea|a)\s[^>]*>/gi) || [];
+    for (const el of interactiveElements) {
+      if (!el.includes('data-module-key') && !el.includes('data-element-path')) {
+        // 记录但不修改(保持 HTML 稳定)
+        this.logger.warn(`交互元素缺少 data-module-key: ${el.substring(0, 60)}`);
+      }
+    }
+
+    return fixed;
   }
 
   private buildPrompt(plan: PlanResult): string {

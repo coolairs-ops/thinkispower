@@ -77,6 +77,8 @@ services:
       - apps/api/.env
     ports:
       - "3001:3001"
+    volumes:
+      - deliveries:/app/.hermes/deliveries
     depends_on:
       - postgres
       - redis
@@ -89,3 +91,4 @@ volumes:
   pgdata:
   redisdata:
   miniodata:
+  deliveries:

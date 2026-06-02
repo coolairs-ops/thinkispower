@@ -206,7 +206,10 @@ export class SpecificationService {
     if (!spec) throw new NotFoundException('规格不存在，请先生成');
 
     if (dto.action === 'confirm') {
-      if (spec.status === 'frozen') throw new BadRequestException('规格已确认');
+      if (spec.status === 'frozen') {
+        // 已确认 → 幂等返回成功，让前端可以继续进入开发
+        return { success: true, frozen: true, version: spec.version, message: '规格已确认，可以进入产品开发' };
+      }
 
       // 冻结规格
       await this.prisma.specification.update({

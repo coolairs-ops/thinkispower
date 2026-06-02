@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CompletenessCheckerService, CompletenessReport } from './completeness-checker.service';
-import { DeepseekService } from './deepseek.service';
+import { DeepseekService } from '../../services/deepseek.service';
 
 export interface DiscoveryResult {
   /** 下一轮要问的问题（null=完备度已达标，无需继续） */

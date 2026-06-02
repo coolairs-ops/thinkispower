@@ -1,0 +1,18 @@
+import { createDefaultPreset } from 'ts-jest';
+
+/** @type {import('jest').Config} */
+const config = {
+  ...createDefaultPreset(),
+  moduleFileExtensions: ['js', 'json', 'ts'],
+  rootDir: '.',
+  roots: ['<rootDir>/src'],
+  testRegex: '.*\.spec\.ts$',
+  collectCoverageFrom: ['src/**/*.(t|j)s', '!**/node_modules/**'],
+  coverageDirectory: 'coverage',
+  testEnvironment: 'node',
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+  },
+};
+
+export default config;

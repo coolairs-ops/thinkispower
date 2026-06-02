@@ -202,13 +202,21 @@ export default function SpecPage() {
               </>
             )}
             {isFrozen && (
-              <button
-                onClick={handleRevise}
-                disabled={saving}
-                className="px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:opacity-50 text-sm"
-              >
-                退回修改
-              </button>
+              <>
+                <button
+                  onClick={() => router.push(`/projects/${projectId}/demo`)}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+                >
+                  进入开发
+                </button>
+                <button
+                  onClick={handleRevise}
+                  disabled={saving}
+                  className="px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:opacity-50 text-sm"
+                >
+                  退回修改
+                </button>
+              </>
             )}
             <button
               onClick={() => router.push(`/projects/${projectId}/plan`)}
@@ -279,6 +287,24 @@ export default function SpecPage() {
                     className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium shadow-sm"
                   >
                     确认规格
+                  </button>
+                </div>
+              </div>
+            )}
+            {isFrozen && (
+              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-green-800">规格已确认 v{spec.version}，可以进入开发</p>
+                    <p className="text-xs text-green-600 mt-1">
+                      下一步：生成 Demo 预览 → 查看效果 → 终稿交付
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => router.push(`/projects/${projectId}/demo`)}
+                    className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium shadow-sm"
+                  >
+                    进入开发
                   </button>
                 </div>
               </div>

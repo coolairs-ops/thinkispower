@@ -5,6 +5,7 @@ import * as https from 'node:https';
 
 jest.mock('node:https', () => ({
   request: jest.fn(),
+  Agent: jest.fn().mockImplementation(() => ({})),
 }));
 
 describe('DeepseekService', () => {
@@ -209,4 +210,196 @@ describe('DeepseekService', () => {
       expect(result).toBeTruthy();
     });
   });
+
+  // ═══ 自愈闸门测试（2026-06-02 新增） ═══
+  describe('闸门测试 (需API key)', () => {
+    beforeEach(async () => {
+      mockConfigService.get.mockImplementation((key: string, defaultValue?: any) => {
+        if (key === 'DEEPSEEK_API_KEY') return '***';
+        return defaultValue;
+      });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          DeepseekService,
+          { provide: ConfigService, useValue: mockConfigService },
+        ],
+      }).compile();
+
+      service = module.get<DeepseekService>(DeepseekService);
+    });
+  describe('闸门1: validateStructure', () => {
+    it('短文本不通过', () => {
+      const r = service.validateStructure('short');
+      expect(r.valid).toBe(false);
+      expect(r.reason).toContain('过短');
+    });
+
+    it('<500字节不通过', () => {
+      const r = service.validateStructure('x'.repeat(300));
+      expect(r.valid).toBe(false);
+      expect(r.reason).toContain('不完整');
+    });
+
+    it('含markdown代码块不通过', () => {
+      const r = service.validateStructure('```html\n<div>' + 'x'.repeat(500) + '</div>\n```');
+      expect(r.valid).toBe(false);
+      expect(r.reason).toContain('markdown');
+    });
+
+    it('HTML缺失DOCTYPE不通过', () => {
+      const html = '<html><head></head><body><div>' + 'x'.repeat(500) + '</div></body></html>';
+      const r = service.validateStructure(html);
+      expect(r.valid).toBe(false);
+      expect(r.reason).toContain('DOCTYPE');
+    });
+
+    it('HTML无闭合标签不通过', () => {
+      const html = '<!DOCTYPE html>\n<html><head></head><body><div>' + 'x'.repeat(500) + '</div></body>';
+      const r = service.validateStructure(html);
+      expect(r.valid).toBe(false);
+      expect(r.reason).toContain('不完整');
+    });
+
+    it('完整HTML通过', () => {
+      const html = '<!DOCTYPE html>\n<html><head></head><body><div>' + 'x'.repeat(500) + '</div></body></html>';
+      const r = service.validateStructure(html);
+      expect(r.valid).toBe(true);
+    });
+
+    it('纯文本(500+字节)通过', () => {
+      // DeepSeek 可能返回纯文本而非 HTML
+      const text = 'x'.repeat(600);
+      const r = service.validateStructure(text);
+      expect(r.valid).toBe(true);
+    });
+  });
+
+  describe('闸门2: validateContent', () => {
+    it('抱歉无法完成 — 不通过', () => {
+      const r = service.validateContent('抱歉，我无法完成这个任务');
+      expect(r.valid).toBe(false);
+      expect(r.reason).toContain('无法');
+    });
+
+    it('请求超时 — 不通过', () => {
+      const r = service.validateContent('请求超时 Request timeout');
+      expect(r.valid).toBe(false);
+      expect(r.reason).toContain('超时');
+    });
+
+    it('发生错误 — 不通过', () => {
+      const r = service.validateContent('处理过程中遇到错误');
+      expect(r.valid).toBe(false);
+    });
+
+    it('正常内容 — 通过', () => {
+      const r = service.validateContent('这是正常的功能描述，没有任何错误');
+      expect(r.valid).toBe(true);
+    });
+
+    it('HTML Demo — 通过', () => {
+      const r = service.validateContent('<!DOCTYPE html><html>客户管理系统演示</html>');
+      expect(r.valid).toBe(true);
+    });
+  });
+
+  describe('chatWithRetry 自愈重试', () => {
+    it('第一次成功直接返回', async () => {
+      // 返回完整HTML，应通过所有闸门
+      const html = '<!DOCTYPE html>\n<html><head></head><body><div>' + 'x'.repeat(500) + '</div></body></html>';
+      mockHttpsSuccess({ choices: [{ message: { content: html } }] });
+
+      const result = await service.chatWithRetry(
+        [{ role: 'user', content: '生成Demo' }],
+        { temperature: 0.3, expectHtml: true },
+      );
+
+      expect(result).toBe(html);
+      // 只调用一次
+      expect(https.request).toHaveBeenCalledTimes(1);
+    });
+
+    it('闸门1失败触发重试', async () => {
+      // 第一次返回过短(不通过闸门1)，第二次返回正常
+      const badHtml = 'too short';
+      const goodHtml = '<!DOCTYPE html>\n<html><head></head><body><div>' + 'x'.repeat(500) + '</div></body></html>';
+      
+      let callCount = 0;
+      (https.request as jest.Mock).mockImplementation((_opts: any, callback: (r: any) => void) => {
+        callCount++;
+        const body = callCount === 1 ? { choices: [{ message: { content: badHtml } }] }
+                                      : { choices: [{ message: { content: goodHtml } }] };
+        const res = { on: jest.fn((event: string, cb: Function) => {
+          if (event === 'data') cb(Buffer.from(JSON.stringify(body)));
+          if (event === 'end') cb();
+        }), statusCode: 200 };
+        callback(res);
+        return { on: jest.fn(), write: jest.fn(), end: jest.fn(), destroy: jest.fn() };
+      });
+
+      const result = await service.chatWithRetry(
+        [{ role: 'user', content: '生成Demo' }],
+        { temperature: 0.3, expectHtml: true },
+      );
+
+      expect(result).toBe(goodHtml);
+      expect(callCount).toBe(2);
+    });
+
+    it('闸门2失败触发重试', async () => {
+      // 第一次返回AI错误文本，第二次正常
+      const badContent = '<!DOCTYPE html>\n<html><head></head><body><p>' + '抱歉，我无法完成'.repeat(20) + '</p></body></html>';
+      const goodHtml = '<!DOCTYPE html>\n<html><head></head><body><div>' + 'x'.repeat(500) + '</div></body></html>';
+      
+      let callCount = 0;
+      (https.request as jest.Mock).mockImplementation((_opts: any, callback: (r: any) => void) => {
+        callCount++;
+        const body = callCount === 1 ? { choices: [{ message: { content: badContent } }] }
+                                      : { choices: [{ message: { content: goodHtml } }] };
+        const res = { on: jest.fn((event: string, cb: Function) => {
+          if (event === 'data') cb(Buffer.from(JSON.stringify(body)));
+          if (event === 'end') cb();
+        }), statusCode: 200 };
+        callback(res);
+        return { on: jest.fn(), write: jest.fn(), end: jest.fn(), destroy: jest.fn() };
+      });
+
+      const result = await service.chatWithRetry(
+        [{ role: 'user', content: '生成Demo' }],
+        { temperature: 0.3, expectHtml: true },
+      );
+
+      expect(result).toBe(goodHtml);
+      expect(callCount).toBe(2);
+    });
+
+    it('三次全部失败返回null', async () => {
+      const badHtml = 'too short'; // 每次都过短
+      mockHttpsSuccess({ choices: [{ message: { content: badHtml } }] });
+
+      const result = await service.chatWithRetry(
+        [{ role: 'user', content: '生成Demo' }],
+        { temperature: 0.3, expectHtml: true },
+      );
+
+      expect(result).toBeNull();
+      expect(https.request).toHaveBeenCalledTimes(3);
+    });
+
+    it('非HTML模式跳过闸门1', async () => {
+      const text = '这是纯文本回复'; // <500字节但expectHtml=false跳过闸门1
+      mockHttpsSuccess({ choices: [{ message: { content: text } }] });
+
+      const result = await service.chatWithRetry(
+        [{ role: 'user', content: '你好' }],
+        { temperature: 0.3, expectHtml: false },
+      );
+
+      expect(result).toBe(text);
+      expect(https.request).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  }); // close 闸门测试
 });

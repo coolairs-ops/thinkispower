@@ -1,6 +1,7 @@
 import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 
 @Injectable()
@@ -12,41 +13,69 @@ export class AuthService {
 
   async register(email: string, name: string, password: string) {
     const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      throw new ConflictException('该邮箱已被注册');
-    }
+    if (existing) throw new ConflictException('该邮箱已被注册');
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await this.prisma.user.create({
       data: { email, name, hashedPassword },
     });
 
-    return { token: this.generateToken(user.id), user: { id: user.id, email: user.email, name: user.name } };
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role);
+    await this.prisma.user.update({ where: { id: user.id }, data: { refreshToken } });
+
+    return { accessToken, refreshToken, user: { id: user.id, email, name, role: user.role } };
   }
 
   async login(email: string, password: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      throw new UnauthorizedException('邮箱或密码不正确');
-    }
+    if (!user) throw new UnauthorizedException('邮箱或密码不正确');
 
     const valid = await bcrypt.compare(password, user.hashedPassword);
-    if (!valid) {
-      throw new UnauthorizedException('邮箱或密码不正确');
+    if (!valid) throw new UnauthorizedException('邮箱或密码不正确');
+
+    const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role);
+    await this.prisma.user.update({ where: { id: user.id }, data: { refreshToken } });
+
+    return { accessToken, refreshToken, user: { id: user.id, email: user.email, name: user.name, role: user.role } };
+  }
+
+  async refresh(refreshToken: string) {
+    if (!refreshToken) throw new UnauthorizedException('Refresh token 缺失');
+
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(refreshToken, { secret: process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET });
+    } catch {
+      throw new UnauthorizedException('Refresh token 无效或已过期');
     }
 
-    return { token: this.generateToken(user.id), user: { id: user.id, email: user.email, name: user.name } };
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || user.refreshToken !== refreshToken) {
+      throw new UnauthorizedException('Refresh token 已失效');
+    }
+
+    const tokens = await this.generateTokens(user.id, user.role);
+    await this.prisma.user.update({ where: { id: user.id }, data: { refreshToken: tokens.refreshToken } });
+
+    return tokens;
   }
 
   async getProfile(userId: string) {
-    const user = await this.prisma.user.findUnique({
+    return this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, name: true, plan: true, createdAt: true },
+      select: { id: true, email: true, name: true, role: true, plan: true, createdAt: true },
     });
-    return user;
   }
 
-  private generateToken(userId: string): string {
-    return this.jwtService.sign({ sub: userId });
+  /** 生成 access(15min) + refresh(7d) token对 */
+  private async generateTokens(userId: string, role: string) {
+    const payload = { sub: userId, role };
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+    const refreshSecret = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+    const refreshToken = this.jwtService.sign(
+      { sub: userId, type: 'refresh' },
+      { secret: refreshSecret, expiresIn: '7d' },
+    );
+    return { accessToken, refreshToken };
   }
 }

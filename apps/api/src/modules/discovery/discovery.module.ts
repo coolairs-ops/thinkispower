@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { DiscoveryController } from './discovery.controller';
-import { DiscoveryEngineService } from '../../services/discovery-engine.service';
-import { CompletenessCheckerService } from '../../services/completeness-checker.service';
+import { DiscoveryEngineService } from './discovery-engine.service';
+import { CompletenessCheckerService } from './completeness-checker.service';
+
+import { SharedCoreModule } from '../../shared/shared-core.module';
 
 @Module({
-  imports: [],
+  imports: [SharedCoreModule],
   controllers: [DiscoveryController],
   providers: [DiscoveryEngineService, CompletenessCheckerService],
 })

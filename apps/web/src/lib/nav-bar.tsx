@@ -10,13 +10,12 @@ interface NavBarProps {
 }
 
 const links = [
+  { href: '/idea', label: '需求访谈' },
   { href: '/spec', label: '规格' },
-  { href: '/estimate', label: '预测' },
   { href: '/demo', label: '预览' },
   { href: '/deploy', label: '测试环境' },
   { href: '/snapshots', label: '版本' },
   { href: '/evaluation', label: '项目评估' },
-  { href: '/handoff', label: '开发包' },
   { href: '/delivery', label: '终稿交付' },
 ];
 

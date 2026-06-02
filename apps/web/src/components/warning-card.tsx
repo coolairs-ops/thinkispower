@@ -13,7 +13,7 @@ interface Warning {
 
 interface Props {
   projectId: string;
-  refreshKey?: string;
+  refreshKey?: string | number;
   title?: string;
   description?: string;
 }

@@ -3,6 +3,9 @@ import { Response, Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { DeploymentService } from './deployment.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import * as fs from 'fs';
+import * as path from 'path';
+import { execSync } from 'child_process';
 
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -41,6 +44,31 @@ else{document.getElementById('err').style.display='block'}}
 @Controller('api/deploy')
 export class DeployController {
   constructor(private deploymentService: DeploymentService) {}
+
+  /** 下载交付源码包 — 必须放在 :projectId 路由前，避免被 :projectId 吞掉路径 */
+  @Public()
+  @Get(':projectId/delivery/:deliveryId')
+  async downloadDelivery(@Param('projectId') projectId: string, @Param('deliveryId') deliveryId: string, @Res() res: Response) {
+    const deliveryDir = path.join(process.cwd(), '.hermes', 'deliveries', deliveryId);
+    if (!fs.existsSync(deliveryDir)) {
+      return res.status(404).json({ message: '交付文件不存在' });
+    }
+
+    const zipPath = path.join(process.cwd(), '.hermes', 'deliveries', `${deliveryId}.zip`);
+    try {
+      execSync(`cd ${path.dirname(deliveryDir)} && tar -czf ${zipPath} ${deliveryId}`, { timeout: 30000 });
+    } catch {
+      return res.status(500).json({ message: '打包失败' });
+    }
+
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="delivery-${deliveryId.slice(0,8)}.tar.gz"`);
+    const stream = fs.createReadStream(zipPath);
+    stream.pipe(res);
+    stream.on('end', () => {
+      try { fs.unlinkSync(zipPath); } catch {}
+    });
+  }
 
   @Public()
   @Get(':projectId')

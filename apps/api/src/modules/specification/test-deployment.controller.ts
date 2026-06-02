@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Delete, Param, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { TestDeploymentService } from '../../services/test-deployment.service';
+import { TestDeploymentService } from './test-deployment.service';
 
 @Controller('api/projects/:projectId/test-deploy')
 @UseGuards(JwtAuthGuard)

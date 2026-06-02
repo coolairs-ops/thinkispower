@@ -60,13 +60,22 @@ export default function ProjectChatPage() {
  ])
  .then(([proj, msgs]) => {
  setProject(proj);
- setMessages(Array.isArray(msgs) ? msgs : []);
+ const actualMsgs = Array.isArray(msgs) ? msgs : [];
+ setMessages(actualMsgs);
  // Extract PRD from project
  if (proj.structuredRequirement) {
  const raw = proj.structuredRequirement.prd || proj.structuredRequirement;
  setPrd(raw);
  setEditPrd(JSON.parse(JSON.stringify(raw)));
  }
+
+   // 未开始访谈且无历史消息 → 跳转到独立访谈页
+   api.get(`/api/projects/${projectId}/idea`).then((idea: any) => {
+     if (idea && !idea.done && idea.question && actualMsgs.length === 0) {
+       router.push(`/projects/${projectId}/idea`);
+       return;
+     }
+   }).catch(() => {});
  })
  .catch(() => router.push('/dashboard'));
  }, [projectId, token, isLoading, router]);
@@ -76,28 +85,30 @@ export default function ProjectChatPage() {
  }, [messages]);
 
  const handleSend = async () => {
- if (!input.trim() || sending) return;
- setSending(true);
- const userMsg = input;
- setInput('');
+   if (!input.trim() || sending) return;
+   setSending(true);
+   const userMsg = input;
+   setInput('');
 
- setMessages((prev) => [...prev, { id: 'temp', role: 'user', content: userMsg, createdAt: new Date().toISOString() }]);
+   // 普通聊天模式
 
- try {
- const data = await api.post(`/api/projects/${projectId}/messages`, { content: userMsg });
- setMessages(data.messages || []);
- const proj = await api.get(`/api/projects/${projectId}`);
- setProject(proj);
- if (proj.structuredRequirement) {
- const raw = proj.structuredRequirement.prd || proj.structuredRequirement;
- setPrd(raw);
- setEditPrd(JSON.parse(JSON.stringify(raw)));
- }
- } catch {
- setInput(userMsg);
- }
+    setMessages((prev) => [...prev, { id: 'temp', role: 'user', content: userMsg, createdAt: new Date().toISOString() }]);
 
- setSending(false);
+    try {
+      const data = await api.post(`/api/projects/${projectId}/messages`, { content: userMsg });
+      setMessages(data.messages || []);
+      const proj = await api.get(`/api/projects/${projectId}`);
+      setProject(proj);
+      if (proj.structuredRequirement) {
+        const raw = proj.structuredRequirement.prd || proj.structuredRequirement;
+        setPrd(raw);
+        setEditPrd(JSON.parse(JSON.stringify(raw)));
+      }
+    } catch {
+      setInput(userMsg);
+    }
+
+    setSending(false);
  };
 
  const handleSavePrd = async () => {

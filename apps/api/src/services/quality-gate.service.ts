@@ -42,6 +42,9 @@ export class QualityGateService {
       // ── 代码/部署类 (2项) ──
       this.checkErrorHandling(html),
       this.checkApiReadiness(html),
+
+      // ── 自愈流水线新增: 错误文本检测 (闸门2) ──
+      this.checkNoErrorText(html),
     ];
 
     const score = Math.round(
@@ -269,6 +272,24 @@ export class QualityGateService {
       detail: passed ? (hasFetch ? '使用 fetch' : hasAxios ? '使用 axios' : '使用 XHR') :
               hasApiEndpoint ? '有API端点但无调用代码' : '未检测到API调用',
       recommendation: !passed ? '建议添加 API 调用逻辑使前后端完整联通' : undefined,
+    };
+  }
+
+  // ─── 自愈流水线 (闸门2): AI 错误文本检测 ───
+
+  private checkNoErrorText(html: string): QualityCheck {
+    const patterns = [
+      { regex: /抱歉.{0,20}(无法|不能|出错)/i, label: 'AI错误提示' },
+      { regex: /I (cannot|can't|am unable)/i, label: 'AI错误提示(EN)' },
+      { regex: /(请求超时|Request\s*timeout)/i, label: '超时错误' },
+      { regex: /(遇到错误|发生错误|Error occurred)/i, label: '错误描述' },
+    ];
+    const found = patterns.filter(p => p.regex.test(html)).map(p => p.label);
+    return {
+      name: '无AI错误文本', category: 'code', passed: found.length === 0,
+      score: found.length === 0 ? 100 : Math.max(0, 100 - found.length * 30),
+      detail: found.length > 0 ? `发现: ${found.join(', ')}` : '通过',
+      recommendation: found.length > 0 ? 'AI 响应包含错误信息，应触发自愈重试' : undefined,
     };
   }
 }

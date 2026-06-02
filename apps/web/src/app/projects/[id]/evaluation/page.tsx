@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast';
 import NavBar from '@/lib/nav-bar';
 import PhaseTreeView, { PhaseState } from '@/components/phase-tree-view';
+import ScoreGauge from '@/components/score-gauge';
 
 interface RoundResult {
  round: number;
@@ -41,6 +42,7 @@ export default function EvaluationPage() {
  const [statusText, setStatusText] = useState('就绪');
  const [stuckModal, setStuckModal] = useState<any>(null);
  const [perfectModal, setPerfectModal] = useState<any>(null);
+ const [doneModal, setDoneModal] = useState<any>(null);  // 迭代完成（非达标）面板
  const [delivering, setDelivering] = useState(false);
  const [taskId, setTaskId] = useState<string | null>(null);
  const [phaseStates, setPhaseStates] = useState<PhaseState[]>([
@@ -108,7 +110,7 @@ export default function EvaluationPage() {
  setStuckModal({ ...data, needsHuman: true });
  setStatusText(data.message || '需要人工介入');
  setIterating(false);
- toast('自动修复连续失败，需要人工介入', 'warning');
+ toast('自动修复连续失败，需要人工介入', 'error');
  break;
 
  case 'stuck_progress':
@@ -120,8 +122,8 @@ export default function EvaluationPage() {
  if (data.reason === '达标' && (data.score ?? 0) >= 90) {
  setPerfectModal(data);
  } else {
+ setDoneModal(data);
  setStatusText(`已完成 ${data.rounds} 轮（最终评分 ${data.score}）`);
- toast('迭代完成', 'info');
  }
  setIterating(false);
  break;
@@ -170,6 +172,7 @@ export default function EvaluationPage() {
  setCurrentScore(0);
  setStuckModal(null);
  setPerfectModal(null);
+ setDoneModal(null);
  setPhaseStates([]);
  setCurrentRound(0);
  completedRef.current = false;
@@ -268,6 +271,23 @@ export default function EvaluationPage() {
  }
  }, [projectId, router, startIterate, toast]);
 
+ // 一键交付: 直接触发代码生成
+ const handleQuickDeliver = useCallback(async () => {
+ setStuckModal(null); setDoneModal(null);
+ try {
+ const proj = await api.get(`/api/projects/${projectId}`);
+ await api.post(`/api/projects/${projectId}/delivery/deliver`, {
+ projectName: proj.name || 'app',
+ planSummary: proj.planSummary,
+ demoHtml: proj.demoHtml,
+ });
+ toast('终稿交付已启动！', 'success');
+ router.push(`/projects/${projectId}/delivery`);
+ } catch (e: any) {
+ toast(e?.message || '交付启动失败', 'error');
+ }
+ }, [projectId, router, toast]);
+
  const handlePerfectDeliver = useCallback(async () => {
  setDelivering(true);
  setPerfectModal(null);
@@ -295,7 +315,7 @@ export default function EvaluationPage() {
  <div className="px-6 py-8 max-w-7xl mx-auto">
 
  {/* ─── 迭代进行中横幅 ─── */}
- {iterating && !stuckModal && !perfectModal && (
+ {iterating && !stuckModal && !perfectModal && !doneModal && (
  <div className="mb-6 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-600 p-5 text-gray-900 shadow-lg">
  <div className="flex items-center gap-3">
  <span className="inline-flex h-4 w-4 rounded-full bg-white animate-ping" />
@@ -355,33 +375,16 @@ export default function EvaluationPage() {
  <PhaseTreeView phases={phaseStates} />
  </div>
 
- {/* ─── 综合评分 + 三段式进度条 ─── */}
- <div className="mb-6 bg-white rounded-xl p-6 shadow-sm">
- <div className="flex items-center justify-between mb-3">
- <span className="text-sm font-medium text-gray-600">综合评分</span>
- <span className={`text-2xl font-bold ${progressColor.replace('bg-', 'text-')}`}>{currentScore}</span>
- </div>
- <div className="flex gap-1 h-6 rounded-full overflow-hidden">
- <div className="bg-blue-400 transition-all duration-500 flex items-center justify-center text-[10px] text-gray-900 font-medium"
- style={{ width: `${latest?.l1Score ?? 33}%` }}>
- {latest ? `L1 ${latest.l1Score ?? 0}` : 'L1'}
- </div>
- <div className="bg-green-400 transition-all duration-500 flex items-center justify-center text-[10px] text-gray-900 font-medium"
- style={{ width: `${latest?.l2Score ?? 33}%` }}>
- {latest ? `L2 ${latest.l2Score ?? 0}` : 'L2'}
- </div>
- <div className="bg-purple-400 transition-all duration-500 flex items-center justify-center text-[10px] text-gray-900 font-medium"
- style={{ width: `${latest?.l3Score ?? 34}%` }}>
- {latest ? `L3 ${latest.l3Score ?? 0}` : 'L3'}
- </div>
- </div>
- <div className="flex justify-between mt-2 text-xs text-gray-400">
- <span>轮次: {rounds.length}</span>
- {latest?.coverage != null && (
- <span>需求覆盖 {latest.coverage}% {latest.missingRequirements?.length ? `（缺失${latest.missingRequirements.length}项）` : '✅'}</span>
- )}
- </div>
- </div>
+ {/* ─── 综合评分 ─── */}
+ <ScoreGauge
+   score={currentScore}
+   l1Score={latest?.l1Score}
+   l2Score={latest?.l2Score}
+   l3Score={latest?.l3Score}
+   rounds={rounds.length}
+   coverage={latest?.coverage}
+   missingCount={latest?.missingRequirements?.length}
+ />
 
 {/* ─── 技术门禁 ─── */}
 {latest?.quality && latest.quality.checks && (
@@ -449,10 +452,10 @@ export default function EvaluationPage() {
  <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">迭代记录</h2>
  {[...rounds].reverse().map((r, idx) => (
  <div key={idx} className="bg-white rounded-xl p-4 shadow-sm border-l-4"
- style={{ borderColor: r.score >= 80 ? '#22c55e' : r.score >= 50 ? '#eab308' : '#ef4444' }}>
+ style={{ borderColor: (r.overallScore ?? r.score ?? 0) >= 80 ? '#22c55e' : (r.overallScore ?? r.score ?? 0) >= 50 ? '#eab308' : '#ef4444' }}>
  <div className="flex items-center justify-between mb-2">
  <span className="font-medium text-sm">第 {r.round} 轮</span>
- <span className="text-lg font-bold">{r.score}</span>
+ <span className="text-lg font-bold">{r.overallScore ?? r.score ?? '?'}</span>
  </div>
  <div className="flex gap-4 text-xs text-gray-500">
  <span>L1 {r.l1Score ?? 0}</span>
@@ -477,21 +480,68 @@ export default function EvaluationPage() {
 
  <div className="lg:col-span-2">
  <div className="bg-white rounded-xl p-4 shadow-sm sticky top-4">
- <h2 className="font-semibold text-sm mb-3">当前风险 ({latest?.risks?.length || 0}项)</h2>
- <div className="space-y-2">
- {(latest?.risks || []).map((r: any, i: number) => (
- <div key={i} className="text-xs px-3 py-2 rounded border-l-2"
- style={{ borderColor: r.severity === 'high' ? '#ef4444' : '#f59e0b',
- background: r.severity === 'high' ? '#fef2f2' : '#fffbeb' }}>
- {r.description}
+ {/* 风险项 */}
+ {latest?.risks?.length > 0 && (
+   <>
+   <h2 className="font-semibold text-sm mb-3 text-red-600">⚠️ 风险项 ({latest.risks.length}项)</h2>
+   <div className="space-y-2 mb-4">
+   {(latest.risks || []).map((r: any, i: number) => (
+   <div key={i} className="text-xs px-3 py-2 rounded border-l-2"
+   style={{ borderColor: r.severity === 'high' ? '#ef4444' : '#f59e0b',
+   background: r.severity === 'high' ? '#fef2f2' : '#fffbeb' }}>
+   {r.description}
+   </div>
+   ))}
+   </div>
+   </>
+ )}
+ {/* 优化建议 */}
+ {latest?.recommendations?.length > 0 && (
+   <>
+   <h2 className="font-semibold text-sm mb-3 text-blue-600">💡 优化建议 ({latest.recommendations.length}条)</h2>
+   <div className="space-y-2">
+   {latest.recommendations.map((rec: string, i: number) => (
+   <div key={`rec-${i}`} className="text-xs px-3 py-2 rounded bg-blue-50 text-blue-700 border-l-2 border-blue-400">
+   {rec}
+   </div>
+   ))}
+   </div>
+   </>
+ )}
+ {/* 无风险也无建议 */}
+ {(!latest?.risks || latest.risks.length === 0) && (!latest?.recommendations || latest.recommendations.length === 0) && (
+   <p className="text-xs text-gray-400">暂无风险和建议</p>
+ )}
  </div>
- ))}
- {latest?.recommendations?.map((rec: string, i: number) => (
- <div key={`rec-${i}`} className="text-xs px-3 py-2 rounded bg-blue-50 text-blue-700 border-l-2 border-blue-400">
- 💡 {rec}
  </div>
- ))}
  </div>
+ )}
+
+ {/* ─── 迭代完成弹窗（非达标） ─── */}
+ {doneModal && (
+ <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-50/40">
+ <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+ <div className="text-center mb-6">
+ <div className="text-4xl mb-3">📊</div>
+ <h2 className="text-xl font-bold text-gray-800">迭代完成</h2>
+ <p className="text-sm text-gray-500 mt-2">
+  已完成 {doneModal.rounds} 轮迭代，最终评分 {doneModal.score} 分。
+ </p>
+ <p className="text-sm text-gray-600 mt-1">Demo 已自动优化，可以预览或进入终稿交付。</p>
+ </div>
+ <div className="space-y-3">
+ <button onClick={() => { setDoneModal(null); router.push(`/projects/${projectId}/demo`); }}
+ className="w-full rounded-xl bg-indigo-600 px-6 py-3 text-white font-medium hover:bg-indigo-700">
+  查看 Demo 预览
+ </button>
+ <button onClick={handleQuickDeliver}
+ className="w-full rounded-xl bg-green-600 px-6 py-3 text-white font-medium hover:bg-green-700">
+  开始终稿交付
+ </button>
+ <button onClick={() => setDoneModal(null)}
+ className="w-full rounded-xl border border-gray-200 px-6 py-3 text-gray-500 text-sm hover:bg-gray-50">
+  关闭
+ </button>
  </div>
  </div>
  </div>
@@ -547,6 +597,10 @@ export default function EvaluationPage() {
    className="w-full rounded-xl bg-amber-600 px-6 py-3 text-white font-medium hover:bg-amber-700">
     查看 Demo 手动修复
    </button>
+   <button onClick={handleQuickDeliver}
+   className="w-full rounded-xl bg-green-600 px-6 py-3 text-white font-medium hover:bg-green-700">
+    开始终稿交付
+   </button>
    <button onClick={() => { setStuckModal(null); }}
    className="w-full rounded-xl border border-gray-300 px-6 py-3 text-gray-700 font-medium hover:bg-gray-50">
     关闭
@@ -565,6 +619,10 @@ export default function EvaluationPage() {
  <button onClick={() => handleDecide('view_demo')}
  className="w-full rounded-xl border border-gray-300 px-6 py-3 text-gray-700 font-medium hover:bg-gray-50">
  查看当前 Demo
+ </button>
+ <button onClick={handleQuickDeliver}
+ className="w-full rounded-xl bg-green-600 px-6 py-3 text-white font-medium hover:bg-green-700">
+ 开始终稿交付
  </button>
   </>
  )}

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../database/prisma.service';
-import { DeepseekService } from './deepseek.service';
+import { PrismaService } from '../../database/prisma.service';
+import { DeepseekService } from '../../services/deepseek.service';
 
 export type Level4 = 'missing' | 'partial' | 'good' | 'complete';
 export type SpecLevel = 'missing' | 'draft' | 'frozen';

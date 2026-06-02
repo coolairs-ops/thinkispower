@@ -24,6 +24,12 @@ export class LoginDto {
   password!: string;
 }
 
+export class RefreshDto {
+  @IsString()
+  @MinLength(1, { message: 'Refresh token 不能为空' })
+  refreshToken!: string;
+}
+
 export class SendMessageDto {
   @IsString()
   @MinLength(1, { message: '消息内容不能为空' })
