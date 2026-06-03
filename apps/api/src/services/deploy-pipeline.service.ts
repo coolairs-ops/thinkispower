@@ -102,7 +102,7 @@ export class DeployPipelineService {
     try {
       this.logger.log(`Docker build: ${imageTag}...`);
       const output = execSync(`docker build -t ${imageTag} "${deliveryDir}" 2>&1`, {
-        timeout: 180_000,
+        timeout: 600_000,
         stdio: 'pipe',
         encoding: 'utf-8',
       });
@@ -133,14 +133,21 @@ export class DeployPipelineService {
       return { status: 'static_only', error: 'Docker 未运行，无法部署容器' };
     }
 
-    // 1. 尝试 docker-compose (多服务)
+    // 优先使用单服务部署（更可靠），compose 作为备选
     const composeFile = join(deliveryDir, 'docker-compose.yml');
+    const hasDockerfile = existsSync(join(deliveryDir, 'Dockerfile'));
+    
+    // 单服务模式: docker build → docker run (最可靠)
+    if (hasDockerfile) {
+      return this.deploySingleService(deliveryId, deliveryDir, projectId);
+    }
+    
+    // docker-compose 模式: 仅在没有标准 Dockerfile 时使用
     if (existsSync(composeFile)) {
       return this.deployWithCompose(deliveryDir, projectId);
     }
-
-    // 2. 单服务模式
-    return this.deploySingleService(deliveryId, deliveryDir, projectId);
+    
+    return { status: 'deploy_failed', error: '无可部署的 Dockerfile 或 docker-compose.yml' };
   }
 
   /** docker-compose 多服务部署 */

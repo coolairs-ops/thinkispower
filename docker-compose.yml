@@ -79,6 +79,7 @@ services:
       - "3001:3001"
     volumes:
       - deliveries:/app/.hermes/deliveries
+      - //var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker 一键部署
     depends_on:
       - postgres
       - redis

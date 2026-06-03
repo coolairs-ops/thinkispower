@@ -5,7 +5,7 @@
 
 const getToken = () => {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('token');
+  return localStorage.getItem('accessToken');
 };
 
 async function request(path: string, options: RequestInit = {}): Promise<any> {
@@ -22,7 +22,8 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
 
   if (res.status === 401) {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('token');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
       window.location.href = '/';
     }
     throw new Error('登录已过期，请重新登录');

@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem('token');
+    const stored = localStorage.getItem('accessToken');
     if (!stored) {
       setIsLoading(false);
       return;
@@ -50,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser({ id: data.id, email: data.email, name: data.name, plan: data.plan });
       })
       .catch(() => {
-        localStorage.removeItem('token');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
         setToken(null);
         setUser(null);
       })
@@ -71,8 +72,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.message || '登录失败');
     }
     const data = await res.json();
-    localStorage.setItem('token', data.token);
-    setToken(data.token);
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    setToken(data.accessToken);
     setUser(data.user);
   }, []);
 
@@ -87,13 +89,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.message || '注册失败');
     }
     const data = await res.json();
-    localStorage.setItem('token', data.token);
-    setToken(data.token);
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    setToken(data.accessToken);
     setUser(data.user);
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('token');
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
     setToken(null);
     setUser(null);
     router.push('/');

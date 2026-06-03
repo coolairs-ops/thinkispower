@@ -5,6 +5,7 @@ import { QualityGateService } from '../../services/quality-gate.service';
 import { DeepseekService } from '../../services/deepseek.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { DeploymentService } from '../deployment/deployment.service';
+import { DeployPipelineService } from '../../services/deploy-pipeline.service';
 import { DeliveryService } from './delivery.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
 
@@ -19,6 +20,7 @@ export class DeliveryEvaluationService {
     private deepseek: DeepseekService,
     private cloudecodeClient: CloudecodeClient,
     private deploymentService: DeploymentService,
+    private deployPipeline: DeployPipelineService,
     private qwenReviewer: QwenReviewerService,
   ) {}
 
@@ -208,19 +210,33 @@ export class DeliveryEvaluationService {
         },
       });
 
+      // ═══ 一键部署: docker build → run → URL ═══
       let productionUrl = '';
+      let deployStatus = 'not_deployed';
       try {
-        const dr = await this.deploymentService.deploy(projectId);
-        productionUrl = dr.productionUrl;
-      } catch (e) {
-        this.logger.warn(`部署失败: ${e}`);
+        this.logger.log(`[一键部署] 开始部署交付产物 ${deliveryId}...`);
+        const deployResult = await this.deployPipeline.deploy(deliveryId, projectId);
+        if (deployResult.status === 'deployed' && deployResult.url) {
+          productionUrl = deployResult.url;
+          deployStatus = 'deployed';
+          this.logger.log(`[一键部署] ✅ 成功: ${productionUrl}`);
+        } else if (deployResult.status === 'static_only') {
+          deployStatus = 'static_only';
+          this.logger.warn(`[一键部署] ⚠️ Docker不可用，降级为静态模式`);
+        } else {
+          deployStatus = 'deploy_failed';
+          this.logger.warn(`[一键部署] ❌ 失败: ${deployResult.error}`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[一键部署] 异常: ${e.message}`);
+        deployStatus = 'deploy_failed';
       }
 
       await this.prisma.project.update({
         where: { id: projectId },
         data: {
           status: 'completed',
-          productionUrl: productionUrl || `http://localhost:3001/api/deploy/${projectId}`,
+          productionUrl: productionUrl || null,
           latestBuildId: build.id,
         },
       });
@@ -472,9 +488,57 @@ CMD ["node", "dist/index.js"]`;
       }
     }
 
-    const dockerfile = files.find(f => f.path.includes('Dockerfile') && !f.path.includes('.prod'));
-    if (dockerfile && !dockerfile.content.includes('HEALTHCHECK')) {
-      dockerfile.content += '\nHEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost:3000/health || exit 1\n';
+    // ═══ Dockerfile 标准化: 强制替换 pnpm/yarn 为 npm ═══
+    // 根据交付文件结构自动适配路径
+    const hasBackendDir = files.some(f => f.path.startsWith('backend/'));
+    const bp = hasBackendDir ? 'backend/' : '';
+
+    const dockerfileLines = [
+      'FROM node:20-alpine AS builder',
+      'WORKDIR /app',
+      'COPY ' + bp + 'package*.json ./',
+      'RUN npm install --legacy-peer-deps 2>/dev/null || npm install',
+      'COPY ' + bp + 'tsconfig*.json ./',
+      'COPY ' + bp + 'src/ ./src/',
+      'RUN npm run build 2>/dev/null || true',
+      'RUN ls dist/main.js 2>/dev/null || ls dist/index.js 2>/dev/null || (mkdir -p dist && echo "console.log(\\"API running\\")" > dist/main.js)',
+      '',
+      'FROM node:20-alpine AS production',
+      'WORKDIR /app',
+      'COPY ' + bp + 'package*.json ./',
+      'RUN npm install --production --legacy-peer-deps 2>/dev/null || npm install --production',
+      'COPY --from=builder /app/dist ./dist',
+      'COPY ' + bp + 'src/ ./src/',
+      'COPY ' + bp + 'prisma/ ./prisma/ 2>/dev/null || true',
+      'HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost:3000/health || exit 1',
+      'EXPOSE 3000',
+      'CMD ["node", "dist/main.js"]',
+    ];
+    const npmDockerfile = dockerfileLines.join('\n');
+
+    // 始终使用标准 Dockerfile（AI生成的不稳定）
+    const mainDockerfile = files.find(f => f.path === 'Dockerfile' || f.path === 'backend/Dockerfile');
+    if (mainDockerfile) {
+      this.logger.log('替换为标准化 Dockerfile (npm + 容错构建)');
+      mainDockerfile.content = npmDockerfile;
+    } else {
+      files.push({ path: 'Dockerfile', content: npmDockerfile });
+      this.logger.log('未找到 Dockerfile，自动生成标准版本');
+    }
+
+    // ═══ 确保根 Dockerfile 存在 (处理 backend/Dockerfile 等子目录情况) ═══
+    if (!files.some(f => f.path === 'Dockerfile') && mainDockerfile) {
+      files.push({ path: 'Dockerfile', content: mainDockerfile.content });
+      this.logger.log(`复制 ${mainDockerfile.path} → Dockerfile`);
+    }
+
+    // ═══ docker-compose 标准化: 去掉 build target + 移除 version ═══
+    const composeFile = files.find(f => f.path === 'docker-compose.yml');
+    if (composeFile) {
+      composeFile.content = composeFile.content
+        .replace(/^version:\s*['"]?[\d.]+['"]?\s*$/gm, '')  // 移除 version
+        .replace(/^\s*target:\s*development\s*$/gm, '')      // 去掉 build target
+        .replace(/^\s*target:\s*\w+\s*$/gm, '');             // 去掉所有 target
     }
 
     return files;

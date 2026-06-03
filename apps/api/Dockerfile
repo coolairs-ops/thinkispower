@@ -17,6 +17,9 @@ RUN npm prune --production
 FROM node:20-alpine
 WORKDIR /app
 
+# Docker CLI for one-click deploy
+RUN apk add --no-cache docker-cli docker-cli-compose
+
 COPY --from=build /build/dist ./dist
 COPY --from=build /build/node_modules ./node_modules
 COPY --from=build /build/package.json ./
