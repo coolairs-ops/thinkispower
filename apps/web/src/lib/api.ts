@@ -1,12 +1,37 @@
 /**
  * Frontend API helper
  * All calls go through Next.js rewrites to NestJS backend
+ * Auto-refreshes access token on 401.
  */
+
+let refreshPromise: Promise<boolean> | null = null;
 
 const getToken = () => {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('accessToken');
 };
+
+async function tryRefreshToken(): Promise<boolean> {
+  const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null;
+  if (!refreshToken) return false;
+
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    localStorage.setItem('accessToken', data.accessToken);
+    if (data.refreshToken) {
+      localStorage.setItem('refreshToken', data.refreshToken);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const token = getToken();
@@ -18,14 +43,25 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(path, { ...options, headers });
+  let res = await fetch(path, { ...options, headers });
 
-  if (res.status === 401) {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      window.location.href = '/';
+  // 401 → 自动尝试 refresh token
+  if (res.status === 401 && typeof window !== 'undefined') {
+    if (!refreshPromise) {
+      refreshPromise = tryRefreshToken();
     }
+    const refreshed = await refreshPromise;
+    refreshPromise = null;
+
+    if (refreshed) {
+      headers['Authorization'] = `Bearer ${getToken()}`;
+      res = await fetch(path, { ...options, headers });
+      if (res.ok) return res.json();
+    }
+
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    window.location.href = '/';
     throw new Error('登录已过期，请重新登录');
   }
 

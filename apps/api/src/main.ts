@@ -1,11 +1,22 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as express from 'express';
 import { AppModule } from './app.module';
 import { UserFriendlyExceptionFilter } from './common/filters/user-friendly-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Swagger API 文档
+  const config = new DocumentBuilder()
+    .setTitle('Think-is-power API')
+    .setDescription('PM自助交付平台 — AI驱动全栈应用生成系统')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document);
   app.use(express.urlencoded({ extended: true }));
 
   app.enableCors({

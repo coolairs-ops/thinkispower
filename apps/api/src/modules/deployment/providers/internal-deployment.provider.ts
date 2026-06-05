@@ -22,24 +22,28 @@ export class InternalDeploymentProvider implements IDeploymentProvider {
     const baseUrl = this.config.get<string>('APP_BASE_URL', 'http://localhost:3001');
     const url = `${baseUrl}/api/deploy/${projectId}`;
 
-    // Upload to MinIO as a permanent deployment artifact if available
     let externalUrl: string | undefined;
+    let uploadSuccess = false;
     if (this.minio) {
       try {
         const objectName = `deployments/${projectId}/index.html`;
         externalUrl = await this.minio.uploadFile(objectName, Buffer.from(html, 'utf-8'), {
           contentType: 'text/html; charset=utf-8',
         });
+        uploadSuccess = true;
         this.logger.log(`Deployment uploaded to MinIO: ${objectName}`);
       } catch (error) {
         this.logger.warn(`MinIO upload failed for deployment, serving via API: ${error}`);
       }
+    } else {
+      this.logger.warn('MinIO not configured — HTML served via API proxy, not persisted to object storage');
     }
 
     return {
-      success: true,
-      url,
+      success: true, // API proxy always works since HTML is in DB
+      url: externalUrl || url,
       provider: 'internal',
+      errorMessage: uploadSuccess ? undefined : 'Deployed via API proxy (MinIO unavailable)',
     };
   }
 

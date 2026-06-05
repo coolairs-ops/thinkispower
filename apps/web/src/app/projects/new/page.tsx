@@ -61,7 +61,7 @@ export default function NewProjectPage() {
 
  <button
  type="submit"
- className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-gray-900 transition-all duration-200 hover:bg-blue-700 hover:shadow-md active:scale-[0.98]"
+ className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-white transition-all duration-200 hover:bg-blue-700 hover:shadow-md active:scale-[0.98]"
  >
  创建并开始
  </button>

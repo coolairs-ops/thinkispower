@@ -139,8 +139,8 @@ export default function DemoPage() {
     setFeedbackComment('');
   };
 
-  const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing';
-  const showGenerateButton = status === 'prd_ready' || status === 'plan_ready' || status === 'spec_confirmed' || status === 'demo_ready' || status === 'demo_generating' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing';
+  const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing' || status === 'demo_failed';
+  const showGenerateButton = status === 'prd_ready' || status === 'plan_ready' || status === 'spec_confirmed' || status === 'demo_ready' || status === 'demo_generating' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing' || status === 'demo_failed';
 
   if (isLoading) return null;
 

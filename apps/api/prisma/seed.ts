@@ -1,8 +1,27 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
+  // ── 默认管理员账号 ──
+  const existing = await prisma.user.findUnique({ where: { email: 'admin@123.com' } });
+  if (!existing) {
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+    await prisma.user.create({
+      data: {
+        email: 'admin@123.com',
+        name: '管理员',
+        hashedPassword,
+        role: 'admin',
+        plan: 'pro',
+      },
+    });
+    console.log('  ✓ 默认管理员账号: admin@123.com / admin123');
+  } else {
+    console.log('  - 管理员账号已存在，跳过');
+  }
+
   console.log('Seeding ErrorPatterns...');
 
   const patterns = [

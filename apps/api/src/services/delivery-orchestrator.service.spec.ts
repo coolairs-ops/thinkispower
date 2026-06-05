@@ -7,7 +7,6 @@ import { StatusMapperService } from './status-mapper.service';
 import { DeepseekService } from './deepseek.service';
 import { CloudecodeClient } from '../integrations/cloudecode/cloudecode.client';
 import { HermesClient } from '../integrations/hermes/hermes.client';
-import { N8nClient } from '../integrations/n8n/n8n.client';
 import { MinioService } from '../integrations/minio/minio.service';
 import { DeploymentService } from '../modules/deployment/deployment.service';
 import { EVENTS } from '../events/event-types';
@@ -44,9 +43,6 @@ describe('DeliveryOrchestrator', () => {
     }),
   };
   const mockHermes = {};
-  const mockN8n = {
-    triggerDeliveryExportWorkflow: jest.fn().mockResolvedValue({ success: true, runId: 'run-1' }),
-  };
   const mockMinio = {};
   const mockDeploymentService = {};
 
@@ -69,7 +65,6 @@ describe('DeliveryOrchestrator', () => {
         { provide: DeepseekService, useValue: mockDeepseekService },
         { provide: CloudecodeClient, useValue: mockCloudecode },
         { provide: HermesClient, useValue: mockHermes },
-        { provide: N8nClient, useValue: mockN8n },
         { provide: MinioService, useValue: mockMinio },
         { provide: DeploymentService, useValue: mockDeploymentService },
       ],
@@ -138,39 +133,9 @@ describe('DeliveryOrchestrator', () => {
       );
     });
 
-    // ═══════ 异步导出类型 ═══════
+    // ═══════ 异步导出类型（原 N8N 路径，现直接本地生成） ═══════
 
-    it('should trigger N8N workflow for repository export and return early', async () => {
-      await orchestrator.handleExportRequest({ ...basePayload, exportType: 'repository' });
-
-      expect(mockN8n.triggerDeliveryExportWorkflow).toHaveBeenCalledWith('project-1', 'repository');
-      expect(mockBuildService.updateBuildStatus).toHaveBeenCalledTimes(1); // only 'building'
-      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-    });
-
-    it('should trigger N8N workflow for database export and return early', async () => {
-      await orchestrator.handleExportRequest({ ...basePayload, exportType: 'database' });
-
-      expect(mockN8n.triggerDeliveryExportWorkflow).toHaveBeenCalledWith('project-1', 'database');
-      expect(mockBuildService.updateBuildStatus).toHaveBeenCalledTimes(1);
-      expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-    });
-
-    // ═══════ 错误处理 ═══════
-
-    it('should throw and emit failed event for unknown export type', async () => {
-      await orchestrator.handleExportRequest({ ...basePayload, exportType: 'unknown' as any });
-
-      expect(mockBuildService.updateBuildStatus).toHaveBeenCalledWith('build-1', 'failed');
-      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
-        EVENTS.DELIVERY_EXPORT_FAILED,
-        expect.objectContaining({ exportType: 'unknown', error: expect.stringContaining('Unknown export type') }),
-      );
-    });
-
-    it('should fallback to local asset generation when N8N unavailable', async () => {
-      mockN8n.triggerDeliveryExportWorkflow.mockResolvedValueOnce({ success: false, runId: undefined });
-
+    it('should use local generation for repository export', async () => {
       await orchestrator.handleExportRequest({ ...basePayload, exportType: 'repository' });
 
       expect(mockCloudecode.generateAsset).toHaveBeenCalledWith(
@@ -184,6 +149,32 @@ describe('DeliveryOrchestrator', () => {
       expect(mockEventEmitter.emit).toHaveBeenCalledWith(
         EVENTS.DELIVERY_EXPORT_COMPLETED,
         expect.objectContaining({ exportType: 'repository' }),
+      );
+    });
+
+    it('should use local generation for database export', async () => {
+      await orchestrator.handleExportRequest({ ...basePayload, exportType: 'database' });
+
+      expect(mockCloudecode.generateAsset).toHaveBeenCalledWith(
+        'export_database_schema',
+        expect.objectContaining({}),
+      );
+      expect(mockBuildService.uploadArtifact).toHaveBeenCalled();
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENTS.DELIVERY_EXPORT_COMPLETED,
+        expect.objectContaining({ exportType: 'database' }),
+      );
+    });
+
+    // ═══════ 错误处理 ═══════
+
+    it('should throw and emit failed event for unknown export type', async () => {
+      await orchestrator.handleExportRequest({ ...basePayload, exportType: 'unknown' as any });
+
+      expect(mockBuildService.updateBuildStatus).toHaveBeenCalledWith('build-1', 'failed');
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+        EVENTS.DELIVERY_EXPORT_FAILED,
+        expect.objectContaining({ exportType: 'unknown', error: expect.stringContaining('Unknown export type') }),
       );
     });
 

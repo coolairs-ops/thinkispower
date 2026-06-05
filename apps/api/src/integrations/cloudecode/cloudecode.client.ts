@@ -139,13 +139,16 @@ export class CloudecodeClient {
 
     const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p: string) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f: string) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
 
-    const response = await this.deepseek.chat(
+    const response = await this.deepseek.chatWithRetry(
       [
         { role: 'system', content: HTML_MODIFICATION_PROMPT },
         { role: 'user', content: prompt },
       ],
-      { temperature: 0.3, maxTokens: 8192 },
+      { temperature: 0.3, maxTokens: 8192, expectHtml: true, timeoutMs: 120_000 },
     );
+    if (!response) {
+      return { success: false, rawError: 'Demo HTML generation failed after 3 retries' };
+    }
 
     const html = this.extractHtml(response);
     if (!html) {
@@ -559,7 +562,7 @@ check();
 
       const response = await this.deepseek.chat(
         [{ role: 'user', content: prompt }],
-        { temperature: 0.3, maxTokens: 16384 }
+        { temperature: 0.3, maxTokens: 32768 }
       );
 
       const newHtml = this.extractHtml(response);
@@ -598,7 +601,7 @@ Demo HTML：${opts.demoHtml.substring(0, 1500)}
 
     const response = await this.deepseek.chat(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.3, maxTokens: 16384, timeoutMs: 180_000 },
+      { temperature: 0.3, maxTokens: 32768, timeoutMs: 180_000 },
     );
 
     const files = this.parseFiles(response);
@@ -634,7 +637,7 @@ Demo HTML：${opts.demoHtml.substring(0, 1500)}
   /** Step 2: 生成后端 API */
   async generateBackend(projectId: string, payload: { projectName: string; planSummary: any; schemaSql?: string }): Promise<Array<{ path: string; content: string }>> {
     const schemaCtx = payload.schemaSql ? `\n数据库 Schema:\n\`\`\`sql\n${payload.schemaSql}\n\`\`\`\n` : '';
-    const prompt = `${FILE_PATH_REQUIREMENT}为项目"${payload.projectName}"生成 NestJS + Prisma 后端代码。${schemaCtx}
+    const prompt = `${FILE_PATH_REQUIREMENT}为项目"${payload.projectName}"生成 Express.js + Prisma 后端代码。${schemaCtx}
 功能: ${JSON.stringify(payload.planSummary?.features || [])}
 页面: ${JSON.stringify(payload.planSummary?.pages || [])}
 角色: ${JSON.stringify(payload.planSummary?.roles || [])}
@@ -651,7 +654,7 @@ Demo HTML：${opts.demoHtml.substring(0, 1500)}
 
     const response = await this.deepseek.chat(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.3, maxTokens: 16384, timeoutMs: 120_000 },
+      { temperature: 0.3, maxTokens: 32768, timeoutMs: 120_000 },
     );
     return this.parseFiles(response);
   }
@@ -674,7 +677,7 @@ Demo HTML：${opts.demoHtml.substring(0, 1500)}
 
     const response = await this.deepseek.chat(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.3, maxTokens: 16384, timeoutMs: 120_000 },
+      { temperature: 0.3, maxTokens: 32768, timeoutMs: 120_000 },
     );
     return this.parseFiles(response);
   }

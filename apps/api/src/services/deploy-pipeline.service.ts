@@ -3,6 +3,7 @@ import { PrismaService } from '../database/prisma.service';
 import { execSync, exec } from 'child_process';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { createServer } from 'net';
 
 export interface DeployResult {
   status: 'deployed' | 'deploy_failed' | 'static_only';
@@ -220,7 +221,7 @@ export class DeployPipelineService {
     }
 
     // 找空闲端口
-    const port = this.findFreePort();
+    const port = await this.findFreePort();
     const containerName = `app-${projectId.substring(0, 8)}`.toLowerCase();
 
     try {
@@ -247,24 +248,19 @@ export class DeployPipelineService {
     return { status: 'deployed', url, port, containerName };
   }
 
-  /** 查找空闲端口（30050-30150 范围） */
-  private findFreePort(): number {
+  /** 查找空闲端口（30050-30150 范围，跨平台：用 Node.js net 模块替代 nc/ss） */
+  private async findFreePort(): Promise<number> {
     for (let port = 30050; port <= 30150; port++) {
-      try {
-        execSync(`nc -z localhost ${port} 2>/dev/null`, { timeout: 1000, stdio: 'pipe' });
-        // nc exit 0 = port in use → skip
-      } catch {
-        // nc exit 1 = connection refused = port free
-        // Also try ss to double check
-        try {
-          const ssOut = execSync(`ss -tlnp 2>/dev/null | grep ":${port} " || true`, {
-            timeout: 1000, stdio: 'pipe', encoding: 'utf-8',
-          });
-          if (!ssOut.trim()) return port;
-        } catch {
-          return port;
-        }
-      }
+      const free = await new Promise<boolean>((resolve) => {
+        const server = createServer();
+        server.once('error', () => resolve(false)); // EADDRINUSE
+        server.once('listening', () => {
+          server.close();
+          resolve(true);
+        });
+        server.listen(port, '0.0.0.0');
+      });
+      if (free) return port;
     }
     return 30050; // fallback
   }

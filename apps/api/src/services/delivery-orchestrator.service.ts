@@ -7,7 +7,6 @@ import { StatusMapperService } from './status-mapper.service';
 import { DeepseekService } from './deepseek.service';
 import { CloudecodeClient } from '../integrations/cloudecode/cloudecode.client';
 import { HermesClient } from '../integrations/hermes/hermes.client';
-import { N8nClient } from '../integrations/n8n/n8n.client';
 import { MinioService } from '../integrations/minio/minio.service';
 import { DeploymentService } from '../modules/deployment/deployment.service';
 import { createZipBuffer } from '../common/utils/zip';
@@ -59,7 +58,6 @@ export class DeliveryOrchestrator {
     private deepseek: DeepseekService,
     private cloudecode: CloudecodeClient,
     private hermes: HermesClient,
-    private n8n: N8nClient,
     private minio: MinioService,
     private deploymentService: DeploymentService,
   ) {}
@@ -75,11 +73,10 @@ export class DeliveryOrchestrator {
 
       let artifactUrl: string | undefined;
 
-      // 2. 异步导出类型（N8N 工作流）— 触发后不等结果，由 webhook 回调完成
+      // 2. 异步导出类型 — 本地生成资产（原 N8N 异步路径已弃用）
       if (exportType === 'repository' || exportType === 'database') {
         artifactUrl = await this.handleN8nWorkflow(payload);
-        if (artifactUrl === undefined) return; // N8N 异步路径：webhook 回调处理完成
-        // 降级路径：本地生成完成，跳过 switch，流入完成逻辑
+        // 本地生成完成，流入完成逻辑
       } else {
         // 3. 同步导出类型 — 等待执行结果
         switch (exportType) {
@@ -213,29 +210,15 @@ export class DeliveryOrchestrator {
 
   // ═══════════ 执行机构 3：N8N 工作流（异步 + 反馈闭环）═══════════
   /**
-   * 工程控制论 — 前向通道触发 + 反馈信道等待。
+   * 异步导出类型 — 本地生成资产（N8N 已弃用，直接使用本地引擎）。
    *
-   * 调用 N8N 工作流（delivery-export），由 N8N 编排详细的交付任务。
-   * N8N 通过以下回调完成反馈闭环：
-   *   1. POST /api/n8n-webhook/execute-task → Cloudecode 执行单个任务
-   *   2. POST /api/n8n-webhook/task-complete → 更新单个任务状态
-   *   3. POST /api/n8n-webhook/delivery-complete → 全部完成，更新状态
-   *
-   * 注意：此方法不在此处标记 Build 完成，由 delivery-complete 回调处理。
+   * 注意：此方法不在此处标记 Build 完成，由 caller handleExportRequest 统一处理。
    */
   private async handleN8nWorkflow(payload: DeliveryExportRequestedPayload): Promise<string | undefined> {
     const { projectId, exportType, buildId } = payload;
-    this.logger.log(`[执行机构] N8N 工作流: ${exportType} 项目 ${projectId}`);
+    this.logger.log(`[执行机构] 本地资产生成: ${exportType} 项目 ${projectId}`);
 
-    const result = await this.n8n.triggerDeliveryExportWorkflow(projectId, exportType);
-
-    if (result.success) {
-      this.logger.log(`[前向通道] N8N 工作流已触发: runId=${result.runId} build=${buildId}`);
-      return undefined; // webhook 回调处理完成，不在此处返回 URL
-    }
-
-    // 降级路径：N8N 不可用时本地生成资产
-    this.logger.warn(`[降级] N8N 不可用，本地生成 ${exportType} 资产`);
+    // 本地生成资产（原 N8N 降级路径，现在作为主路径）
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { name: true, demoHtml: true, planSummary: true, structuredRequirement: true },

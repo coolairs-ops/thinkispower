@@ -56,6 +56,21 @@ services:
       - "5001:5001"
     restart: unless-stopped
 
+  web:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://api:3001
+    environment:
+      PORT: 3003
+      NEXT_PUBLIC_API_URL: http://api:3001
+    ports:
+      - "3003:3003"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   api:
     build:
       context: apps/api

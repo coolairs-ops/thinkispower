@@ -294,7 +294,7 @@ export default function PlanPage() {
  <button
  onClick={handleSave}
  disabled={saving}
- className="rounded-lg bg-blue-600 px-6 py-2 text-gray-900 hover:bg-blue-700 transition-colors disabled:bg-gray-400"
+ className="rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700 transition-colors disabled:bg-gray-400"
  >
  {saving ? '保存中...' : '💾 保存修改'}
  </button>

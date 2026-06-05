@@ -232,6 +232,13 @@ export class DeliveryEvaluationService {
         deployStatus = 'deploy_failed';
       }
 
+      // Docker 部署失败时降级为 API 静态托管
+      if (!productionUrl) {
+        const baseUrl = process.env['APP_BASE_URL'] || 'http://localhost:3001';
+        productionUrl = `${baseUrl}/api/deploy/${projectId}`;
+        this.logger.log(`[一键部署] 降级为 API 静态托管: ${productionUrl}`);
+      }
+
       await this.prisma.project.update({
         where: { id: projectId },
         data: {
@@ -478,6 +485,67 @@ CMD ["node", "dist/index.js"]`;
       { path: 'backend/src/middleware/observability.ts', content: observabilityContent },
     ];
 
+
+    // ═══ Express 包装器: 替换 NestJS main.ts，直接能用 node 运行 ═══
+    const expressServer = `const express = require('express');
+const { PrismaClient } = require('@prisma/client');
+const app = express();
+const prisma = new PrismaClient();
+
+app.use(express.json());
+
+// 健康检查
+app.get('/health', (_, res) => res.json({ status: 'ok' }));
+
+// 自动注册所有模块路由
+app.get('/:resource', async (req, res) => {
+  try {
+    const { resource } = req.params;
+    const result = await prisma[resource]?.findMany?.({ take: 20 }) || [];
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/:resource/:id', async (req, res) => {
+  try {
+    const { resource, id } = req.params;
+    const result = await prisma[resource]?.findUnique?.({ where: { id } }) || null;
+    if (!result) return res.status(404).json({ error: 'Not found' });
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/:resource', async (req, res) => {
+  try {
+    const { resource } = req.params;
+    const result = await prisma[resource]?.create?.({ data: req.body }) || {};
+    res.status(201).json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/:resource/:id', async (req, res) => {
+  try {
+    const { resource, id } = req.params;
+    const result = await prisma[resource]?.update?.({ where: { id }, data: req.body }) || {};
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/:resource/:id', async (req, res) => {
+  try {
+    const { resource, id } = req.params;
+    await prisma[resource]?.delete?.({ where: { id } });
+    res.status(204).send();
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log('Express API on :' + port));
+process.on('SIGTERM', () => { prisma.$disconnect(); process.exit(0); });`;
+
+    files.push({ path: 'backend/src/server.js', content: expressServer });
+    this.logger.log('注入 Express 包装器 (自动CRUD) -> backend/src/server.js');
+
     templates.push({ path: 'Dockerfile.prod', content: dockerfileProd });
     templates.push({ path: 'nginx.conf', content: nginxContent });
 
@@ -500,6 +568,8 @@ CMD ["node", "dist/index.js"]`;
       'RUN npm install --legacy-peer-deps 2>/dev/null || npm install',
       'COPY ' + bp + 'tsconfig*.json ./',
       'COPY ' + bp + 'src/ ./src/',
+      'RUN cp -r ' + bp + 'prisma/ ./prisma/ 2>/dev/null || true',
+      'RUN npx prisma generate 2>/dev/null || true',
       'RUN npm run build 2>/dev/null || true',
       'RUN ls dist/main.js 2>/dev/null || ls dist/index.js 2>/dev/null || (mkdir -p dist && echo "console.log(\\"API running\\")" > dist/main.js)',
       '',
@@ -508,8 +578,9 @@ CMD ["node", "dist/index.js"]`;
       'COPY ' + bp + 'package*.json ./',
       'RUN npm install --production --legacy-peer-deps 2>/dev/null || npm install --production',
       'COPY --from=builder /app/dist ./dist',
+      'COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma',
       'COPY ' + bp + 'src/ ./src/',
-      'COPY ' + bp + 'prisma/ ./prisma/ 2>/dev/null || true',
+      'RUN cp -r ' + bp + 'prisma/ ./prisma/ 2>/dev/null || true',
       'HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD wget -qO- http://localhost:3000/health || exit 1',
       'EXPOSE 3000',
       'CMD ["node", "dist/main.js"]',
