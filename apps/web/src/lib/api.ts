@@ -35,8 +35,10 @@ async function tryRefreshToken(): Promise<boolean> {
 
 async function request(path: string, options: RequestInit = {}): Promise<any> {
   const token = getToken();
+  // FormData(文件上传)不能设 Content-Type，需由浏览器自动带 multipart boundary
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isForm ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
   };
   if (token) {
@@ -80,4 +82,6 @@ export const api = {
   put: (path: string, body?: any) => request(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   patch: (path: string, body?: any) => request(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   delete: (path: string) => request(path, { method: 'DELETE' }),
+  /** 文件上传(multipart)：传入 FormData，自动带 auth 与 401 刷新 */
+  upload: (path: string, formData: FormData) => request(path, { method: 'POST', body: formData }),
 };
