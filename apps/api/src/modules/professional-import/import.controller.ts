@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ImportBatchService } from './import-batch.service';
 import { AssetFileService, UploadedAsset } from './asset-file.service';
 import { ImportUnderstandingService } from './import-understanding.service';
+import { SpecMaterializeService } from './spec-materialize.service';
 import { TenantContext } from '../../common/utils/tenant-scope';
 
 @Controller('api/import/batches')
@@ -15,6 +16,7 @@ export class ImportController {
     private batchService: ImportBatchService,
     private assetService: AssetFileService,
     private understandingService: ImportUnderstandingService,
+    private materializeService: SpecMaterializeService,
   ) {}
 
   private ctx(req: { user: { id: string; orgId?: string | null } }): TenantContext {
@@ -55,5 +57,14 @@ export class ImportController {
     @Param('batchId') batchId: string,
   ) {
     return this.understandingService.summarize(this.ctx(req), batchId);
+  }
+
+  /** PM 确认 → 把需求理解物化为带溯源的草稿规格(承载项目)，汇入现有规格链路 */
+  @Post(':batchId/materialize-spec')
+  materializeSpec(
+    @Req() req: { user: { id: string; orgId?: string | null } },
+    @Param('batchId') batchId: string,
+  ) {
+    return this.materializeService.materializeSpec(this.ctx(req), batchId);
   }
 }
