@@ -116,9 +116,18 @@
 | S1.1 SecurityGate 文件边界 | ✅ | 41a6904 |
 | S1.2 命令白名单 | ✅ | 7fa26d2 |
 | S1.3 ExecutorRouter | ✅ | 47177e5 |
-| S1.4 双消息结构 | ✅ | (本次) |
-| S0.1 BullMQ 脚手架 | ⬜ 可做（Docker 已就绪） | — |
+| S1.4 双消息结构 | ✅ | fd0cc10 |
+| S0.1 BullMQ 脚手架 | ✅ 已验证 redis 连接 | 3abf0ba |
 | S0.2 TaskRunner | ⬜ | — |
 | S0.3 分布式锁 | ⬜ | — |
 
 > 待办（S1.4 发现）：现有 `sanitize.service` 的 BANNED_TERMS 缺 Docker/tsc/lint/Prisma/PostgreSQL/MinIO/JWT/RBAC/SSE 等文档 §7.2 要求的英文技术词，建议后续单独补全（会动现有 sanitize 测试，需谨慎）。
+
+### 5.1 状态机终态保护（demo 故障衍生加固）
+
+排查「已交付项目被打回 demo 生成」时发现：项目状态机缺终态锁定，任何有 planSummary 的项目都能被「确认方案/生成预览」无脑打回 `demo_generating`，丢弃已有成果重做。
+
+- **终态定义**：`LOCKED_PROJECT_STATUSES = [developing, completed]`（见 `common/utils/project-status.ts`）。
+- **A（已完成）**：`confirmPlan` 加 `isProjectLocked` 保护，拒绝锁定态回退。
+- **B（已完成）**：`doGenerate` 同样加显式 `isProjectLocked`（原 allowed 白名单已隐式保护，此为统一语义 + 防御）。审计确认其余 status 回写均为流程内部（生成成功→demo_ready），非用户回退入口。
+- **后续（B 延伸，记入待办）**：可进一步收敛为一个统一的「状态机防回退 guard」，并补「产物复用」——已生成/已交付的产物直接展示，不反复触发 AI 重新生成。

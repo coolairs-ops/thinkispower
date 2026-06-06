@@ -3,6 +3,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
+import { isProjectLocked } from '../../common/utils/project-status';
 
 /** demo 生成超过此时长仍未完成，判定为卡死（后台任务因进程重启等丢失），自愈为 failed */
 const DEMO_GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
@@ -67,6 +68,8 @@ export class DemoService {
   }
 
   private async doGenerate(p: { id: string; status: string; planSummary: any }) {
+    // 终态保护：已进入开发/交付的项目不应被打回 demo 生成（与 confirmPlan 一致）
+    if (isProjectLocked(p.status)) throw new BadRequestException('项目已进入开发/交付阶段，如需修改请使用迭代功能');
     const allowed = ['prd_ready', 'plan_ready', 'spec_confirmed', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback', 'demo_failed'];
     if (!allowed.includes(p.status)) throw new BadRequestException('当前状态不允许');
     if (!p.planSummary) throw new BadRequestException('方案尚未生成');
