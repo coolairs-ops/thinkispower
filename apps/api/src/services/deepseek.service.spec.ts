@@ -241,10 +241,10 @@ describe('DeepseekService', () => {
       expect(r.reason).toContain('不完整');
     });
 
-    it('含markdown代码块不通过', () => {
-      const r = service.validateStructure('```html\n<div>' + 'x'.repeat(500) + '</div>\n```');
-      expect(r.valid).toBe(false);
-      expect(r.reason).toContain('markdown');
+    it('带 markdown 围栏的完整 HTML 通过（剥围栏后校验，修复生成死锁）', () => {
+      const html = '```html\n<!DOCTYPE html>\n<html><head></head><body><div>' + 'x'.repeat(500) + '</div></body></html>\n```';
+      const r = service.validateStructure(html);
+      expect(r.valid).toBe(true);
     });
 
     it('HTML缺失DOCTYPE不通过', () => {

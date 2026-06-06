@@ -126,14 +126,18 @@ export class DeepseekService {
 
   /** 闸门1: 验证 HTML 结构完整性 */
   validateStructure(html: string): { valid: boolean; reason?: string } {
-    if (!html || html.length < 200) return { valid: false, reason: `响应过短 (${html.length} 字节)` };
-    if (html.length < 500) return { valid: false, reason: `响应不完整 (${html.length} < 500 字节)` };
-    // 含 markdown 代码块标记
-    if (/```[a-z]*\s*[\s\S]*?```/.test(html)) return { valid: false, reason: '响应含 markdown 代码块标记' };
-    // 是 HTML 时才检查标签
-    if (/<html/i.test(html) || /<body/i.test(html) || /<div/i.test(html)) {
-      if (!/<!DOCTYPE\s+html/i.test(html)) return { valid: false, reason: '缺少 DOCTYPE' };
-      if (!/<\/html>\s*$/i.test(html.trim())) return { valid: false, reason: 'HTML 不完整(未以 </html> 结束)' };
+    // LLM 生成 HTML 通常带 ```html 围栏，属正常输出；先剥围栏再校验结构。
+    // 否则带围栏的「完整」HTML 会被误判为不合格，导致 HTML 生成永远过不了此闸门（死锁）。
+    const stripped = (html || '')
+      .replace(/^\s*```[a-z]*\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim();
+    if (stripped.length < 200) return { valid: false, reason: `响应过短 (${stripped.length} 字节)` };
+    if (stripped.length < 500) return { valid: false, reason: `响应不完整 (${stripped.length} < 500 字节)` };
+    // 是 HTML 时才检查标签（在剥围栏后的内容上判断完整性）
+    if (/<html/i.test(stripped) || /<body/i.test(stripped) || /<div/i.test(stripped)) {
+      if (!/<!DOCTYPE\s+html/i.test(stripped)) return { valid: false, reason: '缺少 DOCTYPE' };
+      if (!/<\/html>\s*$/i.test(stripped)) return { valid: false, reason: 'HTML 不完整(未以 </html> 结束)' };
     }
     return { valid: true };
   }
