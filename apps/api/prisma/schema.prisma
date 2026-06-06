@@ -38,8 +38,9 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  memberships Membership[]
-  projects    Project[]
+  memberships   Membership[]
+  projects      Project[]
+  importBatches ImportBatch[]
 
   @@map("organizations")
 }
@@ -103,6 +104,7 @@ model Project {
   systemLocks               SystemLock[]
   specification             Specification?
   testDeployments           TestDeployment[]
+  importBatches             ImportBatch[]
 
   @@index([userId])
   @@index([orgId])
@@ -500,4 +502,103 @@ model TestDeployment {
 
   @@index([projectId, status])
   @@map("test_deployments")
+}
+
+// ============ 专业资料导入（Phase 1.5，精简版）============
+
+enum ImportBatchStatus {
+  uploading
+  parsing
+  ready_for_review
+  confirmed
+  failed
+}
+
+enum AssetCategory {
+  document
+  prototype
+  design
+  other
+}
+
+enum UnderstandingStatus {
+  draft
+  confirmed
+}
+
+/// 导入批次：一批专业资料的生命周期载体，挂租户(org)与可选项目，不污染 Project.status
+model ImportBatch {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String?  @map("org_id") @db.Uuid
+  projectId String?  @map("project_id") @db.Uuid
+  name      String?
+  status    ImportBatchStatus @default(uploading)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org           Organization?             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project       Project?                  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  assets        AssetFile[]
+  understanding RequirementUnderstanding?
+
+  @@index([orgId])
+  @@index([projectId])
+  @@map("import_batches")
+}
+
+/// 上传文件：只存对象存储引用 + checksum(秒传/解析缓存) + LLM 逐份理解笔记
+model AssetFile {
+  id           String    @id @default(uuid()) @db.Uuid
+  batchId      String    @map("batch_id") @db.Uuid
+  category     AssetCategory
+  fileName     String    @map("file_name")
+  mimeType     String?   @map("mime_type")
+  sizeBytes    BigInt?   @map("size_bytes")
+  storageKey   String    @map("storage_key")
+  checksum     String?
+  parseSummary Json?     @map("parse_summary")
+  parsedAt     DateTime? @map("parsed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  batch ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([checksum])
+  @@map("asset_files")
+}
+
+/// 处理文档：汇总各份理解的半结构化结果。features/pages 等 JSON 内每条带内联 source(溯源)
+model RequirementUnderstanding {
+  id              String   @id @default(uuid()) @db.Uuid
+  batchId         String   @unique @map("batch_id") @db.Uuid
+  positioning     String?
+  roles           Json?
+  features        Json?
+  pages           Json?
+  flows           Json?
+  conflicts       Json?
+  confidenceScore Float?   @map("confidence_score")
+  status          UnderstandingStatus @default(draft)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  batch     ImportBatch           @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  questions RequirementQuestion[]
+
+  @@map("requirement_understandings")
+}
+
+/// 低置信度/冲突时的待确认问题(人在回路)
+model RequirementQuestion {
+  id              String   @id @default(uuid()) @db.Uuid
+  understandingId String   @map("understanding_id") @db.Uuid
+  question        String
+  answer          String?
+  resolved        Boolean  @default(false)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  understanding RequirementUnderstanding @relation(fields: [understandingId], references: [id], onDelete: Cascade)
+
+  @@index([understandingId])
+  @@map("requirement_questions")
 }
