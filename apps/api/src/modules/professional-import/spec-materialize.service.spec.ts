@@ -105,9 +105,27 @@ describe('SpecMaterializeService', () => {
     expect(prisma.project.create).not.toHaveBeenCalled();
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: 'p-existing' },
-      data: { status: 'spec_ready', publicStatusLabel: '规格已生成，等待确认' },
+      data: expect.objectContaining({ status: 'spec_ready', publicStatusLabel: '规格已生成，等待确认' }),
     });
     expect(r.projectId).toBe('p-existing');
+  });
+
+  it('物化时写入 planSummary，供下游 demo 生成', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1', projectId: null, name: 'x' });
+    prisma.requirementUnderstanding.findUnique.mockResolvedValue(understanding);
+
+    await service.materializeSpec(ctx, 'b1');
+
+    const created = prisma.project.create.mock.calls[0][0].data;
+    expect(created.planSummary).toEqual(
+      expect.objectContaining({
+        positioning: '在线图书商城',
+        features: [{ name: '登录' }, { name: '下单' }],
+        pages: [{ name: '首页' }],
+        roles: [{ name: '买家' }],
+        source: 'import',
+      }),
+    );
   });
 
   it('版本递增：已有 spec 则 version+1', async () => {

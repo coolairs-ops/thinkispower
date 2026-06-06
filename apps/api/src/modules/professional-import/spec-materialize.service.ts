@@ -31,7 +31,8 @@ export class SpecMaterializeService {
     });
     if (!understanding) throw new BadRequestException('请先生成需求理解');
 
-    const projectId = await this.ensureProject(ctx, batch, understanding.positioning);
+    const planSummary = this.buildPlanSummary(understanding);
+    const projectId = await this.ensureProject(ctx, batch, understanding.positioning, planSummary);
 
     const existing = await this.prisma.specification.findUnique({ where: { projectId } });
     const specData = this.assemble(understanding);
@@ -53,18 +54,19 @@ export class SpecMaterializeService {
     return { projectId, spec };
   }
 
-  /** 确定承载项目：批次已关联则复用并置 spec_ready；否则新建一个 */
+  /** 确定承载项目：批次已关联则复用并置 spec_ready；否则新建一个。同时写入 planSummary 供下游 demo 生成 */
   private async ensureProject(
     ctx: TenantContext,
     batch: { id: string; projectId: string | null; orgId: string | null; name: string | null },
     positioning: string | null,
+    planSummary: Record<string, unknown>,
   ): Promise<string> {
     const label = this.statusMapper.mapProjectStatusToPublicLabel('spec_ready');
 
     if (batch.projectId) {
       await this.prisma.project.update({
         where: { id: batch.projectId },
-        data: { status: 'spec_ready', publicStatusLabel: label },
+        data: { status: 'spec_ready', publicStatusLabel: label, planSummary: planSummary as never },
       });
       return batch.projectId;
     }
@@ -77,6 +79,7 @@ export class SpecMaterializeService {
         description: positioning || '',
         status: 'spec_ready',
         publicStatusLabel: label,
+        planSummary: planSummary as never,
         deliveryOptions: { create: {} },
       },
     });
@@ -85,6 +88,24 @@ export class SpecMaterializeService {
       data: { projectId: project.id },
     });
     return project.id;
+  }
+
+  /** 从需求理解组装 planSummary —— 下游 demo/预览生成的输入(导入路径跳过了 plan 阶段，在此补齐) */
+  private buildPlanSummary(u: {
+    positioning: string | null;
+    features: unknown;
+    pages: unknown;
+    roles: unknown;
+  }): Record<string, unknown> {
+    const names = (v: unknown) =>
+      this.items(v).map((x) => ({ name: x.name }));
+    return {
+      positioning: u.positioning ?? '',
+      features: names(u.features),
+      pages: names(u.pages),
+      roles: names(u.roles),
+      source: 'import',
+    };
   }
 
   /** 从需求理解组装规格内容，逐条带 provenance(来源资料) */
