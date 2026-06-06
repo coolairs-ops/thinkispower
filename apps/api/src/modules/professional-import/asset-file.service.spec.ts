@@ -8,6 +8,7 @@ describe('AssetFileService', () => {
     assetFile: { findFirst: jest.Mock; create: jest.Mock };
   };
   let minio: { uploadFile: jest.Mock };
+  let queue: { add: jest.Mock };
   let service: AssetFileService;
   const ctx = { userId: 'u1', orgId: 'org-1' };
 
@@ -25,7 +26,8 @@ describe('AssetFileService', () => {
       assetFile: { findFirst: jest.fn(), create: jest.fn() },
     };
     minio = { uploadFile: jest.fn().mockResolvedValue('http://signed') };
-    service = new AssetFileService(prisma as never, minio as never);
+    queue = { add: jest.fn().mockResolvedValue(undefined) };
+    service = new AssetFileService(prisma as never, minio as never, queue as never);
   });
 
   it('无文件 → BadRequest', async () => {
@@ -67,6 +69,7 @@ describe('AssetFileService', () => {
         checksum: expectedSum,
       },
     });
+    expect(queue.add).toHaveBeenCalledWith('parse', { assetId: 'a1' });
   });
 
   it('秒传：同批次同 checksum 直接复用，不重复上传', async () => {
@@ -79,6 +82,7 @@ describe('AssetFileService', () => {
     expect(result).toBe(existing);
     expect(minio.uploadFile).not.toHaveBeenCalled();
     expect(prisma.assetFile.create).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
   });
 
   it('显式 category 覆盖扩展名推断', async () => {

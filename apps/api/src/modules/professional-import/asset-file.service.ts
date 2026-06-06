@@ -1,8 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { MinioService } from '../../integrations/minio/minio.service';
 import { assertOrgAccess, TenantContext } from '../../common/utils/tenant-scope';
+import { IMPORT_PARSE_QUEUE, ImportParseJob } from './import-parse.processor';
 
 /** 上传文件的最小形状（multer memory storage） */
 export interface UploadedAsset {
@@ -34,6 +37,7 @@ export class AssetFileService {
   constructor(
     private prisma: PrismaService,
     private minio: MinioService,
+    @InjectQueue(IMPORT_PARSE_QUEUE) private parseQueue: Queue<ImportParseJob>,
   ) {}
 
   /** 接收一份上传文件，落对象存储并登记 AssetFile */
@@ -64,7 +68,7 @@ export class AssetFileService {
       contentType: file.mimetype || 'application/octet-stream',
     });
 
-    return this.prisma.assetFile.create({
+    const created = await this.prisma.assetFile.create({
       data: {
         batchId,
         category: resolvedCategory as never,
@@ -75,6 +79,11 @@ export class AssetFileService {
         checksum,
       },
     });
+
+    // 异步逐份理解（BullMQ）：不阻塞上传响应，进程重启不丢
+    await this.parseQueue.add('parse', { assetId: created.id });
+
+    return created;
   }
 
   /** 按扩展名粗分类；UI 已知槽位时由客户端显式传 category 覆盖 */

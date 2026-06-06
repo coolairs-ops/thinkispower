@@ -95,6 +95,18 @@ export class MinioService implements OnModuleInit {
   }
 
   /**
+   * Download an object as a Buffer (用于逐份理解：从对象存储拉回字节喂 LLM)。
+   */
+  async downloadFile(objectName: string): Promise<Buffer> {
+    const stream = await this.client.getObject(this.bucket, objectName);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk as Buffer);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  /**
    * Build a namespaced object name for a project artifact.
    */
   buildObjectName(projectId: string, exportType: string, filename: string): string {
