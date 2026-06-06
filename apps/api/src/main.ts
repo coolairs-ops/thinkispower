@@ -5,6 +5,11 @@ import * as express from 'express';
 import { AppModule } from './app.module';
 import { UserFriendlyExceptionFilter } from './common/filters/user-friendly-exception.filter';
 
+// BigInt 序列化兜底：Prisma 的 BigInt 字段（如 AssetFile.sizeBytes）默认无法被 res.json 序列化
+(BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function (this: bigint) {
+  return Number(this);
+};
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 

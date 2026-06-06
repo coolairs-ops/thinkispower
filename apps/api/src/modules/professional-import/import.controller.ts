@@ -1,12 +1,19 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller, Get, Post, Body, Param, UseGuards, Req, UploadedFile, UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ImportBatchService } from './import-batch.service';
+import { AssetFileService, UploadedAsset } from './asset-file.service';
 import { TenantContext } from '../../common/utils/tenant-scope';
 
 @Controller('api/import/batches')
 @UseGuards(JwtAuthGuard)
 export class ImportController {
-  constructor(private batchService: ImportBatchService) {}
+  constructor(
+    private batchService: ImportBatchService,
+    private assetService: AssetFileService,
+  ) {}
 
   private ctx(req: { user: { id: string; orgId?: string | null } }): TenantContext {
     return { userId: req.user.id, orgId: req.user.orgId ?? null };
@@ -25,5 +32,17 @@ export class ImportController {
   @Get(':batchId')
   get(@Req() req: { user: { id: string; orgId?: string | null } }, @Param('batchId') batchId: string) {
     return this.batchService.get(this.ctx(req), batchId);
+  }
+
+  /** 接收一份上传文件：落域内对象存储 + 登记 AssetFile（multipart 字段名 file） */
+  @Post(':batchId/files')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 200 * 1024 * 1024 } }))
+  addFile(
+    @Req() req: { user: { id: string; orgId?: string | null } },
+    @Param('batchId') batchId: string,
+    @UploadedFile() file: UploadedAsset | undefined,
+    @Body() body: { category?: string },
+  ) {
+    return this.assetService.addFile(this.ctx(req), batchId, file, body?.category);
   }
 }

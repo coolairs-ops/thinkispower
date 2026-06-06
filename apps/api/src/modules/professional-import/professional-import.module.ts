@@ -1,14 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ImportController } from './import.controller';
 import { ImportBatchService } from './import-batch.service';
+import { AssetFileService } from './asset-file.service';
 
 /**
  * 专业资料导入（Phase 1.5）。
- * 第 1 步：导入批次生命周期。后续：文件接收(AssetFile+MinIO) → 逐份理解(LlmGateway+BullMQ) → 处理文档。
+ * 第 1 步：导入批次生命周期。第 2 步：文件接收(AssetFile+MinIO+checksum)。
+ * 后续：逐份理解(LlmGateway+BullMQ) → 处理文档。
+ * MinioService 由 @Global MinioModule 提供，无需在此导入。
  */
 @Module({
   controllers: [ImportController],
-  providers: [ImportBatchService],
-  exports: [ImportBatchService],
+  providers: [ImportBatchService, AssetFileService],
+  exports: [ImportBatchService, AssetFileService],
 })
 export class ProfessionalImportModule {}
