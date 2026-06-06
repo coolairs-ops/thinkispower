@@ -3,6 +3,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { PlanGeneratorService } from '../../services/plan-generator.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoService } from '../demo/demo.service';
+import { isProjectLocked } from '../../common/utils/project-status';
 
 @Injectable()
 export class PlanService {
@@ -57,6 +58,10 @@ export class PlanService {
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
     if (!project.planSummary) throw new BadRequestException('方案尚未生成，请先完成需求描述');
+    // 终态保护：已进入开发/交付的项目不应被「确认方案」打回 demo 生成（避免丢弃已有成果重做）
+    if (isProjectLocked(project.status)) {
+      throw new BadRequestException('项目已进入开发/交付阶段，如需修改请使用迭代功能');
+    }
 
     await this.prisma.project.update({
       where: { id: projectId },
