@@ -24,13 +24,14 @@ export interface ParseSummary {
 
 const TEXT_MIME_PREFIX = 'text/';
 const TEXT_EXTS = new Set(['txt', 'md', 'markdown', 'csv', 'json', 'log', 'yaml', 'yml']);
-const MAX_TEXT_CHARS = 12_000;
+const MAX_TEXT_CHARS = 30_000;
 
 const UNDERSTAND_SYSTEM =
-  '你是产品资料理解助手。阅读用户提供的一份专业资料，提取与产品相关的信息。' +
+  '你是产品需求理解助手。请逐段通读这份专业资料，尽可能完整、细致地提取其中描述的所有产品信息，' +
+  '不要遗漏，也不要把多个具体功能概括成一个笼统的大类——资料里提到的每一个可操作能力都要单列一条。' +
   '只输出一个 JSON 对象，不要任何解释或 markdown 代码块，字段：' +
-  '{"summary":"一句话概述","features":["功能名"],"pages":["页面/界面名"],' +
-  '"roles":["用户角色"],"entities":["数据实体"],"notes":"补充要点"}。' +
+  '{"summary":"一两句话概述产品定位","features":["逐条列出资料中提到的每个功能点，尽量穷尽，宁多勿漏"],' +
+  '"pages":["页面/界面/模块名"],"roles":["用户角色"],"entities":["数据实体"],"notes":"其他要点"}。' +
   '无法判断的字段给空数组或空字符串。';
 
 /**
@@ -105,7 +106,7 @@ export class ImportParseService {
     const raw = await this.llm.chat(
       'text-primary',
       { system: UNDERSTAND_SYSTEM, user: `资料文件名：${asset.fileName}\n内容：\n${text}` },
-      { temperature: 0.2 },
+      { temperature: 0.2, maxTokens: 8000 },
     );
 
     return this.toSummary(raw);
