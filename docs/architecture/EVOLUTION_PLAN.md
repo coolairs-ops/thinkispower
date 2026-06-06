@@ -113,10 +113,12 @@
 
 | 步骤 | 状态 | 提交 |
 |---|---|---|
-| S1.1 SecurityGate 文件边界 | ⬜ 进行中 | — |
-| S1.2 命令白名单 | ⬜ | — |
-| S1.3 ExecutorRouter | ⬜ | — |
-| S1.4 双消息结构 | ⬜ | — |
-| S0.1 BullMQ 脚手架 | ⬜ 待 Docker 就位 | — |
+| S1.1 SecurityGate 文件边界 | ✅ | 41a6904 |
+| S1.2 命令白名单 | ✅ | 7fa26d2 |
+| S1.3 ExecutorRouter | ✅ | 47177e5 |
+| S1.4 双消息结构 | ✅ | (本次) |
+| S0.1 BullMQ 脚手架 | ⬜ 可做（Docker 已就绪） | — |
 | S0.2 TaskRunner | ⬜ | — |
 | S0.3 分布式锁 | ⬜ | — |
+
+> 待办（S1.4 发现）：现有 `sanitize.service` 的 BANNED_TERMS 缺 Docker/tsc/lint/Prisma/PostgreSQL/MinIO/JWT/RBAC/SSE 等文档 §7.2 要求的英文技术词，建议后续单独补全（会动现有 sanitize 测试，需谨慎）。
