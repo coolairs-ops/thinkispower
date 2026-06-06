@@ -133,11 +133,12 @@ export class CloudecodeClient {
   }> {
     this.logger.log(`Cloudecode directly generating demo HTML for project ${projectId}`);
 
-    const pages = Array.isArray(planSummary.pages) ? planSummary.pages : ['首页', '列表页'];
-    const features = Array.isArray(planSummary.features) ? planSummary.features : [];
-    const name = planSummary.summary || '应用';
+    const pageNames = this.itemNames(planSummary?.pages);
+    const pages = pageNames.length ? pageNames : ['首页', '列表页'];
+    const features = this.itemNames(planSummary?.features);
+    const name = planSummary?.summary || planSummary?.positioning || '应用';
 
-    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p: string) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f: string) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
+    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
 
     const response = await this.deepseek.chatWithRetry(
       [
@@ -176,11 +177,12 @@ export class CloudecodeClient {
     this.logger.log(`Cloudecode generating demo HTML for project ${project.id}`);
 
     const planSummary = (task.inputPayload as any)?.planSummary || {};
-    const pages = Array.isArray(planSummary.pages) ? planSummary.pages : ['首页', '列表页'];
-    const features = Array.isArray(planSummary.features) ? planSummary.features : [];
-    const name = planSummary.summary || '应用';
+    const pageNames = this.itemNames(planSummary?.pages);
+    const pages = pageNames.length ? pageNames : ['首页', '列表页'];
+    const features = this.itemNames(planSummary?.features);
+    const name = planSummary?.summary || planSummary?.positioning || '应用';
 
-    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p: string) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f: string) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
+    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
 
     const response = await this.deepseek.chat(
       [
@@ -533,6 +535,15 @@ check();
 
   private sanitizeProjectName(name: string): string {
     return name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'my-app';
+  }
+
+  /** planSummary 的 features/pages 可能是 string[]（描述路径）或 [{name}]（导入路径），统一取名字 */
+  private itemNames(v: unknown): string[] {
+    if (!Array.isArray(v)) return [];
+    return v
+      .map((x) => (typeof x === 'string' ? x : ((x as { name?: string })?.name ?? '')))
+      .map((s) => String(s).trim())
+      .filter(Boolean);
   }
 
   private extractHtml(response: string): string | null {
