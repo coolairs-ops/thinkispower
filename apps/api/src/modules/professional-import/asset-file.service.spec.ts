@@ -85,6 +85,20 @@ describe('AssetFileService', () => {
     expect(queue.add).not.toHaveBeenCalled();
   });
 
+  it('中文文件名(multer latin1)还原为 utf8', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1' });
+    prisma.assetFile.findFirst.mockResolvedValue(null);
+    prisma.assetFile.create.mockImplementation(({ data }: never) => data);
+
+    // 模拟 multer：utf8 文件名被当作 latin1 读入
+    const garbled = Buffer.from('需求文档.docx', 'utf8').toString('latin1');
+    await service.addFile(ctx, 'b1', file({ originalname: garbled }));
+
+    expect(prisma.assetFile.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ fileName: '需求文档.docx' }) }),
+    );
+  });
+
   it('显式 category 覆盖扩展名推断', async () => {
     prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1' });
     prisma.assetFile.findFirst.mockResolvedValue(null);

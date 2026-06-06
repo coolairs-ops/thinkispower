@@ -53,6 +53,8 @@ export class AssetFileService {
     if (!batch) throw new NotFoundException('导入批次不存在');
     assertOrgAccess(batch.orgId, ctx.orgId, { allowLegacyNull: true });
 
+    // multer/busboy 默认以 latin1 解析 multipart 文件名，中文会乱码 → 还原为 utf8
+    const fileName = Buffer.from(file.originalname, 'latin1').toString('utf8');
     const checksum = createHash('sha256').update(file.buffer).digest('hex');
 
     // 秒传：同批次同 checksum 直接复用（幂等重传），不重复上传字节
@@ -61,8 +63,8 @@ export class AssetFileService {
     });
     if (existing) return existing;
 
-    const resolvedCategory = category ?? this.inferCategory(file.originalname);
-    const storageKey = `imports/${batchId}/${checksum}/${file.originalname}`;
+    const resolvedCategory = category ?? this.inferCategory(fileName);
+    const storageKey = `imports/${batchId}/${checksum}/${fileName}`;
 
     await this.minio.uploadFile(storageKey, file.buffer, {
       contentType: file.mimetype || 'application/octet-stream',
@@ -72,7 +74,7 @@ export class AssetFileService {
       data: {
         batchId,
         category: resolvedCategory as never,
-        fileName: file.originalname,
+        fileName,
         mimeType: file.mimetype ?? null,
         sizeBytes: BigInt(file.size),
         storageKey,
