@@ -20,7 +20,10 @@ export default function NewProjectPage() {
 
   const addFiles = (list: FileList | null) => {
     if (!list) return;
-    setFiles((prev) => [...prev, ...Array.from(list)]);
+    // 同步固化为数组：updater 是异步执行的，届时 input.value 已被清空、FileList 变空
+    const picked = Array.from(list);
+    if (picked.length === 0) return;
+    setFiles((prev) => [...prev, ...picked]);
   };
 
   const removeFile = (idx: number) => {
