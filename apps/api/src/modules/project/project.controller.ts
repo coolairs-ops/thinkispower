@@ -13,7 +13,7 @@ export class ProjectController {
 
   @Post()
   async create(@Req() req: any, @Body() body: { name: string; description?: string }) {
-    return this.projectService.create(req.user.id, body);
+    return this.projectService.create(req.user.id, req.user.orgId ?? null, body);
   }
 
   @Get()

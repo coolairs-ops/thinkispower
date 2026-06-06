@@ -35,10 +35,11 @@ export class ProjectService {
     this.logger.log(`项目 ${projectId} 状态: ${current.status} → ${nextStatus}`);
   }
 
-  async create(userId: string, data: { name: string; description?: string }) {
+  async create(userId: string, orgId: string | null, data: { name: string; description?: string }) {
     const project = await this.prisma.project.create({
       data: {
         userId,
+        orgId,
         name: data.name,
         description: data.description || '',
         status: 'needs_input',

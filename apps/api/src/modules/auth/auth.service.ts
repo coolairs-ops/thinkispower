@@ -16,8 +16,14 @@ export class AuthService {
     if (existing) throw new ConflictException('该邮箱已被注册');
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await this.prisma.user.create({
-      data: { email, name, hashedPassword },
+    // 注册即建 personal organization + owner membership（与 2-1b 回填命名一致），保证新用户有租户上下文
+    const user = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.user.create({ data: { email, name, hashedPassword } });
+      const org = await tx.organization.create({
+        data: { name: `${name || email} 的空间`, slug: `user-${u.id}`, plan: 'free' },
+      });
+      await tx.membership.create({ data: { userId: u.id, orgId: org.id, role: 'owner' } });
+      return u;
     });
 
     const { accessToken, refreshToken } = await this.generateTokens(user.id, user.role);

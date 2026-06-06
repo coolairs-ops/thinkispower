@@ -59,11 +59,12 @@ describe('ProjectService', () => {
     it('should create a project with deliveryOptions', async () => {
       prisma.project.create.mockResolvedValue(mockProject);
 
-      const result = await service.create(mockUserId, { name: '测试项目', description: '一个测试项目' });
+      const result = await service.create(mockUserId, 'org-1', { name: '测试项目', description: '一个测试项目' });
 
       expect(prisma.project.create).toHaveBeenCalledWith({
         data: {
           userId: mockUserId,
+          orgId: 'org-1',
           name: '测试项目',
           description: '一个测试项目',
           status: 'needs_input',
@@ -78,7 +79,7 @@ describe('ProjectService', () => {
     it('should create with empty description', async () => {
       prisma.project.create.mockResolvedValue({ ...mockProject, description: '' });
 
-      const result = await service.create(mockUserId, { name: '测试' });
+      const result = await service.create(mockUserId, 'org-1', { name: '测试' });
 
       expect(result.description).toBe('');
     });
