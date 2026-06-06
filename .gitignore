@@ -4,6 +4,7 @@ dist/
 .env
 *.log
 .claude/
+.hermes/
 demo_response.json
 internal/*
 !internal/n8n-workflows/
