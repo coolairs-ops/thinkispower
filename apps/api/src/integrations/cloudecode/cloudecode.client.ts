@@ -144,7 +144,7 @@ export class CloudecodeClient {
         { role: 'system', content: HTML_MODIFICATION_PROMPT },
         { role: 'user', content: prompt },
       ],
-      { temperature: 0.3, maxTokens: 8192, expectHtml: true, timeoutMs: 120_000 },
+      { temperature: 0.3, maxTokens: 32768, expectHtml: true, timeoutMs: 240_000 },
     );
     if (!response) {
       return { success: false, rawError: 'Demo HTML generation failed after 3 retries' };
@@ -543,7 +543,11 @@ check();
     if (codeMatch) return codeMatch[1].trim();
 
     if (response.includes('<html') || response.includes('<!DOCTYPE')) {
-      return response.trim();
+      // 输出被截断时代码块未闭合，上面两个正则会失配；这里兜底剥掉首尾残留的 ``` 围栏
+      return response
+        .replace(/^\s*```(?:html)?\s*/i, '')
+        .replace(/\s*```\s*$/, '')
+        .trim();
     }
 
     return null;

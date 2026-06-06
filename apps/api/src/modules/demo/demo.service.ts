@@ -4,6 +4,9 @@ import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 
+/** demo 生成超过此时长仍未完成，判定为卡死（后台任务因进程重启等丢失），自愈为 failed */
+const DEMO_GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
+
 @Injectable()
 export class DemoService {
   private readonly logger = new Logger(DemoService.name);
@@ -18,12 +21,27 @@ export class DemoService {
   async getDemo(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true },
+      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, updatedAt: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
+
+    let status = project.status;
+    let publicStatusLabel = project.publicStatusLabel;
+    // 自愈：demo 生成是后台异步任务，进程中途重启会丢失，导致 status 永久卡在 demo_generating。
+    // 超时仍未完成则判定失败，让前端脱离死循环、可重试。
+    if (status === 'demo_generating' && Date.now() - project.updatedAt.getTime() > DEMO_GENERATION_TIMEOUT_MS) {
+      await this.prisma.project.update({
+        where: { id: project.id },
+        data: { status: 'demo_failed', publicStatusLabel: '预览生成超时，请重试' },
+      });
+      status = 'demo_failed';
+      publicStatusLabel = '预览生成超时，请重试';
+      this.logger.warn(`Demo generation stale for ${projectId}, marked as failed`);
+    }
+
     const ready = ['demo_ready', 'awaiting_demo_feedback', 'developing', 'completed'];
-    return { status: project.status, publicStatusLabel: project.publicStatusLabel, demoUrl: project.demoUrl, html: ready.includes(project.status) ? project.demoHtml : null };
+    return { status, publicStatusLabel, demoUrl: project.demoUrl, html: ready.includes(status) ? project.demoHtml : null };
   }
 
   async generateDemo(userId: string, projectId: string) {
