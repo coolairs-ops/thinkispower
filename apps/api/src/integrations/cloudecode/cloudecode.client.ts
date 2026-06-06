@@ -711,7 +711,7 @@ Demo HTML：${opts.demoHtml.substring(0, 1500)}
     let match;
     let unnamedIdx = 0;
     while ((match = filePattern.exec(response)) !== null) {
-      let filePath = match[1].trim();
+      const filePath = match[1].trim();
       const content = match[2].trim();
       if (filePath.length < 2 || filePath.length > 80) continue;
       

@@ -304,12 +304,12 @@ export class DeployPipelineService {
     try {
       const content = readFileSync(composeFile, 'utf-8');
       const ports: Record<string, number> = {};
-      const serviceRegex = /^  (\w+):\s*$/gm;
+      const serviceRegex = /^ {2}(\w+):\s*$/gm;
       const portRegex = /^\s*-\s*"?(\d+):(\d+)"?\s*$/gm;
       let currentService = '';
       
       for (const line of content.split('\n')) {
-        const sMatch = line.match(/^  (\w+):\s*$/);
+        const sMatch = line.match(/^ {2}(\w+):\s*$/);
         if (sMatch && sMatch[1] !== 'services' && sMatch[1] !== 'version') {
           currentService = sMatch[1];
         }

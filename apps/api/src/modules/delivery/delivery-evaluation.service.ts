@@ -713,7 +713,7 @@ process.on('SIGTERM', () => { prisma.$disconnect(); process.exit(0); });`;
     const lower = feature.toLowerCase();
     const words = lower
       .replace(/[，。、；：（）【】《》]/g, ' ')
-      .replace(/[',.!;:()\[\]"\-]/g, ' ')
+      .replace(/[',.!;:()[\]"-]/g, ' ')
       // 拆分中文连接词
       .replace(/和|与|或|及|的/g, ' ')
       .split(/\s+/)

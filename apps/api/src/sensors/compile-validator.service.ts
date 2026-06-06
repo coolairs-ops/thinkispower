@@ -51,7 +51,7 @@ export class CompileValidator {
   }
 
   private checkStructure(html: string): SensorCheck {
-    let issues: string[] = [];
+    const issues: string[] = [];
 
     if (!/<!DOCTYPE/i.test(html)) issues.push('缺少 DOCTYPE');
     if (!/<head/i.test(html)) issues.push('缺少 <head>');
@@ -120,7 +120,7 @@ export class CompileValidator {
       return { name: 'CSS语法检查', passed: true, score: 100, weight: 20, detail: '无内联样式' };
     }
 
-    let issues: string[] = [];
+    const issues: string[] = [];
 
     for (const block of styleBlocks) {
       const cssContent = block.replace(/<style[^>]*>/i, '').replace(/<\/style>/i, '').trim();
