@@ -1,5 +1,14 @@
 import { NotFoundException } from '@nestjs/common';
+
+jest.mock('mammoth', () => ({ extractRawText: jest.fn() }));
+jest.mock('pdf-parse', () => jest.fn());
+
+import * as mammoth from 'mammoth';
+import pdfParse from 'pdf-parse';
 import { ImportParseService } from './import-parse.service';
+
+const mockMammoth = mammoth.extractRawText as jest.Mock;
+const mockPdf = pdfParse as unknown as jest.Mock;
 
 describe('ImportParseService', () => {
   let prisma: {
@@ -15,6 +24,8 @@ describe('ImportParseService', () => {
     };
     minio = { downloadFile: jest.fn() };
     llm = { chat: jest.fn() };
+    mockMammoth.mockReset();
+    mockPdf.mockReset();
     service = new ImportParseService(prisma as never, minio as never, llm as never);
   });
 
@@ -70,13 +81,60 @@ describe('ImportParseService', () => {
     expect(llm.chat).not.toHaveBeenCalled();
   });
 
-  it('二进制类(pdf) → skipped(待专用解析器)', async () => {
+  it('其余二进制(zip) → skipped(待专用解析器)', async () => {
     prisma.assetFile.findUnique.mockResolvedValue({
-      id: 'a1', storageKey: 'k', mimeType: 'application/pdf', fileName: 'spec.pdf',
+      id: 'a1', storageKey: 'k', mimeType: 'application/zip', fileName: 'proto.zip',
     });
     const r = await service.parseAsset('a1');
     expect(r.status).toBe('skipped');
     expect(r.reason).toContain('待专用解析器');
+    expect(llm.chat).not.toHaveBeenCalled();
+  });
+
+  it('Word(docx)：mammoth 抽取文本 → 调 LLM', async () => {
+    prisma.assetFile.findUnique.mockResolvedValue({
+      id: 'a1', storageKey: 'k',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      fileName: '需求.docx',
+    });
+    minio.downloadFile.mockResolvedValue(Buffer.from('binary-docx'));
+    mockMammoth.mockResolvedValue({ value: '功能：登录、下单' });
+    llm.chat.mockResolvedValue('{"summary":"x","features":["登录"]}');
+
+    const r = await service.parseAsset('a1');
+
+    expect(mockMammoth).toHaveBeenCalled();
+    expect(llm.chat).toHaveBeenCalledWith('text-primary', expect.objectContaining({ user: expect.stringContaining('登录、下单') }), expect.any(Object));
+    expect(r.status).toBe('parsed');
+    expect(r.features).toEqual(['登录']);
+  });
+
+  it('PDF：pdf-parse 抽取文本 → 调 LLM', async () => {
+    prisma.assetFile.findUnique.mockResolvedValue({
+      id: 'a1', storageKey: 'k', mimeType: 'application/pdf', fileName: 'spec.pdf',
+    });
+    minio.downloadFile.mockResolvedValue(Buffer.from('binary-pdf'));
+    mockPdf.mockResolvedValue({ text: '页面：首页、详情页' });
+    llm.chat.mockResolvedValue('{"summary":"y","pages":["首页"]}');
+
+    const r = await service.parseAsset('a1');
+
+    expect(mockPdf).toHaveBeenCalled();
+    expect(llm.chat).toHaveBeenCalledWith('text-primary', expect.objectContaining({ user: expect.stringContaining('首页、详情页') }), expect.any(Object));
+    expect(r.status).toBe('parsed');
+    expect(r.pages).toEqual(['首页']);
+  });
+
+  it('抽取到空文本(扫描件) → skipped，不调 LLM', async () => {
+    prisma.assetFile.findUnique.mockResolvedValue({
+      id: 'a1', storageKey: 'k', mimeType: 'application/pdf', fileName: 'scan.pdf',
+    });
+    minio.downloadFile.mockResolvedValue(Buffer.from('binary-pdf'));
+    mockPdf.mockResolvedValue({ text: '   \n  ' });
+
+    const r = await service.parseAsset('a1');
+    expect(r.status).toBe('skipped');
+    expect(r.reason).toContain('未从');
     expect(llm.chat).not.toHaveBeenCalled();
   });
 

@@ -1,4 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import * as mammoth from 'mammoth';
+import pdfParse from 'pdf-parse';
 import { PrismaService } from '../../database/prisma.service';
 import { MinioService } from '../../integrations/minio/minio.service';
 import { LlmGatewayService } from '../../integrations/llm/llm-gateway.service';
@@ -34,8 +36,8 @@ const UNDERSTAND_SYSTEM =
 /**
  * 逐份理解（P15-2 第 3 步）：对单个 AssetFile 用 LLM 网关产出半结构化理解笔记。
  *
- * - 文本类直读字节 → text-primary。
- * - 图片类标记 skipped（交由独立视觉模型处理）；pdf/docx/zip/.rp 等二进制标记 skipped（待专用解析器），不引入解析库。
+ * - 文本类直读 / Word(docx) 经 mammoth / PDF 经 pdf-parse 抽取文本 → text-primary。
+ * - 图片类标记 skipped（交由独立视觉模型处理）；其余二进制(zip/.rp 等)标记 skipped（待专用解析器）。
  * - 结果写 AssetFile.parseSummary + parsedAt，供后续汇总成 RequirementUnderstanding。
  * - 走 LlmGateway 统一出口：AI_MODE=local 时自动域内、外呼被阻断（§1.1 数据不出域）。
  */
@@ -86,12 +88,20 @@ export class ImportParseService {
     if (kind === 'skip') {
       return {
         status: 'skipped',
-        reason: `二进制格式（${asset.mimeType ?? asset.fileName}）暂未支持，待专用解析器`,
+        reason: `暂不支持的格式（${asset.mimeType ?? asset.fileName}），待专用解析器`,
       };
     }
 
     const buffer = await this.minio.downloadFile(asset.storageKey);
-    const text = buffer.toString('utf8').slice(0, MAX_TEXT_CHARS);
+    const text = (await this.extractText(kind, buffer)).slice(0, MAX_TEXT_CHARS);
+
+    if (!text.trim()) {
+      return {
+        status: 'skipped',
+        reason: `未从「${asset.fileName}」提取到文本（可能是扫描件或空文件）`,
+      };
+    }
+
     const raw = await this.llm.chat(
       'text-primary',
       { system: UNDERSTAND_SYSTEM, user: `资料文件名：${asset.fileName}\n内容：\n${text}` },
@@ -99,6 +109,13 @@ export class ImportParseService {
     );
 
     return this.toSummary(raw);
+  }
+
+  /** 按类型抽取纯文本：txt 直读 / docx 经 mammoth / pdf 经 pdf-parse */
+  private async extractText(kind: 'text' | 'word' | 'pdf', buffer: Buffer): Promise<string> {
+    if (kind === 'word') return (await mammoth.extractRawText({ buffer })).value;
+    if (kind === 'pdf') return (await pdfParse(buffer)).text;
+    return buffer.toString('utf8');
   }
 
   /** 解析 LLM 返回的 JSON；非法则原文兜底 */
@@ -117,12 +134,20 @@ export class ImportParseService {
     };
   }
 
-  private classify(mime: string | null, fileName: string): 'text' | 'image' | 'skip' {
+  private classify(mime: string | null, fileName: string): 'text' | 'word' | 'pdf' | 'image' | 'skip' {
     const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
-    if ((mime && mime.startsWith('image/')) || ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
+    const m = mime ?? '';
+    if (m.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) {
       return 'image';
     }
-    if ((mime && mime.startsWith(TEXT_MIME_PREFIX)) || TEXT_EXTS.has(ext)) {
+    if (m.includes('pdf') || ext === 'pdf') {
+      return 'pdf';
+    }
+    // 仅 docx（mammoth 不支持老 .doc 二进制）
+    if (m.includes('wordprocessingml') || ext === 'docx') {
+      return 'word';
+    }
+    if (m.startsWith(TEXT_MIME_PREFIX) || TEXT_EXTS.has(ext)) {
       return 'text';
     }
     return 'skip';
