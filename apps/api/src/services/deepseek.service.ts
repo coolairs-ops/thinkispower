@@ -147,7 +147,9 @@ export class DeepseekService {
     const errorPatterns = [
       { pattern: /抱歉.{0,20}(无法|不能|出错)/i, label: 'AI 错误提示: 抱歉无法完成' },
       { pattern: /I (cannot|can't|am unable)/i, label: 'AI 错误提示: I cannot' },
-      { pattern: /(请求超时|Request\s*timeout|timeout)/i, label: '超时错误文本' },
+      // 仅匹配真正的「超时错误消息」短语；不要用裸词 timeout —
+      // 合法 SPA HTML 几乎必然含 setTimeout/clearTimeout，会被误判为错误文本而反复重试。
+      { pattern: /(请求超时|Request\s*timeout|响应超时|连接超时)/i, label: '超时错误文本' },
       { pattern: /(遇到错误|发生错误|Error occurred)/i, label: '错误描述文本' },
     ];
     for (const { pattern, label } of errorPatterns) {

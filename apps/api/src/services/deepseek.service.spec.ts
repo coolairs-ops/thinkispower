@@ -302,6 +302,12 @@ describe('DeepseekService', () => {
       const r = service.validateContent('<!DOCTYPE html><html>客户管理系统演示</html>');
       expect(r.valid).toBe(true);
     });
+
+    it('含 setTimeout 的合法 HTML — 通过（裸词 timeout 不应误判）', () => {
+      const html = '<!DOCTYPE html><html><body><script>setTimeout(()=>{toast()},2000);clearTimeout(t)</script></body></html>';
+      const r = service.validateContent(html);
+      expect(r.valid).toBe(true);
+    });
   });
 
   describe('chatWithRetry 自愈重试', () => {

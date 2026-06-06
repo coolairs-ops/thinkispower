@@ -5,8 +5,13 @@ import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { isProjectLocked } from '../../common/utils/project-status';
 
-/** demo 生成超过此时长仍未完成，判定为卡死（后台任务因进程重启等丢失），自愈为 failed */
-const DEMO_GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
+/**
+ * demo 生成超过此时长仍未完成，判定为卡死（后台任务因进程重启等丢失），自愈为 failed。
+ * 必须大于生成自身的最坏耗时，否则「还活着只是慢」的复杂规格会被提前判死：
+ * generateDemoHtmlDirect → chatWithRetry 最多 3 次 × 240s/次 = 12 分钟。
+ * 取 13 分钟留余量；真正的生成失败由 generateAsync 自己写 demo_failed，此处只兜底进程丢失。
+ */
+const DEMO_GENERATION_TIMEOUT_MS = 13 * 60 * 1000;
 
 @Injectable()
 export class DemoService {
