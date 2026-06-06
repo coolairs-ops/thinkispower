@@ -16,6 +16,8 @@ export interface ParseSummary {
   roles?: string[];
   entities?: string[];
   notes?: string;
+  /** 资深 PM 视角：建议补充 / 待明确的需求点，供后续人工补全 */
+  suggestions?: string[];
   /** skipped/error 时的原因 */
   reason?: string;
   /** LLM 未返回合法 JSON 时的原始文本兜底 */
@@ -27,12 +29,16 @@ const TEXT_EXTS = new Set(['txt', 'md', 'markdown', 'csv', 'json', 'log', 'yaml'
 const MAX_TEXT_CHARS = 30_000;
 
 const UNDERSTAND_SYSTEM =
-  '你是产品需求理解助手。请逐段通读这份专业资料，尽可能完整、细致地提取其中描述的所有产品信息，' +
-  '不要遗漏，也不要把多个具体功能概括成一个笼统的大类——资料里提到的每一个可操作能力都要单列一条。' +
-  '只输出一个 JSON 对象，不要任何解释或 markdown 代码块，字段：' +
-  '{"summary":"一两句话概述产品定位","features":["逐条列出资料中提到的每个功能点，尽量穷尽，宁多勿漏"],' +
-  '"pages":["页面/界面/模块名"],"roles":["用户角色"],"entities":["数据实体"],"notes":"其他要点"}。' +
-  '无法判断的字段给空数组或空字符串。';
+  '你是一位资深产品经理，正在把一份专业资料整理成结构清晰、专业的产品需求。请通读资料后只输出一个 JSON 对象，' +
+  '不要任何解释或 markdown 代码块。要求：\n' +
+  '- features：用产品需求的语言逐条描述「用户/角色能完成什么」，每条用「动词+对象」的精炼短语' +
+  '（如"自动核验申报材料完整性""按法规匹配审查依据"），粒度适中、彼此不重叠、可直接作为一条需求条目；' +
+  '只写面向业务的产品功能，不要把技术实现（OCR、RAG、规则引擎、具体模型/中间件）、交付物清单、实施阶段当作功能。\n' +
+  '- suggestions：站在资深 PM 角度，列出这份资料里尚不清晰或建议补充完善的点（如未明确的角色权限分级、关键流程与状态流转、' +
+  '异常与边界处理、数据保留与权限、性能/安全等非功能需求），作为后续可补充的开放项。\n' +
+  '字段：{"summary":"一两句产品定位","features":["产品功能点"],"pages":["页面/界面/模块"],"roles":["使用角色"],' +
+  '"entities":["核心业务数据对象"],"notes":"技术方案/约束/交付范围等补充说明","suggestions":["建议补充或待明确的需求点"]}。' +
+  'features 力求专业、完整但不堆砌实现细节；无法判断的字段给空数组或空字符串。';
 
 /**
  * 逐份理解（P15-2 第 3 步）：对单个 AssetFile 用 LLM 网关产出半结构化理解笔记。
@@ -132,6 +138,7 @@ export class ImportParseService {
       roles: this.strArray(json.roles),
       entities: this.strArray(json.entities),
       notes: typeof json.notes === 'string' ? json.notes : undefined,
+      suggestions: this.strArray(json.suggestions),
     };
   }
 

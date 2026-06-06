@@ -578,6 +578,7 @@ model RequirementUnderstanding {
   pages           Json?
   flows           Json?
   conflicts       Json?
+  suggestions     Json?    // 资深 PM 视角：建议补充/待明确的需求点(开放项，供人工补全)
   confidenceScore Float?   @map("confidence_score")
   status          UnderstandingStatus @default(draft)
   createdAt       DateTime @default(now()) @map("created_at")

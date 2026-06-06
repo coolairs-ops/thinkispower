@@ -13,6 +13,7 @@ interface Understanding {
   features: MergedItem[] | null;
   pages: MergedItem[] | null;
   roles: MergedItem[] | null;
+  suggestions: string[] | null;
   confidenceScore: number | null;
 }
 interface Batch { id: string; projectId: string | null; status: string; assets: Asset[]; understanding: Understanding | null }
@@ -144,6 +145,22 @@ export default function ImportWizardPage() {
             <Section title="核心功能" items={understanding.features} />
             <Section title="页面" items={understanding.pages} />
             <Section title="用户角色" items={understanding.roles} />
+
+            {understanding.suggestions && understanding.suggestions.length > 0 && (
+              <section className="mb-5">
+                <h2 className="mb-1.5 text-sm font-semibold text-gray-900">
+                  建议补充
+                  <span className="ml-1 text-xs font-normal text-gray-400">（专业视角的待完善点，可按需补充）</span>
+                </h2>
+                <ul className="space-y-1.5">
+                  {understanding.suggestions.map((s, i) => (
+                    <li key={i} className="rounded-lg border border-dashed border-amber-300 bg-amber-50/50 px-4 py-2 text-sm text-gray-700">
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 

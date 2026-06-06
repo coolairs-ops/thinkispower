@@ -86,4 +86,21 @@ describe('ImportUnderstandingService', () => {
       data: { status: 'ready_for_review' },
     });
   });
+
+  it('汇总建议补充(suggestions)并去重', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({
+      id: 'b1', orgId: 'org-1',
+      assets: [
+        asset('a.txt', { status: 'parsed', features: ['x'], suggestions: ['未明确角色权限分级', '缺少异常处理流程'] }),
+        asset('b.txt', { status: 'parsed', features: ['y'], suggestions: ['未明确角色权限分级', '缺少数据保留策略'] }),
+      ],
+    });
+
+    const u = await service.summarize(ctx, 'b1') as { suggestions: string[] };
+
+    expect(u.suggestions).toEqual(
+      expect.arrayContaining(['未明确角色权限分级', '缺少异常处理流程', '缺少数据保留策略']),
+    );
+    expect(u.suggestions.length).toBe(3); // 跨份去重
+  });
 });

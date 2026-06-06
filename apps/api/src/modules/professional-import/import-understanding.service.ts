@@ -40,6 +40,7 @@ export class ImportUnderstandingService {
     const features = this.merge(parsed, 'features');
     const pages = this.merge(parsed, 'pages');
     const roles = this.merge(parsed, 'roles');
+    const suggestions = this.mergeSuggestions(parsed);
     const positioning =
       parsed.map((x) => x.s.summary).filter((v): v is string => !!v).join('；') || null;
     const confidenceScore = parsed.length / batch.assets.length;
@@ -51,6 +52,7 @@ export class ImportUnderstandingService {
       pages: pages as never,
       flows: [] as never,
       conflicts: [] as never,
+      suggestions: suggestions as never,
       confidenceScore,
       status: 'draft' as const,
     };
@@ -67,6 +69,18 @@ export class ImportUnderstandingService {
     });
 
     return understanding;
+  }
+
+  /** 合并各份的「建议补充」开放项，去重（不带溯源，作为统一的待补充清单） */
+  private mergeSuggestions(parsed: Array<{ fileName: string; s: ParseSummary }>): string[] {
+    const seen = new Set<string>();
+    for (const { s } of parsed) {
+      for (const raw of s.suggestions ?? []) {
+        const v = raw.trim();
+        if (v) seen.add(v);
+      }
+    }
+    return [...seen];
   }
 
   /** 把各份笔记的某个数组字段按 name 去重合并，累积来源文件名 */
