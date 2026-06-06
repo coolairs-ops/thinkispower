@@ -5,6 +5,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ImportBatchService } from './import-batch.service';
 import { AssetFileService, UploadedAsset } from './asset-file.service';
+import { ImportUnderstandingService } from './import-understanding.service';
 import { TenantContext } from '../../common/utils/tenant-scope';
 
 @Controller('api/import/batches')
@@ -13,6 +14,7 @@ export class ImportController {
   constructor(
     private batchService: ImportBatchService,
     private assetService: AssetFileService,
+    private understandingService: ImportUnderstandingService,
   ) {}
 
   private ctx(req: { user: { id: string; orgId?: string | null } }): TenantContext {
@@ -44,5 +46,14 @@ export class ImportController {
     @Body() body: { category?: string },
   ) {
     return this.assetService.addFile(this.ctx(req), batchId, file, body?.category);
+  }
+
+  /** 汇总批次内各份理解笔记 → 生成需求理解(处理文档)，批次推进到 ready_for_review */
+  @Post(':batchId/understand')
+  understand(
+    @Req() req: { user: { id: string; orgId?: string | null } },
+    @Param('batchId') batchId: string,
+  ) {
+    return this.understandingService.summarize(this.ctx(req), batchId);
   }
 }
