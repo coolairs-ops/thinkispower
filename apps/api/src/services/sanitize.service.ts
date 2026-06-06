@@ -55,6 +55,10 @@ export class SanitizeService {
     if (obj === null || typeof obj !== 'object') {
       return obj;
     }
+    // Date 无可枚举自有属性，按对象遍历会被拆成 {}（丢失日期）；原样返回，保留其 toJSON 序列化
+    if (obj instanceof Date) {
+      return obj;
+    }
     visited = visited || new WeakSet();
     if (visited.has(obj)) {
       return '[Circular]' as unknown;

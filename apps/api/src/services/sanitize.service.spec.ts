@@ -71,6 +71,23 @@ describe('SanitizeService', () => {
       expect(service.sanitizeResponseBody(true)).toBe(true);
       expect(service.sanitizeResponseBody(null)).toBe(null);
     });
+
+    it('保留 Date（不被遍历拆成 {}）', () => {
+      const d = new Date('2026-06-06T08:00:00.000Z');
+      const out = service.sanitizeResponseBody({ frozenAt: d }) as { frozenAt: Date };
+      expect(out.frozenAt).toBeInstanceOf(Date);
+      expect(JSON.stringify(out)).toContain('2026-06-06T08:00:00.000Z');
+    });
+
+    it('嵌套结构里的 Date 也保留', () => {
+      const d = new Date('2026-01-01T00:00:00.000Z');
+      const out = service.sanitizeResponseBody({ spec: { frozenAt: d }, list: [{ at: d }] }) as {
+        spec: { frozenAt: Date };
+        list: Array<{ at: Date }>;
+      };
+      expect(out.spec.frozenAt).toBeInstanceOf(Date);
+      expect(out.list[0].at).toBeInstanceOf(Date);
+    });
   });
 
   describe('getBannedTerms', () => {
