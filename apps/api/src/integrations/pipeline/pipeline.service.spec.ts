@@ -11,6 +11,12 @@ import { HtmlModuleExtractorService } from '../../services/html-module-extractor
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
 import { DeploymentService } from '../../modules/deployment/deployment.service';
 
+// zip.ts 经 require('archiver') 加载 ESM 包，jest 环境会崩；
+// 与 delivery-orchestrator.spec 同款，mock 掉 createZipBuffer 以绕过加载。
+jest.mock('../../common/utils/zip', () => ({
+  createZipBuffer: jest.fn().mockResolvedValue(Buffer.from('fake-zip')),
+}));
+
 describe('PipelineService', () => {
   let service: PipelineService;
   let taskService: TaskService;

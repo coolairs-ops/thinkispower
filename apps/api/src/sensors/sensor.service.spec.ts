@@ -3,6 +3,8 @@ import { SensorService } from './sensor.service';
 import { L1StaticSensor } from './l1-static.sensor';
 import { L2RuntimeSensor } from './l2-runtime.sensor';
 import { L3SemanticSensor } from './l3-semantic.sensor';
+import { CrossValidator } from './cross-validator.service';
+import { TraceabilityValidator } from './traceability-validator.service';
 import { PrismaService } from '../database/prisma.service';
 
 describe('SensorService', () => {
@@ -41,6 +43,8 @@ describe('SensorService', () => {
         { provide: L1StaticSensor, useValue: mockL1 },
         { provide: L2RuntimeSensor, useValue: mockL2 },
         { provide: L3SemanticSensor, useValue: mockL3 },
+        { provide: CrossValidator, useValue: {} },
+        { provide: TraceabilityValidator, useValue: {} },
         { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
@@ -69,8 +73,10 @@ describe('SensorService', () => {
   });
 
   it('should set stopIteration=true when critical check fails', async () => {
-    mockL1.run.mockResolvedValue(mockReport(1, 30, false));
-    mockL2.run.mockResolvedValue(mockReport(2, 90, true));
+    // stopIteration 仅由 L2 运行时层的严重失败触发（见 sensor.service.fuse）；
+    // L1 静态 / L3 语义失败不阻断迭代，故此处以 L2 critical fail 验证。
+    mockL1.run.mockResolvedValue(mockReport(1, 80, true));
+    mockL2.run.mockResolvedValue(mockReport(2, 30, false));
     mockL3.run.mockResolvedValue(mockReport(3, 70, true));
 
     const report = await service.runAll('project-1');

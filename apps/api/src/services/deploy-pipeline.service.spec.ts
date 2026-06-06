@@ -112,13 +112,13 @@ describe('DeployPipelineService', () => {
   });
 
   describe('findFreePort', () => {
-    it('应返回30050-30150范围内的端口', () => {
+    it('应返回30050-30150范围内的端口', async () => {
       getMockExecSync().mockImplementation((cmd: string) => {
         if (cmd.includes('nc -z')) throw new Error('connection refused');
         if (cmd.includes('ss -tlnp')) throw new Error('no match');
         return Buffer.from('');
       });
-      const port = service['findFreePort']();
+      const port = await service['findFreePort']();
       expect(port).toBeGreaterThanOrEqual(30050);
       expect(port).toBeLessThanOrEqual(30150);
     });
