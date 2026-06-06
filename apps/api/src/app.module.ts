@@ -29,6 +29,7 @@ import { HealthController } from './modules/health/health.controller';
 import { SanitizeInterceptor } from './common/interceptors/sanitize.interceptor';
 import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
 import { SharedCoreModule } from './shared/shared-core.module';
+import { QueueModule } from './queue/queue.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { SharedCoreModule } from './shared/shared-core.module';
     DiscoveryModule,
     SpecificationModule,
     SharedCoreModule,
+    QueueModule,
   ],
   controllers: [HealthController],
   providers: [
