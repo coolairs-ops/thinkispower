@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FeedbackService } from './feedback.service';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
+import { SpecificationService } from '../specification/specification.service';
 import { EVENTS } from '../../events/event-types';
 
 describe('FeedbackService', () => {
@@ -53,6 +54,7 @@ describe('FeedbackService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: StatusMapperService, useValue: statusMapper },
         { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: SpecificationService, useValue: { isBugWithinSpec: jest.fn().mockReturnValue(true) } },
       ],
     }).compile();
 
