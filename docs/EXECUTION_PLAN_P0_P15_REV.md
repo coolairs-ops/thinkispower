@@ -234,8 +234,13 @@ Specification 冻结(frozenAt) = 验收基线
 
 > 与 Phase 1.5 并行；导入功能必须在多租户作用域内隔离（一个租户看不到另一个租户的 PRD/原型）。
 
-- **P2-1 多租户模型**：Organization/Membership；Project 归属 org；现有 User→Project 关系平滑迁移（保留兼容）。
-- **P2-2 租户作用域**：统一租户作用域中间件/仓储层（防越权），关键表加 `orgId` + 索引；可选 Postgres RLS 兜底。
+- **P2-1 多租户模型**：Organization/Membership；Project 归属 org。
+  - ✅ **2-1a/b 已完成**：数据模型 + 现有数据回填（每用户 personal org + owner membership，提交 `1b0e0d2`）
+  - ✅ **2-1c-1 已完成**：tenant-scope helper（assertOrgAccess/orgScope）+ JWT 注入 orgId（`8c84227`）
+  - ✅ **2-1d-0 已完成**：注册建 org + 建项目设 orgId（`1dc1ff0`）
+  - ⏸ **2-1d 剩余（29 处 userId!== → org 作用域）暂缓**：当前每用户独占 personal org，userId 检查 == org 检查、已正确隔离、无越权漏洞；此改造是**团队协作（多人共享 org）前瞻**，待真有该场景再扫（分 4 批：project+feedback / plan+message / specification+delivery / test-deployment+余下）
+  - ⏸ **2-1c-2 RLS 暂缓**：后台任务密集，FORCE RLS 风险高，需先理清后台 org 上下文 + bypass 角色后审慎引入
+- **P2-2 租户作用域**：见上（应用层主防线已就位；RLS 兜底暂缓）。
 - **P2-3 AI 配额 + 限流**：按租户/套餐（`plan`）的 AI 用量配额（GPU 时长 / token）+ ThrottlerModule 公网限流。
 - **P2-4 用量计量**：记录每租户 AI/存储/生成用量，为配额与计费提供数据。
 - **P2-5 跨实例化**：in-process EventEmitter → Redis pub/sub；手写 SSE → Redis 广播；与 P0-2 分布式锁配套，支撑 API 多副本水平扩展。
