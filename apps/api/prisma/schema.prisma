@@ -23,8 +23,40 @@ model User {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   projects Project[]
+  memberships Membership[]
 
   @@map("users")
+}
+
+// ============ 组织 / 多租户 ============
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  plan      String   @default("free") // free | pro | enterprise（计费主体）
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships Membership[]
+  projects    Project[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  orgId     String   @map("org_id") @db.Uuid
+  role      String   @default("member") // owner | admin | member（组织内角色）
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@map("memberships")
 }
 
 // ============ 项目 ============
@@ -32,6 +64,7 @@ model User {
 model Project {
   id                     String   @id @default(uuid()) @db.Uuid
   userId                 String   @map("user_id") @db.Uuid
+  orgId                  String?  @map("org_id") @db.Uuid // 租户数据根：2-1a 可空，2-1b 回填，后续改必填
   name                   String
   description            String?
   appType                String?  @map("app_type")
@@ -54,6 +87,7 @@ model Project {
   updatedAt              DateTime @updatedAt @map("updated_at")
 
   user                     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org                      Organization?       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   messages                 ProjectMessage[]
   modules                  Module[]
   tasks                    Task[]
@@ -71,6 +105,7 @@ model Project {
   testDeployments           TestDeployment[]
 
   @@index([userId])
+  @@index([orgId])
   @@map("projects")
 }
 
