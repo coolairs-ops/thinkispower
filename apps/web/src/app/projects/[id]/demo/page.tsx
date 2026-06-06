@@ -19,6 +19,24 @@ interface FeedbackItem {
   createdAt: string;
 }
 
+interface DemoProgress {
+  phase: 'queued' | 'generating' | 'done' | 'failed';
+  percent: number;
+  message: string;
+  startedAt: string;
+}
+
+/** 生成中按已用时把进度平滑爬升到 95%，让进度条"在动"（后端单次大调用拿不到真实百分比） */
+function displayProgress(p: DemoProgress | null, now: number): { percent: number; label: string; elapsed: number } {
+  if (!p) return { percent: 0, label: 'AI 正在准备…', elapsed: 0 };
+  const elapsed = p.startedAt ? Math.max(0, Math.floor((now - new Date(p.startedAt).getTime()) / 1000)) : 0;
+  if (p.phase === 'done') return { percent: 100, label: p.message, elapsed };
+  if (p.phase === 'failed') return { percent: 100, label: p.message, elapsed };
+  const base = p.percent || 5;
+  const smoothed = Math.min(95, base + (elapsed / 90) * (95 - base));
+  return { percent: Math.round(smoothed), label: p.message || 'AI 正在生成预览…', elapsed };
+}
+
 export default function DemoPage() {
   const params = useParams();
   const router = useRouter();
@@ -30,6 +48,8 @@ export default function DemoPage() {
   const [projectName, setProjectName] = useState('');
   const [status, setStatus] = useState('loading');
   const [publicStatusLabel, setPublicStatusLabel] = useState('');
+  const [progress, setProgress] = useState<DemoProgress | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
   const [mode, setMode] = useState<Mode>('preview');
   const [clickedElement, setClickedElement] = useState<ClickedElement | null>(null);
@@ -51,6 +71,7 @@ export default function DemoPage() {
         setDemoUrl(demo.demoUrl || null);
         setStatus(demo.status || 'loading');
         setPublicStatusLabel(demo.publicStatusLabel || '');
+        setProgress(demo.progress || null);
         setProjectName(proj.name || '');
         setFeedbacks(Array.isArray(fbs) ? fbs : []);
       })
@@ -66,6 +87,7 @@ export default function DemoPage() {
           setDemoUrl(data.demoUrl || null);
           setStatus(data.status || 'loading');
           setPublicStatusLabel(data.publicStatusLabel || '');
+          setProgress(data.progress || null);
         });
         api.get(`/api/projects/${projectId}/feedback`).then((fbs) => {
           setFeedbacks(Array.isArray(fbs) ? fbs : []);
@@ -76,6 +98,13 @@ export default function DemoPage() {
       };
     }
   }, [status, projectId]);
+
+  // 生成中每秒驱动进度条平滑爬升（不发请求，仅本地重算已用时）
+  useEffect(() => {
+    if (status !== 'demo_generating') return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [status]);
 
   // Listen for iframe element-click messages
   useEffect(() => {
@@ -113,6 +142,8 @@ export default function DemoPage() {
   const handleGenerate = async () => {
     setStatus('demo_generating');
     setPublicStatusLabel('正在生成预览');
+    setProgress({ phase: 'queued', percent: 5, message: '已加入生成队列，即将开始…', startedAt: new Date().toISOString() });
+    setNow(Date.now());
     setClickedElement(null);
     await api.post(`/api/projects/${projectId}/demo/generate`);
   };
@@ -191,11 +222,37 @@ export default function DemoPage() {
         {/* Preview area */}
         <div className="flex-1 p-4">
           {status === 'demo_generating' ? (
-            <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed">
-              <div className="text-center">
-                <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-                <p className="text-gray-500">AI 正在生成预览...</p>
-                <p className="mt-1 text-xs text-gray-400">根据方案内容生成，约需 30-60 秒</p>
+            (() => {
+              const disp = displayProgress(progress, now);
+              return (
+                <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed">
+                  <div className="w-full max-w-md px-8 text-center">
+                    <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+                    <p className="mb-3 text-gray-700">{disp.label}</p>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                      <div className="h-full rounded-full bg-blue-600 transition-all duration-700 ease-out" style={{ width: `${disp.percent}%` }} />
+                    </div>
+                    <div className="mt-2 flex justify-between text-xs text-gray-400">
+                      <span>{disp.percent}%</span>
+                      <span>已用时 {disp.elapsed}s</span>
+                    </div>
+                    <p className="mt-3 text-xs text-gray-400">复杂应用通常需要 1-2 分钟，可离开页面，生成完成后回来查看</p>
+                  </div>
+                </div>
+              );
+            })()
+          ) : status === 'demo_failed' ? (
+            <div className="flex h-full items-center justify-center rounded-xl border-2 border-dashed border-red-200 bg-red-50/30">
+              <div className="max-w-md px-8 text-center">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-red-100 text-xl text-red-500">!</div>
+                <p className="mb-1 font-medium text-gray-800">预览生成未成功</p>
+                <p className="mb-4 text-sm text-gray-500">{progress?.message || '生成超时或出错，可以重试。'}</p>
+                <button
+                  onClick={handleGenerate}
+                  className="rounded-lg bg-blue-600 px-5 py-2 text-sm text-white transition-colors hover:bg-blue-700"
+                >
+                  重新生成预览
+                </button>
               </div>
             </div>
           ) : showPreview && demoHtml ? (

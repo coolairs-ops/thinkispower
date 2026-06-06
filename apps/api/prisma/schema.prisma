@@ -77,6 +77,7 @@ model Project {
   acceptanceChecklist    Json?    @map("acceptance_checklist")
   demoUrl                String?  @map("demo_url")
   demoHtml               String?  @map("demo_html")
+  demoProgress           Json?    @map("demo_progress") // 预览生成进度 {phase,percent,message,startedAt,attempt}
   productionUrl          String?  @map("production_url")
   latestBuildId          String?  @map("latest_build_id") @db.Uuid
   sourceExportEnabled    Boolean  @default(false) @map("source_export_enabled")

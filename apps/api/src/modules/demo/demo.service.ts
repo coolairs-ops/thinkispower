@@ -1,17 +1,30 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { isProjectLocked } from '../../common/utils/project-status';
+import { DEMO_QUEUE, DemoGenerateJob } from './demo.queue';
 
+/** 预览生成进度（写入 project.demoProgress，供前端进度条/阶段文案展示） */
+export interface DemoProgress {
+  phase: 'queued' | 'generating' | 'done' | 'failed';
+  percent: number;
+  message: string;
+  startedAt: string;
+}
+
+/** 单次生成的最坏耗时：chatWithRetry 最多 3 次 × 240s = 12 分钟。BullMQ 重试次数见 GEN_ATTEMPTS。 */
+const SINGLE_GEN_TIMEOUT_MS = 12 * 60 * 1000;
+/** BullMQ 重试次数（含首次）。job 持久化、进程重启可恢复，stalled 由 BullMQ 自愈。 */
+const GEN_ATTEMPTS = 2;
 /**
- * demo 生成超过此时长仍未完成，判定为卡死（后台任务因进程重启等丢失），自愈为 failed。
- * 必须大于生成自身的最坏耗时，否则「还活着只是慢」的复杂规格会被提前判死：
- * generateDemoHtmlDirect → chatWithRetry 最多 3 次 × 240s/次 = 12 分钟。
- * 取 13 分钟留余量；真正的生成失败由 generateAsync 自己写 demo_failed，此处只兜底进程丢失。
+ * stale 兜底：worker 永久挂掉（非进程重启，BullMQ 能恢复）时让前端脱离死循环。
+ * 必须覆盖所有重试预算：GEN_ATTEMPTS × 单次最坏 + 余量。
  */
-const DEMO_GENERATION_TIMEOUT_MS = 13 * 60 * 1000;
+const DEMO_GENERATION_TIMEOUT_MS = GEN_ATTEMPTS * SINGLE_GEN_TIMEOUT_MS + 60 * 1000;
 
 @Injectable()
 export class DemoService {
@@ -22,24 +35,26 @@ export class DemoService {
     private statusMapper: StatusMapperService,
     private demoSnapshotService: DemoSnapshotService,
     private cloudecode: CloudecodeClient,
+    @InjectQueue(DEMO_QUEUE) private demoQueue: Queue<DemoGenerateJob>,
   ) {}
 
   async getDemo(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, updatedAt: true },
+      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, updatedAt: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
 
     let status = project.status;
     let publicStatusLabel = project.publicStatusLabel;
-    // 自愈：demo 生成是后台异步任务，进程中途重启会丢失，导致 status 永久卡在 demo_generating。
-    // 超时仍未完成则判定失败，让前端脱离死循环、可重试。
+    let progress = project.demoProgress as DemoProgress | null;
+    // 兜底：worker 永久挂掉时让前端脱离死循环（进程重启时 BullMQ 会自行恢复 job，正常不会走到这）。
     if (status === 'demo_generating' && Date.now() - project.updatedAt.getTime() > DEMO_GENERATION_TIMEOUT_MS) {
+      progress = { phase: 'failed', percent: progress?.percent ?? 0, message: '预览生成超时，请重试', startedAt: progress?.startedAt ?? new Date().toISOString() };
       await this.prisma.project.update({
         where: { id: project.id },
-        data: { status: 'demo_failed', publicStatusLabel: '预览生成超时，请重试' },
+        data: { status: 'demo_failed', publicStatusLabel: '预览生成超时，请重试', demoProgress: progress as never },
       });
       status = 'demo_failed';
       publicStatusLabel = '预览生成超时，请重试';
@@ -47,7 +62,7 @@ export class DemoService {
     }
 
     const ready = ['demo_ready', 'awaiting_demo_feedback', 'developing', 'completed'];
-    return { status, publicStatusLabel, demoUrl: project.demoUrl, html: ready.includes(status) ? project.demoHtml : null };
+    return { status, publicStatusLabel, progress, demoUrl: project.demoUrl, html: ready.includes(status) ? project.demoHtml : null };
   }
 
   async generateDemo(userId: string, projectId: string) {
@@ -79,28 +94,47 @@ export class DemoService {
     if (!allowed.includes(p.status)) throw new BadRequestException('当前状态不允许');
     if (!p.planSummary) throw new BadRequestException('方案尚未生成');
 
-    await this.prisma.project.update({ where: { id: p.id }, data: { status: 'demo_generating', publicStatusLabel: '正在生成预览' } });
-    this.generateAsync(p.id, p.planSummary).catch(err => this.logger.error(`Demo失败:`, err));
+    const progress: DemoProgress = { phase: 'queued', percent: 5, message: '已加入生成队列，即将开始…', startedAt: new Date().toISOString() };
+    await this.prisma.project.update({
+      where: { id: p.id },
+      data: { status: 'demo_generating', publicStatusLabel: '正在生成预览', demoProgress: progress as never },
+    });
+    // 入队 BullMQ：持久化、进程重启可恢复、失败自动重试，取代原 fire-and-forget
+    await this.demoQueue.add(
+      'generate',
+      { projectId: p.id },
+      { attempts: GEN_ATTEMPTS, backoff: { type: 'fixed', delay: 3000 }, removeOnComplete: true, removeOnFail: 50 },
+    );
     return { status: 'demo_generating', message: '预览正在生成中...' };
   }
 
-  private async generateAsync(projectId: string, planSummary: any) {
-    try {
-      // Demo 生成直调 Cloudecode（快，27s），交付走 CC Bridge（全栈）
-      const result = await this.cloudecode.generateDemoHtmlDirect(projectId, planSummary);
-      if (!result.success) {
-        await this.prisma.project.update({
-          where: { id: projectId },
-          data: { status: 'demo_failed', publicStatusLabel: '预览生成失败' },
-        });
-      }
-    } catch (err) {
-      this.logger.error(`Demo失败(${projectId}):`, err);
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: { status: 'demo_failed', publicStatusLabel: '预览生成失败' },
-      });
+  /** 队列消费的实际执行：更新进度 + 调生成（成功时 cloudecode 自身已写 demo_ready + demoHtml） */
+  async executeGeneration(projectId: string): Promise<void> {
+    await this.markProgress(projectId, { phase: 'generating', percent: 30, message: '正在生成页面内容，复杂应用通常需要 1-2 分钟…' });
+    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { planSummary: true } });
+    const result = await this.cloudecode.generateDemoHtmlDirect(projectId, p?.planSummary);
+    if (!result.success) throw new Error(result.rawError || '预览生成失败');
+    await this.markProgress(projectId, { phase: 'done', percent: 100, message: '预览已生成' });
+  }
+
+  /** 生成出错：还会重试 → 提示重试中；终态失败 → 置 demo_failed（由 processor 按重试预算调用） */
+  async onGenerationError(projectId: string, willRetry: boolean, nextAttempt: number): Promise<void> {
+    if (willRetry) {
+      await this.markProgress(projectId, { phase: 'generating', percent: 25, message: `生成遇到问题，正在重试（第 ${nextAttempt} 次）…` });
+      return;
     }
+    await this.markProgress(projectId, { phase: 'failed', percent: 100, message: '预览生成失败，请重试' });
+    await this.prisma.project.update({ where: { id: projectId }, data: { status: 'demo_failed', publicStatusLabel: '预览生成失败' } });
+  }
+
+  /** 合并更新进度，保留 startedAt */
+  private async markProgress(projectId: string, patch: Partial<DemoProgress>): Promise<void> {
+    const cur = await this.prisma.project.findUnique({ where: { id: projectId }, select: { demoProgress: true } });
+    const prev = (cur?.demoProgress as DemoProgress | null) ?? ({ startedAt: new Date().toISOString() } as DemoProgress);
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { demoProgress: { ...prev, ...patch } as never },
+    });
   }
 
   /** 从 Claude Code 输出中提取 HTML */

@@ -6,12 +6,15 @@ import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { HermesClient } from '../../integrations/hermes/hermes.client';
+import { getQueueToken } from '@nestjs/bullmq';
+import { DEMO_QUEUE } from './demo.queue';
 
 describe('DemoService', () => {
   let service: DemoService;
   let prisma: any;
   let cloudecode: any;
   let hermes: any;
+  let demoQueue: any;
 
   const mockUserId = 'user-1';
   const mockProjectId = 'project-1';
@@ -55,6 +58,8 @@ describe('DemoService', () => {
       analyzeProject: jest.fn().mockResolvedValue({ summary: 'OK' }),
     };
 
+    demoQueue = { add: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DemoService,
@@ -63,6 +68,7 @@ describe('DemoService', () => {
         { provide: DemoSnapshotService, useValue: {} },
         { provide: CloudecodeClient, useValue: cloudecode },
         { provide: HermesClient, useValue: hermes },
+        { provide: getQueueToken(DEMO_QUEUE), useValue: demoQueue },
       ],
     }).compile();
 
@@ -114,65 +120,27 @@ describe('DemoService', () => {
   });
 
   describe('generateDemo', () => {
-    it('should mark as generating and trigger N8N webhook (no fallback)', async () => {
+    it('入队 BullMQ 并置 demo_generating（写 queued 进度，不直接生成）', async () => {
       prisma.project.findUnique.mockResolvedValue(planReadyProject);
 
       const result = await service.generateDemo(mockUserId, mockProjectId);
 
       expect(result).toMatchObject({ status: 'demo_generating', message: expect.any(String) });
       expect(prisma.project.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'demo_generating' }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'demo_generating',
+            demoProgress: expect.objectContaining({ phase: 'queued' }),
+          }),
+        }),
       );
-
-      // Let all async work drain
-      await new Promise<void>(resolve => setImmediate(resolve));
-
-      // N8N path: fetch was called, cloudecode NOT called
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/webhook/demo-generate'),
-        expect.anything(),
+      expect(demoQueue.add).toHaveBeenCalledWith(
+        'generate',
+        { projectId: mockProjectId },
+        expect.objectContaining({ attempts: expect.any(Number) }),
       );
+      // 入队即返回，不在请求线程里直接生成
       expect(cloudecode.generateDemoHtmlDirect).not.toHaveBeenCalled();
-    });
-
-    it('should fallback to cloudecode when N8N returns non-ok', async () => {
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-      });
-      prisma.project.findUnique.mockResolvedValue(planReadyProject);
-      cloudecode.generateDemoHtmlDirect.mockResolvedValue({ success: true });
-
-      await service.generateDemo(mockUserId, mockProjectId);
-
-      await new Promise<void>(resolve => setImmediate(resolve));
-      expect(cloudecode.generateDemoHtmlDirect).toHaveBeenCalledWith(mockProjectId, planReadyProject.planSummary);
-    });
-
-    it('should set demo_failed when N8N fails and cloudecode returns failure', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
-      prisma.project.findUnique.mockResolvedValue(planReadyProject);
-      cloudecode.generateDemoHtmlDirect.mockResolvedValue({ success: false, rawError: 'API error' });
-
-      await service.generateDemo(mockUserId, mockProjectId);
-
-      await new Promise<void>(resolve => setImmediate(resolve));
-      expect(prisma.project.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'demo_failed' }) }),
-      );
-    });
-
-    it('should set demo_failed when both N8N and cloudecode throw', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
-      prisma.project.findUnique.mockResolvedValue(planReadyProject);
-      cloudecode.generateDemoHtmlDirect.mockRejectedValue(new Error('crash'));
-
-      await service.generateDemo(mockUserId, mockProjectId);
-
-      await new Promise<void>(resolve => setImmediate(resolve));
-      expect(prisma.project.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: 'demo_failed' }) }),
-      );
     });
 
     it('should throw BadRequestException if status not allowed', async () => {
@@ -197,6 +165,49 @@ describe('DemoService', () => {
       prisma.project.findUnique.mockResolvedValue({ ...planReadyProject, userId: 'other' });
 
       await expect(service.generateDemo(mockUserId, mockProjectId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('executeGeneration（队列消费）', () => {
+    it('生成成功 → done 进度', async () => {
+      prisma.project.findUnique.mockResolvedValue({ planSummary: planReadyProject.planSummary, demoProgress: { startedAt: 't0' } });
+      cloudecode.generateDemoHtmlDirect.mockResolvedValue({ success: true });
+
+      await service.executeGeneration(mockProjectId);
+
+      expect(cloudecode.generateDemoHtmlDirect).toHaveBeenCalled();
+      expect(prisma.project.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ demoProgress: expect.objectContaining({ phase: 'done', percent: 100 }) }) }),
+      );
+    });
+
+    it('生成失败 → 抛错（交 BullMQ 重试）', async () => {
+      prisma.project.findUnique.mockResolvedValue({ planSummary: {}, demoProgress: null });
+      cloudecode.generateDemoHtmlDirect.mockResolvedValue({ success: false, rawError: 'API error' });
+
+      await expect(service.executeGeneration(mockProjectId)).rejects.toThrow('API error');
+    });
+  });
+
+  describe('onGenerationError', () => {
+    it('还会重试 → generating 重试提示，不置 demo_failed', async () => {
+      prisma.project.findUnique.mockResolvedValue({ demoProgress: null });
+
+      await service.onGenerationError(mockProjectId, true, 2);
+
+      const updatedData = prisma.project.update.mock.calls.map((c: any) => c[0].data);
+      expect(updatedData.some((d: any) => d.status === 'demo_failed')).toBe(false);
+      expect(updatedData.some((d: any) => d.demoProgress?.phase === 'generating')).toBe(true);
+    });
+
+    it('终态失败 → 置 demo_failed', async () => {
+      prisma.project.findUnique.mockResolvedValue({ demoProgress: null });
+
+      await service.onGenerationError(mockProjectId, false, 3);
+
+      expect(prisma.project.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'demo_failed' }) }),
+      );
     });
   });
 
