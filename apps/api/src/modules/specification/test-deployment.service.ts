@@ -5,8 +5,12 @@ import { promisify } from 'util';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as http from 'http';
 
 const execAsync = promisify(exec);
+// api 容器内探测测试容器健康（其端口映射在宿主机）：默认 host.docker.internal；
+// 生产 Linux Docker 需 docker run 配 --add-host=host.docker.internal:host-gateway，或改用同 docker 网络的容器名。
+const HEALTHCHECK_HOST = process.env.TEST_DEPLOY_HEALTHCHECK_HOST || 'host.docker.internal';
 
 @Injectable()
 export class TestDeploymentService {
@@ -193,16 +197,19 @@ EXPOSE 80`;
         // Step 4: 健康检查
         await logStep('health', 'running', '正在健康检查...');
         let healthy = false;
+        let lastHc = '';
         for (let i = 0; i < 10; i++) {
           await new Promise(r => setTimeout(r, 2000));
-          try {
-            const { stdout: hc } = await execAsync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${port}/health`);
-            if (hc.trim() === '200') {
-              healthy = true;
-              break;
-            }
-          } catch { /* retry */ }
+          // 用 Node http（api 容器无 curl）访问 host.docker.internal（容器端口映射在宿主机，localhost 到不了）
+          const code = await new Promise<number>((resolve) => {
+            const req = http.get(`http://${HEALTHCHECK_HOST}:${port}/health`, (res) => { res.resume(); resolve(res.statusCode || 0); });
+            req.on('error', () => resolve(0));
+            req.setTimeout(4000, () => { req.destroy(); resolve(0); });
+          });
+          if (code === 200) { healthy = true; break; }
+          lastHc = `code=${code}`;
         }
+        if (!healthy) this.logger.warn(`健康检查失败 (port ${port}, host ${HEALTHCHECK_HOST}): ${lastHc}`);
 
         await this.prisma.testDeployment.update({
           where: { id: deploymentId },
