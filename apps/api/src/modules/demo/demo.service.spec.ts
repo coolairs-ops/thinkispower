@@ -8,6 +8,7 @@ import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.clien
 import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { getQueueToken } from '@nestjs/bullmq';
 import { DEMO_QUEUE } from './demo.queue';
+import { ThemeService } from './theme.service';
 
 describe('DemoService', () => {
   let service: DemoService;
@@ -69,6 +70,7 @@ describe('DemoService', () => {
         { provide: CloudecodeClient, useValue: cloudecode },
         { provide: HermesClient, useValue: hermes },
         { provide: getQueueToken(DEMO_QUEUE), useValue: demoQueue },
+        ThemeService,
       ],
     }).compile();
 
@@ -86,7 +88,9 @@ describe('DemoService', () => {
 
       const result = await service.getDemo(mockUserId, mockProjectId);
 
-      expect(result.html).toBe('<html><body>Hello</body></html>');
+      expect(result.html).toContain('Hello'); // 原内容保留
+      expect(result.html).toContain('id="tip-theme"'); // 注入了主题覆盖层
+      expect(result.themeConfig).toEqual({ primary: '#2563eb', mode: 'light', radius: 8, daisyTheme: 'corporate' }); // 默认主题
       expect(result.status).toBe('demo_ready');
     });
 
@@ -116,6 +120,29 @@ describe('DemoService', () => {
       prisma.project.findUnique.mockResolvedValue({ ...baseProject, userId: 'other' });
 
       await expect(service.getDemo(mockUserId, mockProjectId)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('saveEditedHtml', () => {
+    it('清理 tip-theme 与高亮、补 DOCTYPE 后落库', async () => {
+      prisma.project.findUnique.mockResolvedValue({ userId: mockUserId });
+      const dirty = '<html><head><style id="tip-theme">:root{}</style></head><body><button class="btn annotation-highlight">x</button></body></html>';
+      await service.saveEditedHtml(mockUserId, mockProjectId, dirty);
+      const saved = prisma.project.update.mock.calls[0][0].data.demoHtml as string;
+      expect(saved).not.toContain('tip-theme');
+      expect(saved).not.toContain('annotation-highlight');
+      expect(saved.startsWith('<!DOCTYPE html>')).toBe(true);
+      expect(saved).toContain('class="btn');
+    });
+
+    it('跨用户 → Forbidden', async () => {
+      prisma.project.findUnique.mockResolvedValue({ userId: 'other' });
+      await expect(service.saveEditedHtml(mockUserId, mockProjectId, '<html>'.padEnd(60, 'x'))).rejects.toThrow(ForbiddenException);
+    });
+
+    it('空 HTML → BadRequest', async () => {
+      prisma.project.findUnique.mockResolvedValue({ userId: mockUserId });
+      await expect(service.saveEditedHtml(mockUserId, mockProjectId, '')).rejects.toThrow(BadRequestException);
     });
   });
 

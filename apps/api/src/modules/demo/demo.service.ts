@@ -7,6 +7,7 @@ import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { isProjectLocked } from '../../common/utils/project-status';
 import { DEMO_QUEUE, DemoGenerateJob } from './demo.queue';
+import { ThemeService, ThemeConfig } from './theme.service';
 
 /** 预览生成进度（写入 project.demoProgress，供前端进度条/阶段文案展示） */
 export interface DemoProgress {
@@ -36,12 +37,13 @@ export class DemoService {
     private demoSnapshotService: DemoSnapshotService,
     private cloudecode: CloudecodeClient,
     @InjectQueue(DEMO_QUEUE) private demoQueue: Queue<DemoGenerateJob>,
+    private theme: ThemeService,
   ) {}
 
   async getDemo(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, updatedAt: true },
+      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, themeConfig: true, updatedAt: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
@@ -62,7 +64,34 @@ export class DemoService {
     }
 
     const ready = ['demo_ready', 'awaiting_demo_feedback', 'developing', 'completed'];
-    return { status, publicStatusLabel, progress, demoUrl: project.demoUrl, html: ready.includes(status) ? project.demoHtml : null };
+    // 注入主题覆盖层（皮肤），令预览与已保存的外观一致；demoHtml 本身不变
+    const themeConfig = this.theme.normalize(project.themeConfig as never);
+    const html = ready.includes(status) && project.demoHtml ? this.theme.applyTheme(project.demoHtml, themeConfig) : null;
+    return { status, publicStatusLabel, progress, demoUrl: project.demoUrl, html, themeConfig };
+  }
+
+  /** 保存用户在预览里直接编辑后的 HTML（局部档位调整），清理临时注入后落库 */
+  async saveEditedHtml(userId: string, projectId: string, html: string): Promise<{ success: boolean }> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+    if (!project) throw new NotFoundException('项目不存在');
+    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    if (!html || html.length < 50) throw new BadRequestException('HTML 内容无效');
+    // 去掉读时注入的主题覆盖层与批注高亮（临时态，不应固化进 demoHtml）
+    let clean = html.replace(/<style id="tip-theme">[\s\S]*?<\/style>/g, '').replace(/ ?annotation-highlight/g, '');
+    if (!/^\s*<!DOCTYPE/i.test(clean)) clean = '<!DOCTYPE html>\n' + clean;
+    await this.prisma.project.update({ where: { id: projectId }, data: { demoHtml: clean } });
+    this.logger.log(`Demo HTML 用户编辑已保存 project=${projectId}: ${clean.length} bytes`);
+    return { success: true };
+  }
+
+  /** 保存 demo 外观主题（Phase A 换肤），返回规范化后的配置 */
+  async saveTheme(userId: string, projectId: string, config: Partial<ThemeConfig>): Promise<ThemeConfig> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+    if (!project) throw new NotFoundException('项目不存在');
+    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    const normalized = this.theme.normalize(config);
+    await this.prisma.project.update({ where: { id: projectId }, data: { themeConfig: normalized as never } });
+    return normalized;
   }
 
   async generateDemo(userId: string, projectId: string) {

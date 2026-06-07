@@ -6,8 +6,38 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
 
-type Mode = 'preview' | 'annotation';
+type Mode = 'preview' | 'annotation' | 'theme';
 interface ClickedElement { moduleKey: string; elementPath: string; }
+interface ThemeConfig { primary: string; mode: 'light' | 'dark'; radius: number; daisyTheme: string }
+
+const DEFAULT_THEME: ThemeConfig = { primary: '#2563eb', mode: 'light', radius: 8, daisyTheme: 'corporate' };
+const PRESET_COLORS = ['#2563eb', '#0ea5e9', '#16a34a', '#9333ea', '#dc2626', '#ea580c', '#0f766e', '#475569'];
+
+/** 一键整体风格预设（西服/中山装）：daisyUI 主题(新 demo) + 主色/明暗/圆角(存量覆盖层兜底) */
+const STYLE_PRESETS: { key: string; label: string; desc: string; config: ThemeConfig }[] = [
+  { key: 'gov', label: '政务严肃', desc: '庄重深蓝 · 方正', config: { primary: '#1d4ed8', mode: 'light', radius: 2, daisyTheme: 'corporate' } },
+  { key: 'biz', label: '企业商务', desc: '稳重蓝 · 适中', config: { primary: '#0f766e', mode: 'light', radius: 8, daisyTheme: 'business' } },
+  { key: 'cockpit', label: '深色驾驶舱', desc: '科技青 · 深色', config: { primary: '#0ea5e9', mode: 'dark', radius: 10, daisyTheme: 'dark' } },
+  { key: 'vivid', label: '活力互联网', desc: '活泼紫 · 圆润', config: { primary: '#9333ea', mode: 'light', radius: 16, daisyTheme: 'cyberpunk' } },
+];
+
+/** 与后端 ThemeService.buildThemeCss 一致的覆盖层 CSS（不含 <style> 包裹），用于 iframe 内实时预览 */
+function buildThemeCssText(c: ThemeConfig): string {
+  const dark = c.mode === 'dark';
+  const bg = dark ? '#0f172a' : '#ffffff';
+  const text = dark ? '#e5e7eb' : '#1f2937';
+  const surface = dark ? '#1e293b' : '#f8fafc';
+  const border = dark ? '#334155' : '#e5e7eb';
+  const darkContainers = dark
+    ? `nav, aside, header, [class*="card"], [class*="panel"], [class*="sidebar"], [class*="header"] { background-color: var(--tip-surface) !important; border-color: var(--tip-border) !important; }`
+    : '';
+  return `:root{ --tip-primary:${c.primary}; --tip-on-primary:#ffffff; --tip-radius:${c.radius}px; --tip-bg:${bg}; --tip-text:${text}; --tip-surface:${surface}; --tip-border:${border}; }
+body{ background-color:var(--tip-bg)!important; color:var(--tip-text)!important; }
+a{ color:var(--tip-primary)!important; }
+button,.btn,[class*="btn"],[class*="button"],input[type="submit"],input[type="button"]{ background-color:var(--tip-primary)!important; color:var(--tip-on-primary)!important; border-color:var(--tip-primary)!important; border-radius:var(--tip-radius)!important; }
+input,select,textarea,[class*="card"],[class*="panel"],table{ border-radius:var(--tip-radius)!important; }
+${darkContainers}`;
+}
 
 interface FeedbackItem {
   id: string;
@@ -54,6 +84,12 @@ export default function DemoPage() {
   const [mode, setMode] = useState<Mode>('preview');
   const [clickedElement, setClickedElement] = useState<ClickedElement | null>(null);
   const [feedbackComment, setFeedbackComment] = useState('');
+  const [themeConfig, setThemeConfig] = useState<ThemeConfig>(DEFAULT_THEME);
+  const [savingTheme, setSavingTheme] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editMsg, setEditMsg] = useState('');
+  const themeRef = useRef(themeConfig);
+  themeRef.current = themeConfig;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval>>();
 
@@ -74,6 +110,7 @@ export default function DemoPage() {
         setProgress(demo.progress || null);
         setProjectName(proj.name || '');
         setFeedbacks(Array.isArray(fbs) ? fbs : []);
+        if (demo.themeConfig) setThemeConfig(demo.themeConfig);
       })
       .catch(() => {});
   }, [projectId, token, isLoading, router]);
@@ -139,6 +176,43 @@ export default function DemoPage() {
     }
   }, [clickedElement, mode]);
 
+  // 把主题覆盖层写入 iframe 内的 <style id="tip-theme">（即时、不重载）
+  const applyThemeToIframe = (cfg: ThemeConfig) => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    // daisyUI 化的 demo：切 data-theme（成熟主题体系），并清掉覆盖层避免 !important 冲突
+    const isDaisy = !!doc.querySelector('link[href*="daisyui"]') || doc.documentElement.hasAttribute('data-theme');
+    if (isDaisy) {
+      doc.documentElement.setAttribute('data-theme', cfg.daisyTheme || 'corporate');
+      const old = doc.getElementById('tip-theme');
+      if (old) old.textContent = '';
+      return;
+    }
+    // 非 daisyUI（存量/裸 HTML）：用覆盖层兜底
+    let style = doc.getElementById('tip-theme') as HTMLStyleElement | null;
+    if (!style) {
+      style = doc.createElement('style');
+      style.id = 'tip-theme';
+      (doc.head || doc.body || doc.documentElement).appendChild(style);
+    }
+    style.textContent = buildThemeCssText(cfg);
+  };
+
+  const updateTheme = (patch: Partial<ThemeConfig>) => {
+    const next = { ...themeRef.current, ...patch };
+    setThemeConfig(next);
+    applyThemeToIframe(next);
+  };
+
+  const handleSaveTheme = async () => {
+    setSavingTheme(true);
+    try {
+      const saved = await api.patch(`/api/projects/${projectId}/demo/theme`, themeRef.current);
+      if (saved) setThemeConfig(saved);
+    } catch { /* 保存失败保留本地预览 */ }
+    setSavingTheme(false);
+  };
+
   const handleGenerate = async () => {
     setStatus('demo_generating');
     setPublicStatusLabel('正在生成预览');
@@ -165,9 +239,33 @@ export default function DemoPage() {
     });
   };
 
+  // 档位调整：通知 iframe 对选中元素改 class（即时预览，需保存才持久化）
+  const adjustElement = (group: 'align' | 'size', value: string) => {
+    iframeRef.current?.contentWindow?.postMessage({ type: 'adjust-element', group, value }, '*');
+    setEditMsg('');
+  };
+
+  // 保存预览里的直接编辑（取 iframe 当前 HTML 回存）
+  const handleSaveEdit = async () => {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    setSavingEdit(true);
+    setEditMsg('');
+    try {
+      const html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+      await api.patch(`/api/projects/${projectId}/demo/html`, { html });
+      setEditMsg('✓ 已保存');
+    } catch (e: any) {
+      setEditMsg('保存失败：' + (e?.message || '未知错误'));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const handleClearSelection = () => {
     setClickedElement(null);
     setFeedbackComment('');
+    setEditMsg('');
   };
 
   const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing' || status === 'demo_failed';
@@ -260,6 +358,7 @@ export default function DemoPage() {
             <iframe
               ref={iframeRef}
               srcDoc={demoHtml}
+              onLoad={() => applyThemeToIframe(themeRef.current)}
               className="h-full w-full rounded-xl border bg-white"
               title="预览"
               sandbox="allow-scripts allow-same-origin"
@@ -317,6 +416,30 @@ export default function DemoPage() {
                 >
                   提交意见
                 </button>
+
+                {/* 快捷调整：档位（直接改，不走 AI） */}
+                <div className="mt-1 space-y-2 border-t border-gray-100 pt-3">
+                  <p className="text-xs text-gray-500">快捷调整（即时预览，需保存）</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-8 text-xs text-gray-400">对齐</span>
+                    {([['left', '左'], ['center', '中'], ['right', '右']] as const).map(([v, l]) => (
+                      <button key={v} onClick={() => adjustElement('align', v)}
+                        className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">{l}</button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-8 text-xs text-gray-400">字号</span>
+                    {([['sm', '小'], ['base', '中'], ['lg', '大'], ['xl', '特大']] as const).map(([v, l]) => (
+                      <button key={v} onClick={() => adjustElement('size', v)}
+                        className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">{l}</button>
+                    ))}
+                  </div>
+                  <button onClick={handleSaveEdit} disabled={savingEdit}
+                    className="w-full rounded-lg bg-green-600 px-3 py-1.5 text-sm text-white hover:bg-green-700 disabled:opacity-50">
+                    {savingEdit ? '保存中…' : '保存修改'}
+                  </button>
+                  {editMsg && <p className="text-xs text-gray-500">{editMsg}</p>}
+                </div>
               </div>
             ) : (
               <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-700">
@@ -355,6 +478,99 @@ export default function DemoPage() {
             </div>
           </aside>
         )}
+
+        {/* Theme sidebar — 外观换肤 */}
+        {mode === 'theme' && showPreview && demoHtml && (
+          <aside className="w-72 border-l bg-white p-4 overflow-y-auto flex flex-col gap-5">
+            <div>
+              <h2 className="mb-2 text-sm font-semibold text-gray-800">整体风格</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {STYLE_PRESETS.map((p) => {
+                  const active =
+                    themeConfig.primary.toLowerCase() === p.config.primary.toLowerCase() &&
+                    themeConfig.mode === p.config.mode &&
+                    themeConfig.radius === p.config.radius;
+                  return (
+                    <button
+                      key={p.key}
+                      onClick={() => updateTheme(p.config)}
+                      className={`rounded-lg border p-2.5 text-left transition-all ${active ? 'border-blue-500 ring-1 ring-blue-300' : 'border-gray-200 hover:border-gray-300'}`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-4 w-4 rounded-full" style={{ backgroundColor: p.config.primary }} />
+                        <span className="text-xs font-medium text-gray-800">{p.label}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-gray-400">{p.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <h2 className="mb-2 text-sm font-semibold text-gray-800">主题色 <span className="font-normal text-gray-400">微调</span></h2>
+              <div className="mb-2 flex flex-wrap gap-2">
+                {PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => updateTheme({ primary: c })}
+                    className={`h-7 w-7 rounded-full border-2 ${themeConfig.primary.toLowerCase() === c ? 'border-gray-800' : 'border-transparent'}`}
+                    style={{ backgroundColor: c }}
+                    title={c}
+                  />
+                ))}
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                自定义
+                <input
+                  type="color"
+                  value={themeConfig.primary}
+                  onChange={(e) => updateTheme({ primary: e.target.value })}
+                  className="h-7 w-10 cursor-pointer rounded border border-gray-300"
+                />
+                <span className="font-mono text-xs text-gray-400">{themeConfig.primary}</span>
+              </label>
+            </div>
+
+            <div>
+              <h2 className="mb-2 text-sm font-semibold text-gray-800">明暗</h2>
+              <div className="flex w-fit overflow-hidden rounded-lg border border-gray-300">
+                {(['light', 'dark'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => updateTheme({ mode: m })}
+                    className={`px-4 py-1.5 text-sm ${themeConfig.mode === m ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                  >
+                    {m === 'light' ? '浅色' : '深色'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h2 className="mb-2 text-sm font-semibold text-gray-800">
+                圆角 <span className="font-normal text-gray-400">{themeConfig.radius}px</span>
+              </h2>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={themeConfig.radius}
+                onChange={(e) => updateTheme({ radius: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+
+            <button
+              onClick={handleSaveTheme}
+              disabled={savingTheme}
+              className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {savingTheme ? '保存中…' : '保存外观'}
+            </button>
+            <p className="text-xs text-gray-400">调整即时预览；保存后下次打开与交付都会沿用。</p>
+          </aside>
+        )}
       </div>
     </div>
   );
@@ -382,6 +598,16 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
         }`}
       >
         批注
+      </button>
+      <button
+        onClick={() => onChange('theme')}
+        className={`px-4 py-1.5 text-sm transition-colors ${
+          mode === 'theme'
+            ? 'bg-blue-600 text-white'
+            : 'bg-white text-gray-700 hover:bg-gray-50'
+        }`}
+      >
+        外观
       </button>
     </div>
   );
