@@ -7,6 +7,7 @@ import { ImportParseService } from './import-parse.service';
 import { ImportParseProcessor, IMPORT_PARSE_QUEUE } from './import-parse.processor';
 import { ImportUnderstandingService } from './import-understanding.service';
 import { SpecMaterializeService } from './spec-materialize.service';
+import { ConflictDetectionService } from './conflict-detection.service';
 import { LlmModule } from '../../integrations/llm/llm.module';
 
 /**
@@ -28,6 +29,7 @@ import { LlmModule } from '../../integrations/llm/llm.module';
     ImportParseProcessor,
     ImportUnderstandingService,
     SpecMaterializeService,
+    ConflictDetectionService,
   ],
   exports: [
     ImportBatchService,

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../database/prisma.service';
 import { assertOrgAccess, TenantContext } from '../../common/utils/tenant-scope';
 import { ParseSummary } from './import-parse.service';
+import { ConflictDetectionService, RequirementConflict } from './conflict-detection.service';
 
 /** 带溯源的合并条目：哪些来源资料提到了它 */
 export interface MergedItem {
@@ -18,7 +19,10 @@ export interface MergedItem {
  */
 @Injectable()
 export class ImportUnderstandingService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private conflictDetection: ConflictDetectionService,
+  ) {}
 
   /** 汇总批次内已理解的资料，落 RequirementUnderstanding，并把批次推进到 ready_for_review */
   async summarize(ctx: TenantContext, batchId: string) {
@@ -45,13 +49,18 @@ export class ImportUnderstandingService {
       parsed.map((x) => x.s.summary).filter((v): v is string => !!v).join('；') || null;
     const confidenceScore = parsed.length / batch.assets.length;
 
+    // 跨文档一致性：找出多份资料之间的矛盾/不一致/遗漏（P15-7）
+    const conflicts = await this.conflictDetection.detect(
+      ConflictDetectionService.fromParsed(parsed),
+    );
+
     const data = {
       positioning,
       roles: roles as never,
       features: features as never,
       pages: pages as never,
       flows: [] as never,
-      conflicts: [] as never,
+      conflicts: conflicts as never,
       suggestions: suggestions as never,
       confidenceScore,
       status: 'draft' as const,
@@ -63,12 +72,60 @@ export class ImportUnderstandingService {
       update: data,
     });
 
+    // 据冲突刷新「待确认问题」（人在回路）
+    await this.syncQuestions(understanding.id, conflicts);
+
     await this.prisma.importBatch.update({
       where: { id: batchId },
       data: { status: 'ready_for_review' },
     });
 
     return understanding;
+  }
+
+  /** 列出某批次需求理解的待确认问题（未解决在前） */
+  async listQuestions(ctx: TenantContext, batchId: string) {
+    const understanding = await this.prisma.requirementUnderstanding.findUnique({
+      where: { batchId },
+      include: { batch: { select: { orgId: true } } },
+    });
+    if (!understanding) return [];
+    assertOrgAccess(understanding.batch.orgId, ctx.orgId, { allowLegacyNull: true });
+    return this.prisma.requirementQuestion.findMany({
+      where: { understandingId: understanding.id },
+      orderBy: [{ resolved: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  /** 回答一个待确认问题（记录回答并标记 resolved，门控随之放行对应冲突） */
+  async answerQuestion(ctx: TenantContext, questionId: string, answer: string) {
+    const q = await this.prisma.requirementQuestion.findUnique({
+      where: { id: questionId },
+      include: { understanding: { include: { batch: { select: { orgId: true } } } } },
+    });
+    if (!q) throw new NotFoundException('待确认问题不存在');
+    assertOrgAccess(q.understanding.batch.orgId, ctx.orgId, { allowLegacyNull: true });
+    return this.prisma.requirementQuestion.update({
+      where: { id: questionId },
+      data: { answer, resolved: true },
+    });
+  }
+
+  /** 据冲突刷新待确认问题：清掉未解决的旧问题，为 high/medium 冲突重建（已解决的保留为历史） */
+  private async syncQuestions(understandingId: string, conflicts: RequirementConflict[]): Promise<void> {
+    await this.prisma.requirementQuestion.deleteMany({ where: { understandingId, resolved: false } });
+    const toAsk = conflicts.filter((c) => c.severity === 'high' || c.severity === 'medium');
+    if (toAsk.length === 0) return;
+    await this.prisma.requirementQuestion.createMany({
+      data: toAsk.map((c) => ({ understandingId, question: this.questionText(c), severity: c.severity })),
+    });
+  }
+
+  /** 把一处冲突渲染为给人看的待确认问题文案 */
+  private questionText(c: RequirementConflict): string {
+    const sev = c.severity === 'high' ? '高' : '中';
+    const says = c.statements.map((s) => `${s.source}「${s.claim}」`).join('；');
+    return `[${sev}冲突] ${c.topic}：${says}${c.suggestion ? ` —— ${c.suggestion}` : ''}`;
   }
 
   /** 合并各份的「建议补充」开放项，去重（不带溯源，作为统一的待补充清单） */

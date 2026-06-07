@@ -59,6 +59,25 @@ export class ImportController {
     return this.understandingService.summarize(this.ctx(req), batchId);
   }
 
+  /** 列出该批次需求理解的待确认问题(冲突澄清，人在回路) */
+  @Get(':batchId/questions')
+  listQuestions(
+    @Req() req: { user: { id: string; orgId?: string | null } },
+    @Param('batchId') batchId: string,
+  ) {
+    return this.understandingService.listQuestions(this.ctx(req), batchId);
+  }
+
+  /** 回答一个待确认问题(记录回答并标记已解决) */
+  @Post('questions/:questionId/answer')
+  answerQuestion(
+    @Req() req: { user: { id: string; orgId?: string | null } },
+    @Param('questionId') questionId: string,
+    @Body() body: { answer?: string },
+  ) {
+    return this.understandingService.answerQuestion(this.ctx(req), questionId, body?.answer ?? '');
+  }
+
   /** PM 确认 → 把需求理解物化为带溯源的草稿规格(承载项目)，汇入现有规格链路 */
   @Post(':batchId/materialize-spec')
   materializeSpec(

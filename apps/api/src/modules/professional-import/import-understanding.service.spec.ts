@@ -5,16 +5,20 @@ describe('ImportUnderstandingService', () => {
   let prisma: {
     importBatch: { findUnique: jest.Mock; update: jest.Mock };
     requirementUnderstanding: { upsert: jest.Mock };
+    requirementQuestion: { deleteMany: jest.Mock; createMany: jest.Mock };
   };
+  let conflictDetection: { detect: jest.Mock };
   let service: ImportUnderstandingService;
   const ctx = { userId: 'u1', orgId: 'org-1' };
 
   beforeEach(() => {
     prisma = {
       importBatch: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
-      requirementUnderstanding: { upsert: jest.fn().mockImplementation(({ create, update }) => create ?? update) },
+      requirementUnderstanding: { upsert: jest.fn().mockImplementation(({ create, update }) => ({ id: 'u1', ...(create ?? update) })) },
+      requirementQuestion: { deleteMany: jest.fn().mockResolvedValue({}), createMany: jest.fn().mockResolvedValue({}) },
     };
-    service = new ImportUnderstandingService(prisma as never);
+    conflictDetection = { detect: jest.fn().mockResolvedValue([]) };
+    service = new ImportUnderstandingService(prisma as never, conflictDetection as never);
   });
 
   const asset = (fileName: string, s: unknown) => ({ fileName, parseSummary: s });
@@ -102,5 +106,41 @@ describe('ImportUnderstandingService', () => {
       expect.arrayContaining(['未明确角色权限分级', '缺少异常处理流程', '缺少数据保留策略']),
     );
     expect(u.suggestions.length).toBe(3); // 跨份去重
+  });
+
+  it('检测到冲突 → 落 conflicts 并为 high/medium 生成待确认问题(low 不生成)', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({
+      id: 'b1', orgId: 'org-1',
+      assets: [
+        asset('PRD.txt', { status: 'parsed', features: ['游客可下单'] }),
+        asset('补充.md', { status: 'parsed', features: ['下单需登录'] }),
+      ],
+    });
+    conflictDetection.detect.mockResolvedValue([
+      { topic: '下单是否需登录', kind: 'contradiction', severity: 'high', statements: [{ source: 'PRD.txt', claim: '游客可下单' }], suggestion: '确认' },
+      { topic: '措辞', kind: 'inconsistency', severity: 'low', statements: [], suggestion: '' },
+    ]);
+
+    const u = await service.summarize(ctx, 'b1') as unknown as { conflicts: unknown[] };
+
+    expect(u.conflicts).toHaveLength(2); // 全部落库
+    expect(prisma.requirementQuestion.deleteMany).toHaveBeenCalledWith({
+      where: { understandingId: 'u1', resolved: false },
+    });
+    // 仅 high/medium 生成问题(low 排除)
+    const created = prisma.requirementQuestion.createMany.mock.calls[0][0].data;
+    expect(created).toHaveLength(1);
+    expect(created[0]).toEqual(expect.objectContaining({ understandingId: 'u1', severity: 'high' }));
+    expect(created[0].question).toContain('下单是否需登录');
+  });
+
+  it('无冲突 → 不创建问题(仍清理旧未解决问题)', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({
+      id: 'b1', orgId: 'org-1',
+      assets: [asset('a.txt', { status: 'parsed', features: ['x'] })],
+    });
+    await service.summarize(ctx, 'b1');
+    expect(prisma.requirementQuestion.deleteMany).toHaveBeenCalled();
+    expect(prisma.requirementQuestion.createMany).not.toHaveBeenCalled();
   });
 });

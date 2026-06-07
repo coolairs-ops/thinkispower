@@ -36,7 +36,10 @@ export class ImportBatchService {
   async get(ctx: TenantContext, batchId: string) {
     const batch = await this.prisma.importBatch.findUnique({
       where: { id: batchId },
-      include: { assets: true, understanding: true },
+      include: {
+        assets: true,
+        understanding: { include: { questions: { orderBy: [{ resolved: 'asc' }, { createdAt: 'asc' }] } } },
+      },
     });
     if (!batch) throw new NotFoundException('导入批次不存在');
     assertOrgAccess(batch.orgId, ctx.orgId, { allowLegacyNull: true });
