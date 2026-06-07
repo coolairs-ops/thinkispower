@@ -78,6 +78,7 @@ model Project {
   demoUrl                String?  @map("demo_url")
   demoHtml               String?  @map("demo_html")
   demoProgress           Json?    @map("demo_progress") // 预览生成进度 {phase,percent,message,startedAt,attempt}
+  themeConfig            Json?    @map("theme_config") // demo 外观主题 {primary,mode,radius}（Phase A 换肤）
   productionUrl          String?  @map("production_url")
   latestBuildId          String?  @map("latest_build_id") @db.Uuid
   sourceExportEnabled    Boolean  @default(false) @map("source_export_enabled")
@@ -450,7 +451,12 @@ model Specification {
   roles           Json?    @map("roles")              // [{name, permissions[]}]
   dataModels      Json?    @map("data_models")        // [{name, fields[{name,type,required}]}]
   businessRules   Json?    @map("business_rules")     // [{name, description, trigger, outcome}]
-  acceptanceScenarios Json? @map("acceptance_scenarios") // [{name, given, when, then, priority}]
+  acceptanceScenarios Json? @map("acceptance_scenarios") // [{name, given, when, then, priority, provenance[], coverage[]}]
+
+  // 验收报告（P15-Y 可验收/可追溯）
+  verificationResults Json?     @map("verification_results") // [{scenarioName, status: pass|fail|manual, coverage[], provenance[], checks[], evidence, verifiedAt}]
+  passRate            Float?    @map("pass_rate")            // 通过率 0-1，门控交付
+  verifiedAt         DateTime? @map("verified_at")          // 最近一次验收时间
 
   // 预测信息（冻结时的快照）
   estimatedCostRmb Int?    @map("estimated_cost_rmb")
@@ -556,6 +562,7 @@ model AssetFile {
   mimeType     String?   @map("mime_type")
   sizeBytes    BigInt?   @map("size_bytes")
   storageKey   String    @map("storage_key")
+  domainResident Boolean @default(true) @map("domain_resident") // 字节是否落域内对象存储(§1.1 数据不出域审计)
   checksum     String?
   parseSummary Json?     @map("parse_summary")
   parsedAt     DateTime? @map("parsed_at")
@@ -595,6 +602,7 @@ model RequirementQuestion {
   id              String   @id @default(uuid()) @db.Uuid
   understandingId String   @map("understanding_id") @db.Uuid
   question        String
+  severity        String?  // high|medium：关联冲突严重度，用于物化门控(P15-7)
   answer          String?
   resolved        Boolean  @default(false)
   createdAt       DateTime @default(now()) @map("created_at")
