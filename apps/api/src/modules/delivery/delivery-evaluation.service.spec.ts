@@ -8,6 +8,7 @@ import { DeepseekService } from '../../services/deepseek.service';
 import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { DeploymentService } from '../deployment/deployment.service';
 import { DeployPipelineService } from '../../services/deploy-pipeline.service';
+import { AcceptanceVerificationService } from './acceptance-verification.service';
 
 describe('DeliveryEvaluationService — 企业级检查方法', () => {
   let service: DeliveryEvaluationService;
@@ -27,6 +28,7 @@ describe('DeliveryEvaluationService — 企业级检查方法', () => {
         { provide: QwenReviewerService, useValue: makeMock() },
         { provide: DeploymentService, useValue: makeMock() },
         { provide: DeployPipelineService, useValue: makeMock() },
+        { provide: AcceptanceVerificationService, useValue: makeMock() },
       ],
     }).compile();
 

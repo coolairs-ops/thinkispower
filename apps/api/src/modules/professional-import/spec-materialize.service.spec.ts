@@ -7,8 +7,10 @@ describe('SpecMaterializeService', () => {
     requirementUnderstanding: { findUnique: jest.Mock; update: jest.Mock };
     project: { create: jest.Mock; update: jest.Mock };
     specification: { findUnique: jest.Mock; upsert: jest.Mock };
+    requirementQuestion: { count: jest.Mock };
   };
   let statusMapper: { mapProjectStatusToPublicLabel: jest.Mock };
+  let llm: { chat: jest.Mock };
   let service: SpecMaterializeService;
   const ctx = { userId: 'u1', orgId: 'org-1' };
 
@@ -34,9 +36,12 @@ describe('SpecMaterializeService', () => {
         findUnique: jest.fn().mockResolvedValue(null),
         upsert: jest.fn().mockImplementation(({ create }) => ({ id: 's1', ...create })),
       },
+      requirementQuestion: { count: jest.fn().mockResolvedValue(0) },
     };
     statusMapper = { mapProjectStatusToPublicLabel: jest.fn().mockReturnValue('规格已生成，等待确认') };
-    service = new SpecMaterializeService(prisma as never, statusMapper as never);
+    // 默认 LLM 不可用 → 走确定性兜底场景，保证多数用例不依赖外呼
+    llm = { chat: jest.fn().mockRejectedValue(new Error('llm off')) };
+    service = new SpecMaterializeService(prisma as never, statusMapper as never, llm as never);
   });
 
   it('批次不存在 → NotFound', async () => {
@@ -140,6 +145,52 @@ describe('SpecMaterializeService', () => {
     );
   });
 
+  it('LLM 不可用 → 逐功能生成确定性 GWT 验收场景(带 coverage/provenance)', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1', projectId: 'p1', name: 'x' });
+    prisma.requirementUnderstanding.findUnique.mockResolvedValue(understanding);
+
+    const r = await service.materializeSpec(ctx, 'b1');
+    const scenarios = (r.spec as never as { acceptanceScenarios: any[] }).acceptanceScenarios;
+
+    expect(scenarios.length).toBe(2); // 登录 / 下单
+    expect(scenarios).toContainEqual(
+      expect.objectContaining({
+        name: '登录 验收',
+        priority: 'must',
+        coverage: ['登录'],
+        provenance: ['PRD.txt', '补充.md'],
+      }),
+    );
+    const login = scenarios.find((s) => s.coverage.includes('登录'));
+    expect(login.given).toBeTruthy();
+    expect(login.when).toBeTruthy();
+    expect(login.then).toBeTruthy();
+  });
+
+  it('LLM 生成场景 → 按 coverage 命中功能补齐 provenance，丢弃无关功能', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1', projectId: 'p1', name: 'x' });
+    prisma.requirementUnderstanding.findUnique.mockResolvedValue(understanding);
+    llm.chat.mockResolvedValue(
+      JSON.stringify({
+        scenarios: [
+          { name: '成功登录', given: '已注册', when: '输入正确密码', then: '进入首页', priority: 'must', coverage: ['登录'] },
+          { name: '密码错误', given: '已注册', when: '输入错误密码', then: '提示错误', priority: 'nice', coverage: ['登录', '不存在的功能'] },
+        ],
+      }),
+    );
+
+    const r = await service.materializeSpec(ctx, 'b1');
+    const scenarios = (r.spec as never as { acceptanceScenarios: any[] }).acceptanceScenarios;
+
+    expect(scenarios.length).toBe(2);
+    expect(scenarios[0]).toEqual(
+      expect.objectContaining({ name: '成功登录', then: '进入首页', coverage: ['登录'], provenance: ['PRD.txt', '补充.md'] }),
+    );
+    // coverage 过滤掉「不存在的功能」，只保留命中的「登录」
+    expect(scenarios[1].coverage).toEqual(['登录']);
+    expect(scenarios[1].priority).toBe('nice');
+  });
+
   it('物化后 understanding 与 batch 推进到 confirmed', async () => {
     prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1', projectId: 'p1', name: 'x' });
     prisma.requirementUnderstanding.findUnique.mockResolvedValue(understanding);
@@ -152,5 +203,14 @@ describe('SpecMaterializeService', () => {
     expect(prisma.importBatch.update).toHaveBeenCalledWith({
       where: { id: 'b1' }, data: { status: 'confirmed' },
     });
+  });
+
+  it('存在未解决高冲突 → 拒绝物化(BadRequest)', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1', projectId: 'p1', name: 'x' });
+    prisma.requirementUnderstanding.findUnique.mockResolvedValue(understanding);
+    prisma.requirementQuestion.count.mockResolvedValue(2); // 2 项未解决高冲突
+
+    await expect(service.materializeSpec(ctx, 'b1')).rejects.toThrow(BadRequestException);
+    expect(prisma.specification.upsert).not.toHaveBeenCalled();
   });
 });

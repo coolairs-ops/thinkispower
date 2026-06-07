@@ -8,6 +8,7 @@ import { DeploymentService } from '../deployment/deployment.service';
 import { DeployPipelineService } from '../../services/deploy-pipeline.service';
 import { DeliveryService } from './delivery.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
+import { AcceptanceVerificationService } from './acceptance-verification.service';
 
 @Injectable()
 export class DeliveryEvaluationService {
@@ -22,6 +23,7 @@ export class DeliveryEvaluationService {
     private deploymentService: DeploymentService,
     private deployPipeline: DeployPipelineService,
     private qwenReviewer: QwenReviewerService,
+    private acceptance: AcceptanceVerificationService,
   ) {}
 
   /** 请求评估 — 只分析不交付，返回风险+修复建议 */
@@ -58,7 +60,15 @@ export class DeliveryEvaluationService {
 
     const quality = await this.qualityGate.runAllChecks(projectId, project.demoHtml || '');
 
-    return { analysis, quality };
+    // 验收报告（可验收/可追溯）：逐条场景 → 来源 → 实现 → 检查结果 + 通过率
+    let acceptance: any = null;
+    try {
+      acceptance = await this.acceptance.verify(userId, projectId);
+    } catch (e) {
+      this.logger.warn(`验收报告生成失败(不阻断评估): ${e}`);
+    }
+
+    return { analysis, quality, acceptance };
   }
 
   /** 终稿生产交付 — 异步执行 */
@@ -72,6 +82,21 @@ export class DeliveryEvaluationService {
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
     if (!project.demoHtml) throw new BadRequestException('请先生成 Demo 预览');
+
+    // 验收门控（P15-Y）：规格含验收场景时，通过率需达标才放行生产交付
+    const gate = await this.acceptance.gate(userId, projectId);
+    if (!gate.allowed) {
+      const pct = Math.round((gate.passRate ?? 0) * 100);
+      const need = Math.round(gate.threshold * 100);
+      const blockers = gate.report.scenarios
+        .filter((s) => s.status !== 'pass')
+        .slice(0, 5)
+        .map((s) => `「${s.scenarioName}」${s.status === 'fail' ? '未通过' : '待人工'}`)
+        .join('、');
+      throw new BadRequestException(
+        `验收未达标：通过率 ${pct}%（要求 ≥ ${need}%）。请先在验收报告处理未通过/待人工场景${blockers ? '：' + blockers : ''}，或调整规格后重新验收再交付。`,
+      );
+    }
 
     const deliveryId = `${projectId.substring(0, 8)}-${Date.now()}`;
     this.logger.log(`[生产交付] 异步启动: ${deliveryId}`);
@@ -341,7 +366,7 @@ export class DeliveryEvaluationService {
           });
           const currentHtml = project?.demoHtml ?? '';
 
-          const prompt = `修改以下HTML：\n\n${fixesText}\n\n输出完整HTML，不要省略。\n\n原始HTML：\n${currentHtml.slice(0, 25000)}`;
+          const prompt = `修改以下HTML：\n\n${fixesText}\n\n要求：只按上述意见修改，保持原有结构与风格；若原 HTML 使用 daisyUI（含 daisyUI/tailwind CDN），继续用 daisyUI 组件 class 与语义色、保留 CDN 与 <html> 的 data-theme、不要写死 hex 颜色。\n输出完整HTML，不要省略。\n\n原始HTML：\n${currentHtml.slice(0, 25000)}`;
           const response = await this.deepseek.chat(
             [{ role: 'user', content: prompt }],
             { temperature: 0.3, maxTokens: 16384 },

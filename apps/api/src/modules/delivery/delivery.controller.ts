@@ -6,6 +6,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { DeliveryService } from './delivery.service';
 import { DeliveryEvaluationService } from './delivery-evaluation.service';
 import { DeliveryIterationService } from './delivery-iteration.service';
+import { AcceptanceVerificationService, ScenarioStatus } from './acceptance-verification.service';
 
 @Controller('api/projects/:projectId/delivery')
 @UseGuards(JwtAuthGuard)
@@ -14,7 +15,30 @@ export class DeliveryController {
     private deliveryService: DeliveryService,
     private evaluationService: DeliveryEvaluationService,
     private iterationService: DeliveryIterationService,
+    private acceptanceService: AcceptanceVerificationService,
   ) {}
+
+  // ── 验收报告（P15-Y 可验收/可追溯）──
+  @Get('acceptance-report')
+  async getAcceptanceReport(@Req() req: any, @Param('projectId') projectId: string) {
+    return this.acceptanceService.getReport(req.user.id, projectId);
+  }
+
+  @Post('acceptance-verify')
+  async runAcceptanceVerify(@Req() req: any, @Param('projectId') projectId: string) {
+    return this.acceptanceService.verify(req.user.id, projectId);
+  }
+
+  @Post('acceptance-manual-confirm')
+  async manualConfirmScenario(
+    @Req() req: any,
+    @Param('projectId') projectId: string,
+    @Body('scenarioName') scenarioName: string,
+    @Body('status') status: ScenarioStatus,
+    @Body('note') note?: string,
+  ) {
+    return this.acceptanceService.manualConfirm(req.user.id, projectId, scenarioName, status, note);
+  }
 
   // ── 交付页面数据 ──
   @Get()

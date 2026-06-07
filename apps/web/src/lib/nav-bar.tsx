@@ -16,6 +16,7 @@ const links = [
   { href: '/deploy', label: '测试环境' },
   { href: '/snapshots', label: '版本' },
   { href: '/evaluation', label: '项目评估' },
+  { href: '/acceptance-report', label: '验收报告' },
   { href: '/delivery', label: '终稿交付' },
 ];
 

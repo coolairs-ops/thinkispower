@@ -2,6 +2,15 @@
 
 > 交接自一个已很长的会话；Phase 1.5 导入闭环、demo 防卡死、需求理解 PM 化均已完成。本文件是 P15-Y 的调研结论 + 实现拆解，供新会话 fresh 上下文直接上手。
 
+> ✅ **已实现（2026-06-06）**。四步全部落地并本地端到端验证通过：
+> - 场景真实化：`spec-materialize.service.ts` 从 features 生成真实 GWT（LLM + 确定性兜底，带 coverage/provenance）；实测 12 功能 → 20 条专业场景。
+> - 报告模型 + 服务：`Specification` 加 `verificationResults/passRate/verifiedAt`（db push 已同步）；新增 `apps/api/src/modules/delivery/acceptance-verification.service.ts`（聚合场景↔传感器检查+语义判定，算 passRate，落库 + changeLog 留痕）。
+> - 交付门控：`delivery-evaluation.service.ts` `requestEvaluation` 返回 `acceptance`；`productionDeliver` 前置 passRate≥阈值(默认 0.8，可配 `ACCEPTANCE_PASS_RATE_THRESHOLD`)。
+> - API：`delivery.controller.ts` 加 `GET acceptance-report`/`POST acceptance-verify`/`POST acceptance-manual-confirm`。
+> - 前端：`apps/web/src/app/projects/[id]/acceptance-report/page.tsx`（逐条卡片+来源/覆盖标签+证据+通过率仪表盘+导出 JSON+人工裁定回写）；NavBar 加「验收报告」入口。
+> - 单测：spec-materialize / acceptance-verification / delivery-evaluation 全绿。
+> 下文为原始调研记录，保留备查。
+
 ## 目标（执行计划 P15-Y）
 
 端到端溯源链 + 可审计验收报告：逐条 `acceptanceScenario` → **来源(provenance)** → **实现** → **检查结果(通过/未通过/待人工)**；产出可导出、可审计的验收报告；规格变更 `changeLog` 留痕；**通过率门控接入交付**。呼应立身之本③「可验收/可追溯」。

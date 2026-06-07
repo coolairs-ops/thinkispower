@@ -14,6 +14,7 @@ import { QualityGateService } from '../../services/quality-gate.service';
 import { DeepseekService } from '../../services/deepseek.service';
 import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { DeploymentService } from '../deployment/deployment.service';
+import { AcceptanceVerificationService } from './acceptance-verification.service';
 
 const makeMock = () => ({}) as any;
 
@@ -33,6 +34,7 @@ describe('DeliveryEvaluationService — 集成测试', () => {
         { provide: QwenReviewerService, useValue: makeMock() },
         { provide: DeployPipelineService, useValue: makeMock() },
         { provide: DeploymentService, useValue: makeMock() },
+        { provide: AcceptanceVerificationService, useValue: makeMock() },
       ],
     }).compile();
 

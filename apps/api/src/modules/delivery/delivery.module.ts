@@ -3,8 +3,10 @@ import { DeliveryController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
 import { DeliveryEvaluationService } from './delivery-evaluation.service';
 import { DeliveryIterationService } from './delivery-iteration.service';
+import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
 import { HermesModule } from '../../integrations/hermes/hermes.module';
+import { LlmModule } from '../../integrations/llm/llm.module';
 import { CaseReviewModule } from '../case-review/case-review.module';
 import { ExperienceRecommendationModule } from '../experience-recommendation/experience-recommendation.module';
 import { DeploymentModule } from '../deployment/deployment.module';
@@ -15,9 +17,9 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
 import { IterativeOptimizerService } from '../../services/iterative-optimizer.service';
 
 @Module({
-  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule],
+  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule],
   controllers: [DeliveryController],
-  providers: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, QwenReviewerService, IterativeOptimizerService],
-  exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService],
+  providers: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService],
+  exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService],
 })
 export class DeliveryModule {}
