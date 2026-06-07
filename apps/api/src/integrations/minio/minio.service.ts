@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as Minio from 'minio';
+import { isLocalEndpoint } from '../llm/llm-gateway.service';
 
 @Injectable()
 export class MinioService implements OnModuleInit {
@@ -19,6 +20,16 @@ export class MinioService implements OnModuleInit {
     });
     this.bucket = this.config.get('MINIO_BUCKET', 'platform-assets');
     this.publicUrl = this.config.get('MINIO_PUBLIC_URL', 'http://localhost:9000');
+  }
+
+  /** 对象存储对外端点（数据流向审计用） */
+  get storageEndpoint(): string {
+    return this.publicUrl;
+  }
+
+  /** 字节是否落域内对象存储（§1.1 数据不出域）；用对外 URL 判定，覆盖私有/内网部署 */
+  isDomainResident(): boolean {
+    return isLocalEndpoint(this.publicUrl);
   }
 
   async onModuleInit() {

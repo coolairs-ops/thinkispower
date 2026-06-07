@@ -31,6 +31,7 @@ import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
 import { SharedCoreModule } from './shared/shared-core.module';
 import { QueueModule } from './queue/queue.module';
 import { ProfessionalImportModule } from './modules/professional-import/professional-import.module';
+import { ComplianceModule } from './modules/compliance/compliance.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { ProfessionalImportModule } from './modules/professional-import/professi
     SharedCoreModule,
     QueueModule,
     ProfessionalImportModule,
+    ComplianceModule,
   ],
   controllers: [HealthController],
   providers: [

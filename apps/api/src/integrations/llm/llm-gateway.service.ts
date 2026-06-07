@@ -141,4 +141,12 @@ export class LlmGatewayService {
   get aiMode(): 'local' | 'cloud' {
     return this.mode;
   }
+
+  /** 数据流向审计(§1.1)：列出三个 LLM profile 的出口端点与域内判定 */
+  auditEndpoints(): Array<{ profile: LlmProfile; baseUrl: string; model: string; domainResident: boolean }> {
+    return (Object.keys(this.profiles) as LlmProfile[]).map((profile) => {
+      const p = this.profiles[profile];
+      return { profile, baseUrl: p.baseUrl, model: p.model, domainResident: isLocalEndpoint(p.baseUrl) };
+    });
+  }
 }

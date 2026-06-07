@@ -7,7 +7,7 @@ describe('AssetFileService', () => {
     importBatch: { findUnique: jest.Mock };
     assetFile: { findFirst: jest.Mock; create: jest.Mock };
   };
-  let minio: { uploadFile: jest.Mock };
+  let minio: { uploadFile: jest.Mock; isDomainResident: jest.Mock };
   let queue: { add: jest.Mock };
   let service: AssetFileService;
   const ctx = { userId: 'u1', orgId: 'org-1' };
@@ -25,7 +25,7 @@ describe('AssetFileService', () => {
       importBatch: { findUnique: jest.fn() },
       assetFile: { findFirst: jest.fn(), create: jest.fn() },
     };
-    minio = { uploadFile: jest.fn().mockResolvedValue('http://signed') };
+    minio = { uploadFile: jest.fn().mockResolvedValue('http://signed'), isDomainResident: jest.fn().mockReturnValue(true) };
     queue = { add: jest.fn().mockResolvedValue(undefined) };
     service = new AssetFileService(prisma as never, minio as never, queue as never);
   });
@@ -67,6 +67,7 @@ describe('AssetFileService', () => {
         sizeBytes: BigInt(1234),
         storageKey: `imports/b1/${expectedSum}/PRD.pdf`,
         checksum: expectedSum,
+        domainResident: true,
       },
     });
     expect(queue.add).toHaveBeenCalledWith('parse', { assetId: 'a1' });
@@ -118,6 +119,18 @@ describe('AssetFileService', () => {
     await service.addFile(ctx, 'b1', file({ originalname: 'weird.xyz' }));
     expect(prisma.assetFile.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ category: 'other' }) }),
+    );
+  });
+
+  it('存储非域内 → domainResident=false（§1.1 审计）', async () => {
+    prisma.importBatch.findUnique.mockResolvedValue({ id: 'b1', orgId: 'org-1' });
+    prisma.assetFile.findFirst.mockResolvedValue(null);
+    prisma.assetFile.create.mockImplementation(({ data }: never) => data);
+    minio.isDomainResident.mockReturnValue(false);
+
+    await service.addFile(ctx, 'b1', file());
+    expect(prisma.assetFile.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ domainResident: false }) }),
     );
   });
 });

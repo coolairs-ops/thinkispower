@@ -79,6 +79,7 @@ export class AssetFileService {
         sizeBytes: BigInt(file.size),
         storageKey,
         checksum,
+        domainResident: this.minio.isDomainResident(),
       },
     });
 
