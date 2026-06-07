@@ -4,8 +4,8 @@ import { AuthProvider } from '@/lib/auth-context';
 import { ToastProvider } from '@/lib/toast';
 
 export const metadata: Metadata = {
-  title: '一句话做软件平台',
-  description: 'AI驱动的新一代软件生成与交付平台。你说想法，平台帮你整理需求、生成预览、自动开发、交付可使用的软件。',
+  title: '思想动力',
+  description: '思想动力 —— 不辜负你的每个想法。AI 驱动的软件生成与交付平台，帮你整理需求、生成预览、自动开发、交付可使用的软件。',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

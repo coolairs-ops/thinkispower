@@ -1,7 +1,7 @@
 {
   "name": "platform-web",
   "version": "2.0.0",
-  "description": "一句话做软件平台 2.0 - Next.js Frontend",
+  "description": "思想动力 2.0 - Next.js Frontend",
   "private": true,
   "scripts": {
     "dev": "next dev",

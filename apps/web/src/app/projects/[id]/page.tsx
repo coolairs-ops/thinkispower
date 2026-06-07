@@ -540,13 +540,16 @@ function StringListDisplay({
  addItem: (field: keyof PRD) => void;
  removeItem: (field: keyof PRD, index: number) => void;
 }) {
+ // 兼容字符串 或 {name} 对象（导入路径产出 [{name}]），避免把对象当 React child 渲染
+ const toStr = (x: unknown): string =>
+   typeof x === 'string' ? x : x && typeof x === 'object' && 'name' in x ? String((x as { name?: unknown }).name ?? '') : String(x ?? '');
  if (editing) {
  return (
  <div className="space-y-2">
  {(values && values.length > 0 ? values : ['']).map((item, i) => (
  <div key={i} className="flex gap-2">
  <input
- value={item}
+ value={toStr(item)}
  onChange={(e) => updateItem(field, i, e.target.value)}
  className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
  placeholder={placeholder}
@@ -562,7 +565,7 @@ function StringListDisplay({
  return (
  <ul className="list-inside list-disc space-y-1 text-gray-900">
  {values.map((item, i) => (
- <li key={i}>{item}</li>
+ <li key={i}>{toStr(item)}</li>
  ))}
  </ul>
  );

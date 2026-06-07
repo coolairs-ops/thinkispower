@@ -1,7 +1,7 @@
 {
   "name": "platform-api",
   "version": "2.0.0",
-  "description": "一句话做软件平台 2.0 - NestJS Backend API",
+  "description": "思想动力 2.0 - NestJS Backend API",
   "private": true,
   "scripts": {
     "build": "nest build",

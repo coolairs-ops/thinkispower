@@ -64,7 +64,7 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-50">
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
         <h1 className="text-lg font-bold text-gray-900">
-          一句话做软件平台
+          思想动力
         </h1>
         <Link
           href="/projects/new"

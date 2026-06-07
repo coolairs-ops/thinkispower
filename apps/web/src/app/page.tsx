@@ -36,8 +36,8 @@ export default function HomePage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg">
-        <h1 className="mb-2 text-center text-2xl font-bold text-gray-900">一句话做软件平台</h1>
-        <p className="mb-6 text-center text-sm text-gray-500">你说想法，平台帮你实现</p>
+        <h1 className="mb-2 text-center text-2xl font-bold text-gray-900">思想动力</h1>
+        <p className="mb-6 text-center text-sm text-gray-500">不辜负你的每个想法</p>
 
         {error && (
           <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">

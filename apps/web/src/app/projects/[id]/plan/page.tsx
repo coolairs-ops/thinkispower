@@ -60,12 +60,16 @@ export default function PlanPage() {
  .catch(() => setLoading(false));
  }, [projectId, token, isLoading, router]);
 
+ // 兼容两种格式：字符串 或 {name} 对象（导入路径产出 [{name}]）
+ const toStr = (x: unknown): string =>
+   typeof x === 'string' ? x : x && typeof x === 'object' && 'name' in x ? String((x as { name?: unknown }).name ?? '') : String(x ?? '');
+
  const initEdit = (data: PlanData) => {
  setEditSummary(data?.summary || '');
- setEditPages(data?.pages || []);
- setEditFeatures(data?.features || []);
- setEditRoles(data?.roles || []);
- setEditDataObjects(data?.dataObjects || []);
+ setEditPages((data?.pages || []).map(toStr));
+ setEditFeatures((data?.features || []).map(toStr));
+ setEditRoles((data?.roles || []).map(toStr));
+ setEditDataObjects((data?.dataObjects || []).map(toStr));
  setEditDays(data?.estimatedDays || 0);
  setEditPrice(data?.estimatedPriceRange || '');
  };
@@ -187,7 +191,7 @@ export default function PlanPage() {
  </div>
  ) : (
  <ul className="list-inside list-disc text-gray-500">
- {plan.pages?.length > 0 ? plan.pages.map((p, i) => <li key={i}>{p}</li>) : <p className="text-gray-500/70">暂无</p>}
+ {plan.pages?.length > 0 ? plan.pages.map((p, i) => <li key={i}>{toStr(p)}</li>) : <p className="text-gray-500/70">暂无</p>}
  </ul>
  )}
  </EditableSection>
@@ -209,7 +213,7 @@ export default function PlanPage() {
  </div>
  ) : (
  <ul className="list-inside list-disc text-gray-500">
- {plan.features?.length > 0 ? plan.features.map((f, i) => <li key={i}>{f}</li>) : <p className="text-gray-500/70">暂无</p>}
+ {plan.features?.length > 0 ? plan.features.map((f, i) => <li key={i}>{toStr(f)}</li>) : <p className="text-gray-500/70">暂无</p>}
  </ul>
  )}
  </EditableSection>
@@ -231,7 +235,7 @@ export default function PlanPage() {
  </div>
  ) : (
  <ul className="list-inside list-disc text-gray-500">
- {plan.roles?.length > 0 ? plan.roles.map((r, i) => <li key={i}>{r}</li>) : <p className="text-gray-500/70">暂无</p>}
+ {plan.roles?.length > 0 ? plan.roles.map((r, i) => <li key={i}>{toStr(r)}</li>) : <p className="text-gray-500/70">暂无</p>}
  </ul>
  )}
  </EditableSection>
@@ -253,7 +257,7 @@ export default function PlanPage() {
  </div>
  ) : (
  <ul className="list-inside list-disc text-gray-500">
- {plan.dataObjects?.length > 0 ? plan.dataObjects.map((d, i) => <li key={i}>{d}</li>) : <p className="text-gray-500/70">暂无</p>}
+ {plan.dataObjects?.length > 0 ? plan.dataObjects.map((d, i) => <li key={i}>{toStr(d)}</li>) : <p className="text-gray-500/70">暂无</p>}
  </ul>
  )}
  </EditableSection>
