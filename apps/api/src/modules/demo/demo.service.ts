@@ -158,19 +158,28 @@ export class DemoService {
 
   /** 看图复刻：把参考截图复刻为 demo（第一版取首张；多张的多页拼装待后续） */
   private async generateFromShots(projectId: string, shots: Array<{ name?: string; storageKey: string }>): Promise<void> {
-    const shot = shots[0];
-    await this.markProgress(projectId, { phase: 'generating', percent: 55, message: '正在看图复刻页面…' });
-    const buf = await this.minio.downloadFile(shot.storageKey);
-    const ext = (shot.storageKey.split('.').pop() || 'png').toLowerCase();
-    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
-    const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
-    let html = await this.replicate.replicate(dataUrl, shot.name);
+    const pages: Array<{ name: string; html: string }> = [];
+    for (let i = 0; i < shots.length; i++) {
+      const shot = shots[i];
+      await this.markProgress(projectId, {
+        phase: 'generating', percent: 40 + Math.round((i / shots.length) * 50),
+        message: `正在看图复刻页面 ${i + 1}/${shots.length}…`,
+      });
+      const buf = await this.minio.downloadFile(shot.storageKey);
+      const ext = (shot.storageKey.split('.').pop() || 'png').toLowerCase();
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+      const html = await this.replicate.replicate(dataUrl, shot.name);
+      pages.push({ name: shot.name || `页面${i + 1}`, html });
+    }
+    // 单张直接用，多张拼成带 tab 切换的 SPA
+    let html = pages.length === 1 ? pages[0].html : this.replicate.assembleMultiPage(pages);
     html = this.cloudecode.injectAnnotationSupport(html); // 复用批注/档位注入
     await this.prisma.project.update({
       where: { id: projectId },
       data: { demoHtml: html, demoUrl: `/demo/${projectId}`, status: 'demo_ready', publicStatusLabel: '预览已生成' },
     });
-    this.logger.log(`看图复刻完成 project=${projectId}: ${html.length} bytes${shots.length > 1 ? `（共 ${shots.length} 张，本版取首张）` : ''}`);
+    this.logger.log(`看图复刻完成 project=${projectId}: ${shots.length} 张 → ${html.length} bytes`);
   }
 
   /** 生成出错：还会重试 → 提示重试中；终态失败 → 置 demo_failed（由 processor 按重试预算调用） */

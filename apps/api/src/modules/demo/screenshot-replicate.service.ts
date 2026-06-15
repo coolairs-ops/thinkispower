@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as cheerio from 'cheerio';
 import { LlmGatewayService } from '../../integrations/llm/llm-gateway.service';
 
 /** 看图复刻的「布局描述」prompt（vision 段：只看懂、出短结构，不吐代码——规避 vision 长代码退化） */
@@ -49,6 +50,38 @@ export class ScreenshotReplicateService {
       { maxTokens: 8000, temperature: 0.2 },
     );
     return this.cleanHtml(raw);
+  }
+
+  /** 把多张复刻页拼成一个带顶部 tab 切换的 daisyUI 单文件 SPA（每张截图=一页） */
+  assembleMultiPage(pages: Array<{ name: string; html: string }>): string {
+    const tabs: string[] = [];
+    const bodies: string[] = [];
+    pages.forEach((p, i) => {
+      const $ = cheerio.load(p.html);
+      const body = $('body').html() || p.html;
+      const key = 'p' + i;
+      const name = this.esc(p.name || `页面${i + 1}`);
+      tabs.push(`<button class="rtab${i === 0 ? ' active' : ''}" onclick="rnav('${key}',this)">${name}</button>`);
+      bodies.push(`<section class="rpage${i === 0 ? ' active' : ''}" id="rp-${key}">${body}</section>`);
+    });
+    return `<!DOCTYPE html>
+<html lang="zh-CN" data-theme="corporate">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css"/>
+<style>.rpage{display:none}.rpage.active{display:block}.rtabs{display:flex;gap:6px;padding:8px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;flex-wrap:wrap}.rtab{font-size:13px;padding:5px 12px;border:1px solid #d8dce3;border-radius:6px;background:#fff;cursor:pointer}.rtab.active{background:#2f6fed;color:#fff;border-color:#2f6fed}</style>
+</head>
+<body>
+<div class="rtabs">${tabs.join('')}</div>
+${bodies.join('\n')}
+<script>function rnav(k,el){document.querySelectorAll('.rpage').forEach(function(e){e.classList.remove('active')});var t=document.getElementById('rp-'+k);if(t)t.classList.add('active');document.querySelectorAll('.rtab').forEach(function(e){e.classList.remove('active')});if(el)el.classList.add('active');}</script>
+</body>
+</html>`;
+  }
+
+  private esc(s: string): string {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   /** 去掉模型偶尔加的 markdown 代码块包裹 */

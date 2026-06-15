@@ -32,4 +32,18 @@ describe('ScreenshotReplicateService', () => {
     await s.replicate('data:image/png;base64,XYZ');
     expect(llm.vision).toHaveBeenCalledWith(expect.any(String), ['data:image/png;base64,XYZ'], expect.anything());
   });
+
+  it('assembleMultiPage 把多页拼成 tab 切换 SPA，提取各页 body 内容', () => {
+    const out = s.assembleMultiPage([
+      { name: '首页', html: '<html><head><link href="daisyui"></head><body><div id="a">AAA</div></body></html>' },
+      { name: '列表', html: '<html><body><div id="b">BBB</div></body></html>' },
+    ]);
+    expect(out).toContain('data-theme="corporate"');
+    expect((out.match(/class="rpage/g) || []).length).toBe(2);
+    expect(out).toContain('>首页<');
+    expect(out).toContain('>列表<');
+    expect(out).toContain('AAA');
+    expect(out).toContain('BBB');
+    expect(out).toContain('cdn.jsdelivr.net/npm/daisyui');
+  });
 });
