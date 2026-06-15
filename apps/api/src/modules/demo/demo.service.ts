@@ -47,7 +47,7 @@ export class DemoService {
   async getDemo(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, themeConfig: true, updatedAt: true },
+      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, themeConfig: true, shotLayouts: true, updatedAt: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
@@ -71,7 +71,7 @@ export class DemoService {
     // 注入主题覆盖层（皮肤），令预览与已保存的外观一致；demoHtml 本身不变
     const themeConfig = this.theme.normalize(project.themeConfig as never);
     const html = ready.includes(status) && project.demoHtml ? this.theme.applyTheme(project.demoHtml, themeConfig) : null;
-    return { status, publicStatusLabel, progress, demoUrl: project.demoUrl, html, themeConfig };
+    return { status, publicStatusLabel, progress, demoUrl: project.demoUrl, html, themeConfig, shotLayouts: (project.shotLayouts as unknown) ?? null };
   }
 
   /** 保存用户在预览里直接编辑后的 HTML（局部档位调整），清理临时注入后落库 */
@@ -159,8 +159,10 @@ export class DemoService {
   /** 看图复刻：把参考截图复刻为 demo（第一版取首张；多张的多页拼装待后续） */
   private async generateFromShots(projectId: string, shots: Array<{ name?: string; storageKey: string }>): Promise<void> {
     const pages: Array<{ name: string; html: string }> = [];
+    const layouts: Array<{ name: string; layout: string }> = [];
     for (let i = 0; i < shots.length; i++) {
       const shot = shots[i];
+      const name = shot.name || `页面${i + 1}`;
       await this.markProgress(projectId, {
         phase: 'generating', percent: 40 + Math.round((i / shots.length) * 50),
         message: `正在看图复刻页面 ${i + 1}/${shots.length}…`,
@@ -169,17 +171,38 @@ export class DemoService {
       const ext = (shot.storageKey.split('.').pop() || 'png').toLowerCase();
       const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
       const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
-      const html = await this.replicate.replicate(dataUrl, shot.name);
-      pages.push({ name: shot.name || `页面${i + 1}`, html });
+      const layout = await this.replicate.describeLayout(dataUrl); // 第一段：看图出描述（可人工修正）
+      const html = await this.replicate.generateHtml(layout, name); // 第二段：按描述生成
+      pages.push({ name, html });
+      layouts.push({ name, layout });
     }
-    // 单张直接用，多张拼成带 tab 切换的 SPA
+    await this.storeReplica(projectId, pages, layouts);
+    this.logger.log(`看图复刻完成 project=${projectId}: ${shots.length} 张`);
+  }
+
+  /** 人在回路：用（修正后的）布局描述重新生成，跳过 vision —— 省成本、采纳人工纠错 */
+  async regenerateFromLayouts(userId: string, projectId: string, layouts: Array<{ name: string; layout: string }>): Promise<{ success: boolean }> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+    if (!project) throw new NotFoundException('项目不存在');
+    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    if (!Array.isArray(layouts) || layouts.length === 0) throw new BadRequestException('缺少布局描述');
+    const pages: Array<{ name: string; html: string }> = [];
+    for (let i = 0; i < layouts.length; i++) {
+      const name = layouts[i].name || `页面${i + 1}`;
+      pages.push({ name, html: await this.replicate.generateHtml(layouts[i].layout, name) });
+    }
+    await this.storeReplica(projectId, pages, layouts);
+    return { success: true };
+  }
+
+  /** 拼装多页 + 注入批注 + 落库 demoHtml / shotLayouts */
+  private async storeReplica(projectId: string, pages: Array<{ name: string; html: string }>, layouts: Array<{ name: string; layout: string }>): Promise<void> {
     let html = pages.length === 1 ? pages[0].html : this.replicate.assembleMultiPage(pages);
-    html = this.cloudecode.injectAnnotationSupport(html); // 复用批注/档位注入
+    html = this.cloudecode.injectAnnotationSupport(html);
     await this.prisma.project.update({
       where: { id: projectId },
-      data: { demoHtml: html, demoUrl: `/demo/${projectId}`, status: 'demo_ready', publicStatusLabel: '预览已生成' },
+      data: { demoHtml: html, demoUrl: `/demo/${projectId}`, status: 'demo_ready', publicStatusLabel: '预览已生成', shotLayouts: layouts as never },
     });
-    this.logger.log(`看图复刻完成 project=${projectId}: ${shots.length} 张 → ${html.length} bytes`);
   }
 
   /** 生成出错：还会重试 → 提示重试中；终态失败 → 置 demo_failed（由 processor 按重试预算调用） */

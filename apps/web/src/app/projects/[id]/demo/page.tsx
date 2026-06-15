@@ -6,7 +6,8 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
 
-type Mode = 'preview' | 'annotation' | 'theme';
+type Mode = 'preview' | 'annotation' | 'theme' | 'replica';
+interface ShotLayout { name: string; layout: string }
 interface ClickedElement { moduleKey: string; elementPath: string; }
 interface ThemeConfig { primary: string; mode: 'light' | 'dark'; radius: number; daisyTheme: string }
 
@@ -85,6 +86,8 @@ export default function DemoPage() {
   const [clickedElement, setClickedElement] = useState<ClickedElement | null>(null);
   const [feedbackComment, setFeedbackComment] = useState('');
   const [themeConfig, setThemeConfig] = useState<ThemeConfig>(DEFAULT_THEME);
+  const [shotLayouts, setShotLayouts] = useState<ShotLayout[]>([]);
+  const [regenerating, setRegenerating] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editMsg, setEditMsg] = useState('');
@@ -111,6 +114,7 @@ export default function DemoPage() {
         setProjectName(proj.name || '');
         setFeedbacks(Array.isArray(fbs) ? fbs : []);
         if (demo.themeConfig) setThemeConfig(demo.themeConfig);
+        setShotLayouts(Array.isArray(demo.shotLayouts) ? demo.shotLayouts : []);
       })
       .catch(() => {});
   }, [projectId, token, isLoading, router]);
@@ -213,6 +217,20 @@ export default function DemoPage() {
     setSavingTheme(false);
   };
 
+  const updateLayout = (i: number, v: string) =>
+    setShotLayouts((ls) => ls.map((l, idx) => (idx === i ? { ...l, layout: v } : l)));
+
+  const handleRegenerate = async () => {
+    setRegenerating(true);
+    try {
+      await api.post(`/api/projects/${projectId}/demo/regenerate-shots`, { layouts: shotLayouts });
+      const demo = await api.get(`/api/projects/${projectId}/demo`);
+      setDemoHtml(demo.html || null);
+      if (Array.isArray(demo.shotLayouts)) setShotLayouts(demo.shotLayouts);
+    } catch { /* ignore */ }
+    setRegenerating(false);
+  };
+
   const handleGenerate = async () => {
     setStatus('demo_generating');
     setPublicStatusLabel('正在生成预览');
@@ -280,7 +298,7 @@ export default function DemoPage() {
       <div className="flex items-center justify-between border-b bg-white px-6 py-2">
         <div className="flex items-center gap-4">
           <h1 className="text-lg font-bold text-gray-900">预览</h1>
-          <ModeToggle mode={mode} onChange={setMode} />
+          <ModeToggle mode={mode} onChange={setMode} hasShots={shotLayouts.length > 0} />
         </div>
         <div className="flex items-center gap-3">
           {publicStatusLabel && (
@@ -571,12 +589,39 @@ export default function DemoPage() {
             <p className="text-xs text-gray-400">调整即时预览；保存后下次打开与交付都会沿用。</p>
           </aside>
         )}
+
+        {/* Replica sidebar — 看图复刻描述校对（人在回路） */}
+        {mode === 'replica' && showPreview && shotLayouts.length > 0 && (
+          <aside className="w-80 border-l bg-white p-4 overflow-y-auto flex flex-col gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-800">复刻描述校对</h2>
+              <p className="mt-1 text-xs text-gray-400">看图复刻的布局描述，可改 OCR 错/补漏；改完「按描述重新生成」(跳过看图、更省时)。</p>
+            </div>
+            {shotLayouts.map((s, i) => (
+              <div key={i} className="rounded-lg border border-gray-200 p-2">
+                <p className="mb-1 text-xs font-medium text-gray-600">{s.name}</p>
+                <textarea
+                  value={s.layout}
+                  onChange={(e) => updateLayout(i, e.target.value)}
+                  className="h-40 w-full rounded border border-gray-300 px-2 py-1 font-mono text-xs focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+            ))}
+            <button
+              onClick={handleRegenerate}
+              disabled={regenerating}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {regenerating ? '重新生成中…' : '按描述重新生成'}
+            </button>
+          </aside>
+        )}
       </div>
     </div>
   );
 }
 
-function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
+function ModeToggle({ mode, onChange, hasShots }: { mode: Mode; onChange: (m: Mode) => void; hasShots: boolean }) {
   return (
     <div className="flex rounded-lg border border-gray-300 overflow-hidden">
       <button
@@ -609,6 +654,16 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
       >
         外观
       </button>
+      {hasShots && (
+        <button
+          onClick={() => onChange('replica')}
+          className={`px-4 py-1.5 text-sm transition-colors ${
+            mode === 'replica' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          复刻校对
+        </button>
+      )}
     </div>
   );
 }

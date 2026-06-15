@@ -17,6 +17,16 @@ export class DemoController {
     return this.demoService.generateDemo(req.user.id, projectId);
   }
 
+  /** 人在回路：用修正后的布局描述重新生成看图复刻 demo */
+  @Post('regenerate-shots')
+  async regenerateShots(
+    @Req() req: any,
+    @Param('projectId') projectId: string,
+    @Body() body: { layouts?: Array<{ name: string; layout: string }> },
+  ) {
+    return this.demoService.regenerateFromLayouts(req.user.id, projectId, body?.layouts || []);
+  }
+
   /** 保存预览里直接编辑后的 HTML（档位调整等局部修改） */
   @Patch('html')
   async saveEditedHtml(@Req() req: any, @Param('projectId') projectId: string, @Body('html') html: string) {
