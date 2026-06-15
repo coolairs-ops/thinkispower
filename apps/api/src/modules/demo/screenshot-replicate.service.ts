@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import { LlmGatewayService } from '../../integrations/llm/llm-gateway.service';
+import { tailwindCdnUrl, daisyuiCssUrl, daisyuiHeadAssets } from '../../common/asset-urls';
 
 /** 看图复刻的「布局描述」prompt（vision 段：只看懂、出短结构，不吐代码——规避 vision 长代码退化） */
 const DESCRIBE_PROMPT =
@@ -11,9 +12,9 @@ const DESCRIBE_PROMPT =
   '"pagination":""},"palette":{"primary":"主色hex","bg":"背景hex"}}。只输出 JSON。';
 
 /** 据布局描述生成 daisyUI 页面的 prompt（text 段：擅长吐长代码） */
-const GENERATE_SYSTEM =
+const buildGenerateSystem = (): string =>
   '你是资深前端工程师。下面是一张产品原型的结构化布局描述(JSON)。请据此生成一个单文件 HTML 页面，' +
-  '在 <head> 引入 `https://cdn.tailwindcss.com` 与 `https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css`，' +
+  `在 <head> 引入 \`${tailwindCdnUrl()}\` 与 \`${daisyuiCssUrl()}\`，` +
   '根元素 `<html data-theme="corporate">`，用 daisyUI 语义 class(btn/card/navbar/menu/table/stats/input/badge 等)尽量还原布局、组件、配色与文案。' +
   '每个可操作元素(按钮/输入/卡片/表格/菜单项)加 `data-module-key` 与 `data-element-path`(kebab-case)，侧栏菜单项与页面大标题不要加 data-module-key。' +
   '只输出完整 HTML 代码本身，不要解释、不要用 markdown 代码块包裹。';
@@ -46,7 +47,7 @@ export class ScreenshotReplicateService {
   async generateHtml(layoutDescription: string, pageName?: string): Promise<string> {
     const raw = await this.llm.chat(
       'text-primary',
-      { system: GENERATE_SYSTEM, user: `页面名称：${pageName || '页面'}\n布局描述：\n${layoutDescription}` },
+      { system: buildGenerateSystem(), user: `页面名称：${pageName || '页面'}\n布局描述：\n${layoutDescription}` },
       { maxTokens: 8000, temperature: 0.2 },
     );
     return this.cleanHtml(raw);
@@ -68,8 +69,7 @@ export class ScreenshotReplicateService {
 <html lang="zh-CN" data-theme="corporate">
 <head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<script src="https://cdn.tailwindcss.com"></script>
-<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css"/>
+${daisyuiHeadAssets()}
 <style>.rpage{display:none}.rpage.active{display:block}.rtabs{display:flex;gap:6px;padding:8px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb;flex-wrap:wrap}.rtab{font-size:13px;padding:5px 12px;border:1px solid #d8dce3;border-radius:6px;background:#fff;cursor:pointer}.rtab.active{background:#2f6fed;color:#fff;border-color:#2f6fed}</style>
 </head>
 <body>
