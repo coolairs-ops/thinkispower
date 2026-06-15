@@ -8,6 +8,8 @@ import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.clien
 import { isProjectLocked } from '../../common/utils/project-status';
 import { DEMO_QUEUE, DemoGenerateJob } from './demo.queue';
 import { ThemeService, ThemeConfig } from './theme.service';
+import { ScreenshotReplicateService } from './screenshot-replicate.service';
+import { MinioService } from '../../integrations/minio/minio.service';
 
 /** 预览生成进度（写入 project.demoProgress，供前端进度条/阶段文案展示） */
 export interface DemoProgress {
@@ -38,6 +40,8 @@ export class DemoService {
     private cloudecode: CloudecodeClient,
     @InjectQueue(DEMO_QUEUE) private demoQueue: Queue<DemoGenerateJob>,
     private theme: ThemeService,
+    private minio: MinioService,
+    private replicate: ScreenshotReplicateService,
   ) {}
 
   async getDemo(userId: string, projectId: string) {
@@ -140,10 +144,33 @@ export class DemoService {
   /** 队列消费的实际执行：更新进度 + 调生成（成功时 cloudecode 自身已写 demo_ready + demoHtml） */
   async executeGeneration(projectId: string): Promise<void> {
     await this.markProgress(projectId, { phase: 'generating', percent: 30, message: '正在生成页面内容，复杂应用通常需要 1-2 分钟…' });
-    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { planSummary: true } });
-    const result = await this.cloudecode.generateDemoHtmlDirect(projectId, p?.planSummary);
-    if (!result.success) throw new Error(result.rawError || '预览生成失败');
+    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { planSummary: true, referenceShots: true } });
+    const shots = (p?.referenceShots as Array<{ name?: string; storageKey: string }> | null) ?? [];
+    if (shots.length > 0) {
+      // 看图复刻路径（私有化两段式）
+      await this.generateFromShots(projectId, shots);
+    } else {
+      const result = await this.cloudecode.generateDemoHtmlDirect(projectId, p?.planSummary);
+      if (!result.success) throw new Error(result.rawError || '预览生成失败');
+    }
     await this.markProgress(projectId, { phase: 'done', percent: 100, message: '预览已生成' });
+  }
+
+  /** 看图复刻：把参考截图复刻为 demo（第一版取首张；多张的多页拼装待后续） */
+  private async generateFromShots(projectId: string, shots: Array<{ name?: string; storageKey: string }>): Promise<void> {
+    const shot = shots[0];
+    await this.markProgress(projectId, { phase: 'generating', percent: 55, message: '正在看图复刻页面…' });
+    const buf = await this.minio.downloadFile(shot.storageKey);
+    const ext = (shot.storageKey.split('.').pop() || 'png').toLowerCase();
+    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+    let html = await this.replicate.replicate(dataUrl, shot.name);
+    html = this.cloudecode.injectAnnotationSupport(html); // 复用批注/档位注入
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { demoHtml: html, demoUrl: `/demo/${projectId}`, status: 'demo_ready', publicStatusLabel: '预览已生成' },
+    });
+    this.logger.log(`看图复刻完成 project=${projectId}: ${html.length} bytes${shots.length > 1 ? `（共 ${shots.length} 张，本版取首张）` : ''}`);
   }
 
   /** 生成出错：还会重试 → 提示重试中；终态失败 → 置 demo_failed（由 processor 按重试预算调用） */

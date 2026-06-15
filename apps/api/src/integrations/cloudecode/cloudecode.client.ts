@@ -236,7 +236,7 @@ export class CloudecodeClient {
    * 注入批注高亮 CSS + 消息监听器到 AI 生成的 HTML。
    * AI 不会自动生成这部分，需要后处理补上。
    */
-  private injectAnnotationSupport(html: string): string {
+  injectAnnotationSupport(html: string): string {
     const highlightCss = `
 .annotation-highlight { outline: 3px solid #3b82f6 !important; outline-offset: 2px; background: rgba(59,130,246,.08) !important; border-radius: 4px; }`;
 

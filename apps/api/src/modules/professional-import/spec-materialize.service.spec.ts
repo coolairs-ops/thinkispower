@@ -8,6 +8,7 @@ describe('SpecMaterializeService', () => {
     project: { create: jest.Mock; update: jest.Mock };
     specification: { findUnique: jest.Mock; upsert: jest.Mock };
     requirementQuestion: { count: jest.Mock };
+    assetFile: { findMany: jest.Mock };
   };
   let statusMapper: { mapProjectStatusToPublicLabel: jest.Mock };
   let llm: { chat: jest.Mock };
@@ -37,6 +38,7 @@ describe('SpecMaterializeService', () => {
         upsert: jest.fn().mockImplementation(({ create }) => ({ id: 's1', ...create })),
       },
       requirementQuestion: { count: jest.fn().mockResolvedValue(0) },
+      assetFile: { findMany: jest.fn().mockResolvedValue([]) },
     };
     statusMapper = { mapProjectStatusToPublicLabel: jest.fn().mockReturnValue('规格已生成，等待确认') };
     // 默认 LLM 不可用 → 走确定性兜底场景，保证多数用例不依赖外呼

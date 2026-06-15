@@ -61,6 +61,18 @@ export class SpecMaterializeService {
     const planSummary = this.buildPlanSummary(understanding);
     const projectId = await this.ensureProject(ctx, batch, understanding.positioning, planSummary);
 
+    // 导入的设计截图(蓝湖)→ 项目参考图，供 demo 看图复刻
+    const shots = await this.prisma.assetFile.findMany({
+      where: { batchId, category: 'design' as never },
+      select: { fileName: true, storageKey: true },
+    });
+    if (shots.length > 0) {
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { referenceShots: shots.map((s) => ({ name: s.fileName, storageKey: s.storageKey })) as never },
+      });
+    }
+
     const existing = await this.prisma.specification.findUnique({ where: { projectId } });
     const specData = await this.assemble(understanding);
     const spec = await this.prisma.specification.upsert({

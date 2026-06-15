@@ -9,6 +9,8 @@ import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { getQueueToken } from '@nestjs/bullmq';
 import { DEMO_QUEUE } from './demo.queue';
 import { ThemeService } from './theme.service';
+import { ScreenshotReplicateService } from './screenshot-replicate.service';
+import { MinioService } from '../../integrations/minio/minio.service';
 
 describe('DemoService', () => {
   let service: DemoService;
@@ -71,6 +73,8 @@ describe('DemoService', () => {
         { provide: HermesClient, useValue: hermes },
         { provide: getQueueToken(DEMO_QUEUE), useValue: demoQueue },
         ThemeService,
+        { provide: MinioService, useValue: { downloadFile: jest.fn() } },
+        { provide: ScreenshotReplicateService, useValue: { replicate: jest.fn() } },
       ],
     }).compile();
 

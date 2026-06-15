@@ -79,6 +79,7 @@ model Project {
   demoHtml               String?  @map("demo_html")
   demoProgress           Json?    @map("demo_progress") // 预览生成进度 {phase,percent,message,startedAt,attempt}
   themeConfig            Json?    @map("theme_config") // demo 外观主题 {primary,mode,radius}（Phase A 换肤）
+  referenceShots         Json?    @map("reference_shots") // 参考截图引用 [{name, storageKey}]，供 demo 看图复刻
   productionUrl          String?  @map("production_url")
   latestBuildId          String?  @map("latest_build_id") @db.Uuid
   sourceExportEnabled    Boolean  @default(false) @map("source_export_enabled")
