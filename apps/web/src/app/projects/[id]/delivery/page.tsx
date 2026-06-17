@@ -194,7 +194,7 @@ export default function DeliveryPage() {
             <ServiceCard icon="📦" title="源码下载" available={!!sourceZipUrl}
               availableContent={<>
                 <p className="text-xs text-gray-500 mb-2">全栈项目源码包</p>
-                <a href={sourceZipUrl} target="_blank" rel="noopener noreferrer"
+                <a href={`${sourceZipUrl}${sourceZipUrl?.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`} target="_blank" rel="noopener noreferrer"
                   className="rounded bg-green-600 px-3 py-1.5 text-xs text-white hover:bg-green-700">下载源码</a>
               </>}
               unavailableContent={<>
