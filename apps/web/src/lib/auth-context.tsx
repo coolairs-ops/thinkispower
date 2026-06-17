@@ -38,27 +38,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
-    fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${stored}` },
-      signal: controller.signal,
-    })
-      .then((res) => {
+    const fetchMe = (tok: string) =>
+      fetch('/api/auth/me', { headers: { Authorization: `Bearer ${tok}` }, signal: controller.signal });
+
+    // access token 过期时先用 refreshToken 续期，续期成功才继续——避免「过 15 分钟刷新页面即被登出」丢会话
+    const tryRefresh = async (): Promise<string | null> => {
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) return null;
+      try {
+        const res = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+          signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        localStorage.setItem('accessToken', data.accessToken);
+        if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+        return data.accessToken as string;
+      } catch {
+        return null;
+      }
+    };
+
+    (async () => {
+      try {
+        let res = await fetchMe(stored);
+        if (res.status === 401) {
+          const refreshed = await tryRefresh();
+          if (refreshed) {
+            setToken(refreshed);
+            res = await fetchMe(refreshed);
+          }
+        }
         if (!res.ok) throw new Error('invalid token');
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
         setUser({ id: data.id, email: data.email, name: data.name, plan: data.plan });
-      })
-      .catch(() => {
+      } catch {
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         setToken(null);
         setUser(null);
-      })
-      .finally(() => {
+      } finally {
         clearTimeout(timeout);
         setIsLoading(false);
-      });
+      }
+    })();
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {

@@ -56,15 +56,16 @@ async function request(path: string, options: RequestInit = {}): Promise<any> {
     refreshPromise = null;
 
     if (refreshed) {
+      // 续期成功：用新 token 重试，结果交给下面统一的 ok / 业务错误处理，
+      // 不在此因业务级 4xx/5xx 误登出（仅续期失败才登出）
       headers['Authorization'] = `Bearer ${getToken()}`;
       res = await fetch(path, { ...options, headers });
-      if (res.ok) return res.json();
+    } else {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      window.location.href = '/';
+      throw new Error('登录已过期，请重新登录');
     }
-
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    window.location.href = '/';
-    throw new Error('登录已过期，请重新登录');
   }
 
   if (!res.ok) {
