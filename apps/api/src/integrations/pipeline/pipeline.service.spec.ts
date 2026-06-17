@@ -10,6 +10,10 @@ import { ErrorMatcherService } from '../../services/error-matcher.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
 import { DeploymentService } from '../../modules/deployment/deployment.service';
+import { SecurityGateService } from '../../delivery-control/security-gate.service';
+import { ExecutorRouterService } from '../../delivery-control/executor-router.service';
+import { DeliveryMessageService } from '../../delivery-control/delivery-message.service';
+import { SanitizeService } from '../../services/sanitize.service';
 
 // zip.ts 经 require('archiver') 加载 ESM 包，jest 环境会崩；
 // 与 delivery-orchestrator.spec 同款，mock 掉 createZipBuffer 以绕过加载。
@@ -116,6 +120,11 @@ describe('PipelineService', () => {
         { provide: BuildService, useValue: mockBuildService },
         { provide: DemoSnapshotService, useValue: mockDemoSnapshotService },
         { provide: DeploymentService, useValue: mockDeploymentService },
+        // 交付控制层三件套用真实实例（纯逻辑，无运行态依赖）
+        SecurityGateService,
+        ExecutorRouterService,
+        DeliveryMessageService,
+        SanitizeService,
       ],
     }).compile();
 
@@ -241,6 +250,71 @@ describe('PipelineService', () => {
       expect(mockCloudecode.executeTask).toHaveBeenCalledTimes(4);
       expect(mockTaskService.updateStatus).toHaveBeenLastCalledWith('task-1', 'failed', expect.any(Object));
       expect(mockEventEmitter.emit).toHaveBeenCalledWith('task.failed', expect.any(Object));
+    }, 30000);
+  });
+
+  // 交付控制层三件套已接进主流程（观察+留痕，不改控制流）
+  describe('delivery-control 接线（观察+留痕）', () => {
+    beforeEach(() => {
+      mockTaskService.findById.mockResolvedValue(pendingTask);
+      mockValidator.validateStructure.mockReturnValue({ passed: true, errors: [] });
+      mockValidator.checkRegression.mockReturnValue({ passed: true, changedModules: [] });
+      mockValidator.validateAcceptanceCriteria.mockResolvedValue({ passed: true, criteriaResults: [] });
+      mockPrismaService.project.findUnique.mockResolvedValue({ demoHtml: '<html>updated</html>' });
+    });
+
+    it('ExecutorRouter：路由决策写入 DecisionLog 审计链', async () => {
+      mockTaskService.getPendingTasks.mockResolvedValue([pendingTask]);
+      mockCloudecode.executeTask.mockResolvedValue({ success: true, summary: '完成', changedFiles: ['demo.html'] });
+
+      await service['handleTasksCreated']({ projectId: 'project-1', feedbackId: 'f1', taskIds: ['task-1'] });
+
+      expect(mockPrismaService.decisionLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            stage: 'route',
+            decisionResult: expect.objectContaining({ observeOnly: true, executor: expect.any(String) }),
+          }),
+        }),
+      );
+    });
+
+    it('SecurityGate：越界文件(.env)留痕但不拦截，任务仍完成', async () => {
+      mockTaskService.getPendingTasks.mockResolvedValue([pendingTask]);
+      mockCloudecode.executeTask.mockResolvedValue({ success: true, summary: '完成', changedFiles: ['index.html', '.env'] });
+
+      await service['handleTasksCreated']({ projectId: 'project-1', feedbackId: 'f1', taskIds: ['task-1'] });
+
+      // 留痕：security_gate 审计记录含违规
+      expect(mockPrismaService.decisionLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            stage: 'security_gate',
+            decisionResult: expect.objectContaining({
+              observeOnly: true,
+              allowed: false,
+              violations: expect.arrayContaining([expect.objectContaining({ file: '.env', reason: 'forbidden' })]),
+            }),
+          }),
+        }),
+      );
+      // 不拦截：任务照常完成
+      expect(mockTaskService.updateStatus).toHaveBeenCalledWith('task-1', 'completed', expect.any(Object));
+    });
+
+    it('DeliveryMessage：失败文案脱敏后写入 errorMessage（不漏内部技术词）', async () => {
+      mockTaskService.getPendingTasks.mockResolvedValue([pendingTask]);
+      // rawError 含内部禁用词 Cloudecode，应被脱敏
+      mockCloudecode.executeTask.mockResolvedValue({ success: false, rawError: 'Cloudecode 执行超时' });
+
+      await service['handleTasksCreated']({ projectId: 'project-1', feedbackId: 'f1', taskIds: ['task-1'] });
+
+      const failCall = mockTaskService.updateStatus.mock.calls.find(
+        (c) => c[1] === 'failed',
+      );
+      expect(failCall).toBeDefined();
+      expect(failCall![2].errorMessage).not.toContain('Cloudecode');
+      expect(failCall![2].errorMessage).toContain('AI 开发助手');
     }, 30000);
   });
 });

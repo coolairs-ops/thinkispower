@@ -10,10 +10,16 @@ import { ErrorMatcherService } from '../../services/error-matcher.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
 import { DeploymentService } from '../../modules/deployment/deployment.service';
+import { SecurityGateService } from '../../delivery-control/security-gate.service';
+import { ExecutorRouterService } from '../../delivery-control/executor-router.service';
+import { DeliveryMessageService } from '../../delivery-control/delivery-message.service';
 import { createZipBuffer } from '../../common/utils/zip';
 import { EVENTS, TasksCreatedPayload, TasksCompletedPayload } from '../../events/event-types';
 
 const BACKOFF_MS = [1000, 2000, 4000];
+
+/** 安全门禁止改动区（观察+留痕用）：密钥、私钥、git 内部目录 */
+const FORBIDDEN_FILES = ['.env', '**/.env', '**/.env.*', '**/*.pem', '**/id_rsa', '.git/**'];
 
 @Injectable()
 export class PipelineService {
@@ -30,6 +36,9 @@ export class PipelineService {
     private htmlExtractor: HtmlModuleExtractorService,
     private demoSnapshotService: DemoSnapshotService,
     private deploymentService: DeploymentService,
+    private securityGate: SecurityGateService,
+    private executorRouter: ExecutorRouterService,
+    private deliveryMessage: DeliveryMessageService,
   ) {}
 
   @OnEvent(EVENTS.TASKS_CREATED)
@@ -90,6 +99,10 @@ export class PipelineService {
     // HTML 修改任务 → 现有逻辑，包含验证 → 重试 → 回滚循环
     this.logger.log(`Executing HTML modification task ${taskId} type=${task.type}`);
 
+    // 交付控制层（观察+留痕，不改控制流）：执行器路由决策入审计链，供后续灰度接管参考
+    const route = this.executorRouter.route({ taskType: task.type });
+    await this.logDecision(taskId, projectId, 'route', { observeOnly: true, ...route });
+
     for (let attempt = 0; attempt <= 3; attempt++) {
       try {
         // 1. 执行修改
@@ -98,6 +111,22 @@ export class PipelineService {
 
         if (!result.success) {
           throw new Error(result.rawError || '执行失败');
+        }
+
+        // 1.5 安全门（观察+留痕，不拦截）：校验本次改动文件是否触碰禁止区，命中只记审计
+        const scope = this.securityGate.checkFileScope({
+          changedFiles: result.changedFiles ?? [],
+          forbiddenFiles: FORBIDDEN_FILES,
+        });
+        if (!scope.allowed) {
+          this.logger.warn(
+            `Task ${taskId} 安全门(观察)命中越界: ${scope.violations.map((v) => `${v.file}(${v.reason})`).join(', ')}`,
+          );
+          await this.logDecision(taskId, projectId, 'security_gate', {
+            observeOnly: true,
+            allowed: false,
+            violations: scope.violations,
+          });
         }
 
         // 2. 读取修改后的 HTML
@@ -148,8 +177,10 @@ export class PipelineService {
 
         // 6. 重试耗尽 → 最终回滚
         await this.rollbackToPreModification(projectId, taskId);
-        await this.taskService.updateStatus(taskId, 'failed', { errorMessage: errorText });
-        await this.logDecision(taskId, projectId, 'p3_exhausted', { attempts: attempt + 1 });
+        // 双消息：用户可见文案脱敏（不漏内部技术词），internal 原文留审计
+        const dmExhausted = this.deliveryMessage.build(errorText);
+        await this.taskService.updateStatus(taskId, 'failed', { errorMessage: dmExhausted.publicMessage });
+        await this.logDecision(taskId, projectId, 'p3_exhausted', { attempts: attempt + 1, internalError: dmExhausted.internalMessage });
         this.eventEmitter.emit(EVENTS.TASK_FAILED, { projectId, feedbackId, taskId, error: errorText });
         return;
 
@@ -162,9 +193,10 @@ export class PipelineService {
           continue;
         }
 
-        // 重试耗尽
-        await this.taskService.updateStatus(taskId, 'failed', { errorMessage: msg });
-        await this.logDecision(taskId, projectId, 'p3_exhausted', { attempts: attempt + 1, error: msg });
+        // 重试耗尽 — 双消息：用户可见文案脱敏，internal 原文留审计
+        const dmError = this.deliveryMessage.build(msg);
+        await this.taskService.updateStatus(taskId, 'failed', { errorMessage: dmError.publicMessage });
+        await this.logDecision(taskId, projectId, 'p3_exhausted', { attempts: attempt + 1, internalError: dmError.internalMessage });
         this.eventEmitter.emit(EVENTS.TASK_FAILED, { projectId, feedbackId, taskId, error: msg });
         return;
       }

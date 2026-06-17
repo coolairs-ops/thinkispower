@@ -34,6 +34,7 @@ import { ProfessionalImportModule } from './modules/professional-import/professi
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { GuardianModule } from './modules/guardian/guardian.module';
 import { AppRuntimeModule } from './modules/app-runtime/app-runtime.module';
+import { DeliveryControlModule } from './delivery-control/delivery-control.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { AppRuntimeModule } from './modules/app-runtime/app-runtime.module';
     ComplianceModule,
     GuardianModule,
     AppRuntimeModule,
+    DeliveryControlModule,
   ],
   controllers: [HealthController],
   providers: [
