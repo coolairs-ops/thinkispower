@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { DeliveryController } from './delivery.controller';
 import { DeliveryService } from './delivery.service';
 import { DeliveryEvaluationService } from './delivery-evaluation.service';
+import { DeliveryProcessor } from './delivery.processor';
+import { DELIVERY_QUEUE } from './delivery.queue';
 import { DeliveryIterationService } from './delivery-iteration.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
@@ -17,9 +20,9 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
 import { IterativeOptimizerService } from '../../services/iterative-optimizer.service';
 
 @Module({
-  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule],
+  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule, BullModule.registerQueue({ name: DELIVERY_QUEUE })],
   controllers: [DeliveryController],
-  providers: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService],
+  providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService],
   exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService],
 })
 export class DeliveryModule {}

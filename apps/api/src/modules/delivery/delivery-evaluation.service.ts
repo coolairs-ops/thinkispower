@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
+import { DELIVERY_QUEUE, PRODUCTION_DELIVERY_JOB, RE_EVALUATE_JOB } from './delivery.queue';
 import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { QualityGateService } from '../../services/quality-gate.service';
 import { DeepseekService } from '../../services/deepseek.service';
@@ -24,6 +27,7 @@ export class DeliveryEvaluationService {
     private deployPipeline: DeployPipelineService,
     private qwenReviewer: QwenReviewerService,
     private acceptance: AcceptanceVerificationService,
+    @InjectQueue(DELIVERY_QUEUE) private deliveryQueue: Queue,
   ) {}
 
   /** 请求评估 — 只分析不交付，返回风险+修复建议 */
@@ -99,18 +103,28 @@ export class DeliveryEvaluationService {
     }
 
     const deliveryId = `${projectId.substring(0, 8)}-${Date.now()}`;
-    this.logger.log(`[生产交付] 异步启动: ${deliveryId}`);
+    this.logger.log(`[生产交付] 入队: ${deliveryId}`);
 
-    this.runProductionDelivery(deliveryId, projectId, {
-      projectName: payload.projectName || 'app',
-      planSummary: payload.planSummary,
-      demoHtml: project.demoHtml,
-    }).catch(e => this.logger.error(`生产交付异常: ${e}`));
+    // 入队 BullMQ：持久化、进程重启可恢复，取代原 fire-and-forget。
+    // attempts=1：交付内部已有分步→CC Bridge→单次调用的降级链，外层重试会重复昂贵动作。
+    await this.deliveryQueue.add(
+      PRODUCTION_DELIVERY_JOB,
+      {
+        deliveryId,
+        projectId,
+        payload: {
+          projectName: payload.projectName || 'app',
+          planSummary: payload.planSummary,
+          demoHtml: project.demoHtml,
+        },
+      },
+      { attempts: 1, removeOnComplete: true, removeOnFail: 50 },
+    );
 
     return { success: true, deliveryId, message: '生产交付已启动' };
   }
 
-  private async runProductionDelivery(deliveryId: string, projectId: string, payload: any) {
+  async runProductionDelivery(deliveryId: string, projectId: string, payload: any) {
     try {
       // ═══ 主路径: 分步生成 (Phase A) ═══
       this.logger.log(`[生产交付] 使用分步生成: ${deliveryId}`);
@@ -320,8 +334,21 @@ export class DeliveryEvaluationService {
     const sr = (project.structuredRequirement as any) || {};
     const queue = sr.fixQueue || [];
     const taskId = `${projectId.substring(0, 8)}-re-${Date.now()}`;
-    this.runReEvaluate(taskId, projectId, sr, queue, project.demoHtml ?? '', project.planSummary, project.description).catch(e =>
-      this.logger.error(`re Evaluate failed: ${e}`));
+    // 入队 BullMQ：持久化、进程重启可恢复，取代原 fire-and-forget。
+    // attempts=1：修复内部已有 3 次重试循环，外层重试会重复 LLM 改写。
+    await this.deliveryQueue.add(
+      RE_EVALUATE_JOB,
+      {
+        taskId,
+        projectId,
+        sr,
+        queue,
+        demoHtml: project.demoHtml ?? '',
+        planSummary: project.planSummary,
+        description: project.description,
+      },
+      { attempts: 1, removeOnComplete: true, removeOnFail: 50 },
+    );
 
     return { success: true, taskId, queuedCount: queue.length, message: `已启动 ${queue.length} 项修复，完成后请重新评估` };
   }
@@ -345,7 +372,7 @@ export class DeliveryEvaluationService {
     };
   }
 
-  private async runReEvaluate(taskId: string, projectId: string, sr: any, queue: any[], demoHtml: string, planSummary: any, description: string | null) {
+  async runReEvaluate(taskId: string, projectId: string, sr: any, queue: any[], demoHtml: string, planSummary: any, description: string | null) {
     const results: string[] = [];
 
     if (queue.length > 0) {

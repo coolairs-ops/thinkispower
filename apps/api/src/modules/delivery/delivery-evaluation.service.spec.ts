@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { getQueueToken } from '@nestjs/bullmq';
 import { DeliveryEvaluationService } from './delivery-evaluation.service';
+import { DELIVERY_QUEUE } from './delivery.queue';
 import { PrismaService } from '../../database/prisma.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
@@ -29,6 +31,7 @@ describe('DeliveryEvaluationService — 企业级检查方法', () => {
         { provide: DeploymentService, useValue: makeMock() },
         { provide: DeployPipelineService, useValue: makeMock() },
         { provide: AcceptanceVerificationService, useValue: makeMock() },
+        { provide: getQueueToken(DELIVERY_QUEUE), useValue: { add: jest.fn() } },
       ],
     }).compile();
 
