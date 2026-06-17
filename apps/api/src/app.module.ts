@@ -32,6 +32,7 @@ import { SharedCoreModule } from './shared/shared-core.module';
 import { QueueModule } from './queue/queue.module';
 import { ProfessionalImportModule } from './modules/professional-import/professional-import.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
+import { GuardianModule } from './modules/guardian/guardian.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
     QueueModule,
     ProfessionalImportModule,
     ComplianceModule,
+    GuardianModule,
   ],
   controllers: [HealthController],
   providers: [

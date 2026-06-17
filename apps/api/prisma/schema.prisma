@@ -88,6 +88,7 @@ model Project {
   repositoryExportEnabled Boolean @default(false) @map("repository_export_enabled")
   specConfirmedAt        DateTime? @map("spec_confirmed_at")
   specVersion            Int       @default(0) @map("spec_version")
+  guardianEnabled        Boolean   @default(false) @map("guardian_enabled") // 是否进入 Guardian 守护生命周期（上线即入列）
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
@@ -109,10 +110,39 @@ model Project {
   specification             Specification?
   testDeployments           TestDeployment[]
   importBatches             ImportBatch[]
+  guardianChecks            GuardianCheck[]
 
   @@index([userId])
   @@index([orgId])
   @@map("projects")
+}
+
+// ============ 守护中心（Guardian）============
+
+/**
+ * 产品实例守护巡检记录（Phase 2 最小闭环）。
+ * 定时复用验收引擎对已上线项目跑关键场景，落一条健康快照：可追溯、可回放。
+ */
+model GuardianCheck {
+  id           String   @id @default(uuid()) @db.Uuid
+  projectId    String   @map("project_id") @db.Uuid
+  orgId        String?  @map("org_id") @db.Uuid
+  healthScore  Int      @map("health_score") // 0-100 综合健康分
+  status       String   // healthy | degraded | critical | unknown
+  passRate     Float?   @map("pass_rate")     // 验收通过率 0-1
+  overallScore Int?     @map("overall_score")  // 传感器总分 0-100（实现质量旁证）
+  total        Int      @default(0)
+  passed       Int      @default(0)
+  failed       Int      @default(0)
+  manual       Int      @default(0)
+  trigger      String   @default("scheduled") // scheduled | manual
+  detail       Json?    // 摘要：未通过/待人工场景名等
+  checkedAt    DateTime @default(now()) @map("checked_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, checkedAt])
+  @@map("guardian_checks")
 }
 
 // ============ 项目消息 ============
