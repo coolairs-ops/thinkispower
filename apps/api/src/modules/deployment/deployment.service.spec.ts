@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { DeploymentService } from './deployment.service';
 import { PrismaService } from '../../database/prisma.service';
 import { IDeploymentProvider, DEPLOYMENT_PROVIDERS } from './interfaces/deployment-provider.interface';
+import { BACKEND_RUNTIME } from '../app-runtime/backend-runtime.interface';
 
 describe('DeploymentService', () => {
   let service: DeploymentService;
@@ -152,6 +153,69 @@ describe('DeploymentService', () => {
 
       expect(unavailableProvider.deploy).not.toHaveBeenCalled();
       expect(result.productionUrl).toBeTruthy();
+    });
+  });
+
+  describe('后端数据服务编排 (slice 7)', () => {
+    const mockBackend = { kind: 'crud' as const, provision: jest.fn(), health: jest.fn(), teardown: jest.fn() };
+
+    const build = async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          DeploymentService,
+          { provide: PrismaService, useValue: prisma },
+          { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('http://localhost:3001') } },
+          { provide: DEPLOYMENT_PROVIDERS, useValue: [] },
+          { provide: BACKEND_RUNTIME, useValue: mockBackend },
+        ],
+      }).compile();
+      return module.get<DeploymentService>(DeploymentService);
+    };
+
+    it('项目有数据模型 → 部署时置备后端，返回 backend 信息', async () => {
+      mockBackend.provision.mockResolvedValue({
+        descriptor: { kind: 'crud', schemaName: 'proj_x', resources: ['todo'], status: 'ready' },
+      });
+      prisma.project.findUnique.mockResolvedValue({
+        id: mockProjectId,
+        demoHtml: '<html><body>Hi</body></html>',
+        dataModel: 'model Todo { id String @id @default(uuid()) }',
+      });
+
+      service = await build();
+      const result = await service.deploy(mockProjectId);
+
+      expect(mockBackend.provision).toHaveBeenCalledWith(mockProjectId, expect.stringContaining('model Todo'));
+      expect(result.backend).toEqual({ schemaName: 'proj_x', resources: ['todo'] });
+    });
+
+    it('项目无数据模型 → 不置备后端（纯前端 demo，向后兼容）', async () => {
+      prisma.project.findUnique.mockResolvedValue({
+        id: mockProjectId,
+        demoHtml: '<html><body>Hi</body></html>',
+        dataModel: null,
+      });
+
+      service = await build();
+      const result = await service.deploy(mockProjectId);
+
+      expect(mockBackend.provision).not.toHaveBeenCalled();
+      expect(result.backend).toBeUndefined();
+    });
+
+    it('置备失败 → 降级不阻断部署', async () => {
+      mockBackend.provision.mockRejectedValue(new Error('迁移失败'));
+      prisma.project.findUnique.mockResolvedValue({
+        id: mockProjectId,
+        demoHtml: '<html><body>Hi</body></html>',
+        dataModel: 'model A { id String @id @default(uuid()) }',
+      });
+
+      service = await build();
+      const result = await service.deploy(mockProjectId);
+
+      expect(result.deploymentId).toBe('dep-1'); // 部署仍完成
+      expect(result.backend).toBeUndefined();
     });
   });
 

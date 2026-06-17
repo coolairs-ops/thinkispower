@@ -1,0 +1,153 @@
+import { BadRequestException } from '@nestjs/common';
+import { SchemaMigrationService } from './schema-migration.service';
+
+describe('SchemaMigrationService', () => {
+  let service: SchemaMigrationService;
+  let tx: { $executeRawUnsafe: jest.Mock };
+  let prisma: { $transaction: jest.Mock };
+
+  beforeEach(() => {
+    tx = { $executeRawUnsafe: jest.fn().mockResolvedValue(undefined) };
+    prisma = {
+      $transaction: jest.fn().mockImplementation(async (cb: any) => cb(tx)),
+    };
+    service = new SchemaMigrationService(prisma as never);
+  });
+
+  const todoSchema = `
+    model Todo {
+      id        String   @id @default(uuid())
+      title     String
+      done      Boolean  @default(false)
+      priority  Int?
+      createdAt DateTime @default(now())
+    }
+  `;
+
+  describe('schemaNameFor', () => {
+    it('派生下划线化的安全 schema 名', () => {
+      expect(service.schemaNameFor('11111111-2222-3333-4444-555555555555'))
+        .toBe('proj_11111111_2222_3333_4444_555555555555');
+    });
+  });
+
+  describe('parseAndValidate', () => {
+    it('解析模型与标量字段', () => {
+      const models = service.parseAndValidate(todoSchema);
+      expect(models).toHaveLength(1);
+      expect(models[0].name).toBe('Todo');
+      expect(models[0].table).toBe('todo');
+      expect(models[0].fields.map((f) => f.name)).toEqual(['id', 'title', 'done', 'priority', 'createdAt']);
+      const id = models[0].fields.find((f) => f.name === 'id')!;
+      expect(id.isId).toBe(true);
+      expect(id.defaultSql).toBe('gen_random_uuid()::text');
+      expect(models[0].fields.find((f) => f.name === 'priority')!.optional).toBe(true);
+      expect(models[0].fields.find((f) => f.name === 'done')!.defaultSql).toBe('false');
+    });
+
+    it('跳过关系字段，不物化为列', () => {
+      const schema = `
+        model Post {
+          id       String @id @default(uuid())
+          title    String
+          authorId String
+          author   User   @relation(fields: [authorId], references: [id])
+          tags     Tag[]
+        }
+        model User { id String @id @default(uuid()) name String }
+        model Tag  { id String @id @default(uuid()) label String }
+      `;
+      const post = service.parseAndValidate(schema).find((m) => m.name === 'Post')!;
+      // author(对象关系) 与 tags(列表) 被跳过；authorId(标量外键) 保留
+      expect(post.fields.map((f) => f.name)).toEqual(['id', 'title', 'authorId']);
+    });
+
+    it('拒绝不支持的类型', () => {
+      const schema = `model X {
+        id     String @id @default(uuid())
+        amount Money
+      }`;
+      expect(() => service.parseAndValidate(schema)).toThrow(BadRequestException);
+    });
+
+    it('拒绝标识符注入（字段名含非法字符）', () => {
+      const schema = `model X { id String @id @default(uuid())\n  "evil); DROP TABLE users; --" String }`;
+      expect(() => service.parseAndValidate(schema)).toThrow(BadRequestException);
+    });
+
+    it('拒绝没有 @id 的模型', () => {
+      const schema = `model X { title String }`;
+      expect(() => service.parseAndValidate(schema)).toThrow(BadRequestException);
+    });
+
+    it('拒绝空模型集', () => {
+      expect(() => service.parseAndValidate('// 只有注释')).toThrow(BadRequestException);
+    });
+
+    it('拒绝模型数量超限', () => {
+      const many = Array.from({ length: 31 }, (_, i) => `model M${i} { id String @id @default(uuid()) }`).join('\n');
+      expect(() => service.parseAndValidate(many)).toThrow(BadRequestException);
+    });
+
+    it('忽略无法识别的默认值（不注入、不报错）', () => {
+      const schema = `model X {
+        id   String @id @default(uuid())
+        note String @default("'; DROP--")
+      }`;
+      const note = service.parseAndValidate(schema)[0].fields.find((f) => f.name === 'note')!;
+      expect(note.defaultSql).toBeUndefined();
+    });
+  });
+
+  describe('buildDdl', () => {
+    it('生成幂等 DDL：建 schema + 建表 + 补列，标识符双引号包裹', () => {
+      const models = service.parseAndValidate(todoSchema);
+      const ddl = service.buildDdl('proj_abc', models);
+      expect(ddl[0]).toBe('CREATE SCHEMA IF NOT EXISTS "proj_abc";');
+      const create = ddl.find((s) => s.includes('CREATE TABLE'))!;
+      expect(create).toContain('CREATE TABLE IF NOT EXISTS "proj_abc"."todo"');
+      expect(create).toContain('"id" text PRIMARY KEY DEFAULT gen_random_uuid()::text');
+      expect(create).toContain('"title" text NOT NULL');
+      expect(create).toContain('"done" boolean NOT NULL DEFAULT false');
+      expect(create).toContain('"priority" integer'); // optional → 无 NOT NULL
+      expect(create).not.toContain('"priority" integer NOT NULL');
+      // 非 id 列有对应的 ADD COLUMN IF NOT EXISTS
+      expect(ddl.some((s) => s.includes('ADD COLUMN IF NOT EXISTS "title"'))).toBe(true);
+      expect(ddl.some((s) => s.includes('ADD COLUMN IF NOT EXISTS "id"'))).toBe(false);
+    });
+
+    it('自增整型 id 用 IDENTITY', () => {
+      const models = service.parseAndValidate(`model Seq { id Int @id @default(autoincrement()) v String }`);
+      const create = service.buildDdl('proj_x', models).find((s) => s.includes('CREATE TABLE'))!;
+      expect(create).toContain('"id" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY');
+    });
+
+    it('@updatedAt 字段兜底 DEFAULT now()，避免通用 CRUD 插入触发 NOT NULL 违反', () => {
+      const models = service.parseAndValidate(`model Log {
+        id        String   @id @default(uuid())
+        updatedAt DateTime @updatedAt
+      }`);
+      const updatedAt = models[0].fields.find((f) => f.name === 'updatedAt')!;
+      expect(updatedAt.defaultSql).toBe('now()');
+      const create = service.buildDdl('proj_x', models).find((s) => s.includes('CREATE TABLE'))!;
+      expect(create).toContain('"updatedAt" timestamptz NOT NULL DEFAULT now()');
+    });
+  });
+
+  describe('provision', () => {
+    it('在单事务内顺序执行所有 DDL 并返回资源列表', async () => {
+      const res = await service.provision('11111111-2222-3333-4444-555555555555', todoSchema);
+      expect(res.schemaName).toBe('proj_11111111_2222_3333_4444_555555555555');
+      expect(res.resources).toEqual(['todo']);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.$executeRawUnsafe).toHaveBeenCalled();
+      expect(tx.$executeRawUnsafe.mock.calls[0][0]).toContain('CREATE SCHEMA IF NOT EXISTS');
+    });
+
+    it('非法模型不执行任何 DDL（校验先于事务）', async () => {
+      await expect(service.provision('11111111-2222-3333-4444-555555555555', 'model X { title String }'))
+        .rejects.toThrow(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+});

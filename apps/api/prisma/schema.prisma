@@ -90,6 +90,8 @@ model Project {
   specVersion            Int       @default(0) @map("spec_version")
   guardianEnabled        Boolean   @default(false) @map("guardian_enabled") // 是否进入 Guardian 守护生命周期（上线即入列）
   autoIterateState       Json?     @map("auto_iterate_state") // 自迭代运行的持久状态（真相源）：status/round/score/rounds/phases/terminal，供前端对账自愈
+  dataModel              String?   @map("data_model")      // 路 B(ADR-0001)：LLM 产出的数据模型(Prisma schema 文本)，平台据此建表
+  backendRuntime         Json?     @map("backend_runtime") // 后端运行时描述符 BackendRuntimeDescriptor：kind/schemaName/resources/status
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 

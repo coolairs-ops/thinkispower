@@ -4,6 +4,7 @@ import { L2RuntimeSensor } from './l2-runtime.sensor';
 import { L3SemanticSensor } from './l3-semantic.sensor';
 import { CrossValidator } from './cross-validator.service';
 import { TraceabilityValidator } from './traceability-validator.service';
+import { BackendSmokeSensor } from './backend-smoke.sensor';
 import { PrismaService } from '../database/prisma.service';
 import { FusedReport, SensorReport } from './sensor-report.interface';
 
@@ -18,6 +19,7 @@ export class SensorService {
     private crossValidator: CrossValidator,
     private traceValidator: TraceabilityValidator,
     private prisma: PrismaService,
+    private backendSensor: BackendSmokeSensor,
   ) {}
 
   /**
@@ -45,6 +47,11 @@ export class SensorService {
     }
 
     if (projectId) {
+      // 后端连通探活（L2 运行时层）；排在 L2RuntimeSensor 之后入队——失败 check 会进
+      // recommendations 让自迭代看见后端问题（fuse 取本层首个 report 计分，故不改总分语义）。
+      try { reports.push(await this.backendSensor.run(projectId)); }
+      catch (e) { this.logger.warn(`后端连通传感器失败: ${e}`); }
+
       try { reports.push(await this.l3.run(projectId)); onProgress?.('sense-l3'); }
       catch (e) { this.logger.warn(`L3 传感器失败: ${e}`); }
 

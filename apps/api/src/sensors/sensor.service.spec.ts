@@ -5,6 +5,7 @@ import { L2RuntimeSensor } from './l2-runtime.sensor';
 import { L3SemanticSensor } from './l3-semantic.sensor';
 import { CrossValidator } from './cross-validator.service';
 import { TraceabilityValidator } from './traceability-validator.service';
+import { BackendSmokeSensor } from './backend-smoke.sensor';
 import { PrismaService } from '../database/prisma.service';
 
 describe('SensorService', () => {
@@ -26,6 +27,7 @@ describe('SensorService', () => {
   const mockL1 = { run: jest.fn() };
   const mockL2 = { run: jest.fn() };
   const mockL3 = { run: jest.fn() };
+  const mockBackendSensor = { run: jest.fn() };
   const mockPrisma = {
     project: { findUnique: jest.fn() },
   };
@@ -35,6 +37,11 @@ describe('SensorService', () => {
 
     mockPrisma.project.findUnique.mockResolvedValue({
       demoHtml: '<html><body>Hello</body></html>',
+    });
+    // 默认：无数据后端（跳过 report，passed，不影响总分语义）
+    mockBackendSensor.run.mockResolvedValue({
+      sensorName: 'L2-后端连通', layer: 2, passed: true, score: 100,
+      checks: [{ name: '后端数据服务', passed: true, score: 100, weight: 10, detail: '该应用无数据后端，跳过' }],
     });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -46,6 +53,7 @@ describe('SensorService', () => {
         { provide: CrossValidator, useValue: {} },
         { provide: TraceabilityValidator, useValue: {} },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: BackendSmokeSensor, useValue: mockBackendSensor },
       ],
     }).compile();
 
@@ -105,5 +113,28 @@ describe('SensorService', () => {
 
     expect(report.overallScore).toBe(100);
     expect(mockL2.run).toHaveBeenCalledWith();
+  });
+
+  it('后端不可达 → 失败 check 进 recommendations（闭环看见后端），不改总分语义', async () => {
+    mockL1.run.mockResolvedValue(mockReport(1, 80, true));
+    mockL2.run.mockResolvedValue(mockReport(2, 90, true));
+    mockL3.run.mockResolvedValue(mockReport(3, 70, true));
+    mockBackendSensor.run.mockResolvedValue({
+      sensorName: 'L2-后端连通', layer: 2, passed: false, score: 0,
+      checks: [{ name: '数据资源 todo', passed: false, score: 0, weight: 10, detail: '不可达' }],
+    });
+
+    const report = await service.runAll('project-1');
+
+    // 总分仍由 L2RuntimeSensor 决定（后端 report 排其后，fuse 取本层首个）
+    expect(report.layer2Score).toBe(90);
+    // 但后端失败进 recommendations，自迭代能看见
+    expect(report.recommendations.some(r => r.includes('数据资源 todo'))).toBe(true);
+  });
+
+  it('无 projectId 时不跑后端传感器', async () => {
+    mockL2.run.mockResolvedValue(mockReport(2, 100, true));
+    await service.runAll();
+    expect(mockBackendSensor.run).not.toHaveBeenCalled();
   });
 });

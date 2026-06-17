@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { IDeploymentProvider, DEPLOYMENT_PROVIDERS, DeploymentResult } from './interfaces/deployment-provider.interface';
+import { BACKEND_RUNTIME, BackendRuntime } from '../app-runtime/backend-runtime.interface';
 
 @Injectable()
 export class DeploymentService {
@@ -13,15 +14,21 @@ export class DeploymentService {
     @Optional()
     @Inject(DEPLOYMENT_PROVIDERS)
     private providers?: IDeploymentProvider[],
+    @Optional()
+    @Inject(BACKEND_RUNTIME)
+    private backend?: BackendRuntime,
   ) {}
 
-  async deploy(projectId: string, buildId?: string): Promise<{ deploymentId: string; productionUrl: string }> {
+  async deploy(
+    projectId: string,
+    buildId?: string,
+  ): Promise<{ deploymentId: string; productionUrl: string; backend?: { schemaName: string; resources: string[] } }> {
     this.logger.log(`Deploying project ${projectId} build=${buildId}`);
 
-    // 1. Read current demoHtml
+    // 1. Read current demoHtml + 数据模型
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { demoHtml: true },
+      select: { demoHtml: true, dataModel: true },
     });
 
     const html = project?.demoHtml;
@@ -29,6 +36,19 @@ export class DeploymentService {
       this.logger.warn(`No demoHtml for project ${projectId} — cannot deploy`);
       const baseUrl = this.config.get<string>('APP_BASE_URL', 'http://localhost:3001');
       return { deploymentId: '', productionUrl: `${baseUrl}/api/deploy/${projectId}` };
+    }
+
+    // 1.5 确保 per-project 后端数据服务就位（幂等）——让在线链接背后真有 API，而非只托管静态 HTML。
+    // demo 注入的 appData 走相对路径 /api/app/<projectId>/，与 serveDeploy 同源（均在 API），无需跨域配置。
+    let backendInfo: { schemaName: string; resources: string[] } | undefined;
+    if (this.backend && project.dataModel) {
+      try {
+        const { descriptor } = await this.backend.provision(projectId, project.dataModel);
+        backendInfo = { schemaName: descriptor.schemaName, resources: descriptor.resources };
+        this.logger.log(`后端数据服务就位: [${descriptor.resources.join(', ')}]`);
+      } catch (e) {
+        this.logger.warn(`后端数据服务置备失败（在线应用将无数据接口，降级为纯前端）: ${e instanceof Error ? e.message : e}`);
+      }
     }
 
     // 2. Create Deployment record
@@ -92,7 +112,7 @@ export class DeploymentService {
 
     this.logger.log(`Deployment complete: project=${projectId} url=${productionUrl} status=${result.success ? 'deployed' : 'failed'}`);
 
-    return { deploymentId: deployment.id, productionUrl };
+    return { deploymentId: deployment.id, productionUrl, backend: backendInfo };
   }
 
   async getDeployedHtml(projectId: string): Promise<string | null> {

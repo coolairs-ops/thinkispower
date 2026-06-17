@@ -9,21 +9,23 @@ import { SensorFusionService } from '../../sensors/sensor-fusion.service';
 import { L1StaticSensor } from '../../sensors/l1-static.sensor';
 import { L2RuntimeSensor } from '../../sensors/l2-runtime.sensor';
 import { L3SemanticSensor } from '../../sensors/l3-semantic.sensor';
+import { BackendSmokeSensor } from '../../sensors/backend-smoke.sensor';
 import { SensorService } from '../../sensors/sensor.service';
 import { SharedCoreModule } from '../../shared/shared-core.module';
+import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 
 @Module({
-  imports: [SharedCoreModule],
+  imports: [SharedCoreModule, AppRuntimeModule],
   controllers: [SensorController],
   providers: [
     QwenClient, CompileValidator, CrossValidator, TraceabilityValidator,
     ScreenshotComparator, SensorFusionService, L1StaticSensor, L2RuntimeSensor,
-    L3SemanticSensor, SensorService,
+    L3SemanticSensor, BackendSmokeSensor, SensorService,
   ],
   exports: [
     QwenClient, CompileValidator, CrossValidator, TraceabilityValidator,
     ScreenshotComparator, SensorFusionService, L1StaticSensor, L2RuntimeSensor,
-    L3SemanticSensor, SensorService,
+    L3SemanticSensor, BackendSmokeSensor, SensorService,
   ],
 })
 export class SensorModule {}

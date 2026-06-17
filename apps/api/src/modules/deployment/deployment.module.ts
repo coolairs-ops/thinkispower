@@ -5,9 +5,10 @@ import { DeployPipelineService } from '../../services/deploy-pipeline.service';
 import { InternalDeploymentProvider } from './providers/internal-deployment.provider';
 import { DEPLOYMENT_PROVIDERS } from './interfaces/deployment-provider.interface';
 import { MinioModule } from '../../integrations/minio/minio.module';
+import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 
 @Module({
-  imports: [MinioModule],
+  imports: [MinioModule, AppRuntimeModule],
   controllers: [DeployController],
   providers: [
     DeploymentService,
