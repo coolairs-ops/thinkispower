@@ -33,7 +33,14 @@ describe('AuthService', () => {
         create: jest.fn(),
         update: jest.fn(),
       },
+      organization: {
+        create: jest.fn(),
+      },
+      membership: {
+        create: jest.fn(),
+      },
     };
+    prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
 
     let signCount = 0;
     jwtService = {
@@ -63,6 +70,8 @@ describe('AuthService', () => {
     it('should register a new user and return tokens', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
       prisma.user.create.mockResolvedValue(mockUser);
+      prisma.organization.create.mockResolvedValue({ id: 'org-1', name: '测试用户 的空间' });
+      prisma.membership.create.mockResolvedValue({ id: 'membership-1' });
       prisma.user.update.mockResolvedValue(mockUser);
 
       const result = await service.register('test@example.com', '测试用户', 'password123');
@@ -71,7 +80,16 @@ describe('AuthService', () => {
       expect(result.refreshToken).toBe('refresh-token-mock');
       expect(result.user.email).toBe('test@example.com');
       expect(bcrypt.hash).toHaveBeenCalledWith('password123', 10);
-      expect(prisma.user.create).toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(prisma.user.create).toHaveBeenCalledWith({
+        data: { email: 'test@example.com', name: '测试用户', hashedPassword: 'hashed-pw' },
+      });
+      expect(prisma.organization.create).toHaveBeenCalledWith({
+        data: { name: '测试用户 的空间', slug: 'user-user-1', plan: 'free' },
+      });
+      expect(prisma.membership.create).toHaveBeenCalledWith({
+        data: { userId: 'user-1', orgId: 'org-1', role: 'owner' },
+      });
     });
 
     it('should throw on duplicate email', async () => {

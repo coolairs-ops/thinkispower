@@ -965,13 +965,14 @@ main().catch(err => { console.error(err); process.exit(1); });
 
     // 1. npm install
     try {
-      execSync('npm install --prefer-offline --no-audit --no-fund 2>&1 | tail -1', {
+      execSync('npm install --prefer-offline --no-audit --no-fund', {
         cwd: targetDir, timeout: 90_000, stdio: 'pipe',
       });
       this.logger.log(`[编译] npm install 完成`);
     } catch (e: any) {
-      this.logger.warn(`[编译] npm install 失败: ${e.message?.substring(0, 100)}`);
-      return { passed: false, rounds: 0, error: `依赖安装失败: ${e.message?.substring(0, 100)}` };
+      const installOutput = e.stdout?.toString() || e.stderr?.toString() || e.message || '';
+      this.logger.warn(`[编译] npm install 失败: ${installOutput.substring(0, 100)}`);
+      return { passed: false, rounds: 0, error: `依赖安装失败: ${installOutput.substring(0, 100)}` };
     }
 
     const subPrefix = subDir + '/';
@@ -980,7 +981,7 @@ main().catch(err => { console.error(err); process.exit(1); });
       this.logger.log(`[编译] 第 ${round}/3 轮...`);
 
       try {
-        const result = execSync('npx tsc --noEmit 2>&1', {
+        const result = execSync('npx tsc --noEmit', {
           cwd: targetDir, timeout: 60_000, stdio: 'pipe', encoding: 'utf-8',
         });
         // 可能返回警告但不报错
