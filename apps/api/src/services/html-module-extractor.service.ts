@@ -60,6 +60,17 @@ export class HtmlModuleExtractorService {
     return match[1];
   }
 
+  /** 列出所有可定向修复的模块（含 key 与中文 name），供建议→模块映射使用 */
+  listModules(html: string): { key: string; name: string }[] {
+    const regex = /(['"])([\w-]+)\1\s*:\s*\{[\s\S]*?render\s*:\s*function\s*\(\s*\)\s*\{[\s\S]*?return\s*`[\s\S]*?`;\s*\},\s*name\s*:\s*(['"])([^'"]*)\3\s*\}/g;
+    const modules: { key: string; name: string }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(html)) !== null) {
+      modules.push({ key: m[2], name: m[4] });
+    }
+    return modules;
+  }
+
   /**
    * 闸门3: 模块隔离 — 检测非目标模块是否被污染，如被污染则回退到原始快照。
    */
@@ -93,7 +104,7 @@ export class HtmlModuleExtractorService {
   }
 
   /** 从 HTML 中提取所有页面模块的 key */
-  private extractAllModuleKeys(html: string): string[] {
+  extractAllModuleKeys(html: string): string[] {
     const scriptRegex = /\b(var|let|const)\s+pages\s*=\s*\{([\s\S]*?)\n\s*\};/;
     const match = html.match(scriptRegex);
     if (!match) return [];

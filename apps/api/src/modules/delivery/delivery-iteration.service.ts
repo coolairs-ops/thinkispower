@@ -6,6 +6,7 @@ import { QualityGateService } from '../../services/quality-gate.service';
 import { DeepseekService } from '../../services/deepseek.service';
 import { SensorService } from '../../sensors/sensor.service';
 import { IterativeOptimizerService } from '../../services/iterative-optimizer.service';
+import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { FusedReport, SensorReport } from '../../sensors/sensor-report.interface';
 import { DeliveryService } from './delivery.service';
 
@@ -21,6 +22,7 @@ export class DeliveryIterationService {
     private deepseek: DeepseekService,
     private sensorService: SensorService,
     private optimizer: IterativeOptimizerService,
+    private htmlExtractor: HtmlModuleExtractorService,
   ) {}
 
   /** 启动自动迭代优化（IterativeOptimizer 包装） */
@@ -305,7 +307,7 @@ export class DeliveryIterationService {
           try {
             const newDemo = await DeliveryService.withTimeout(
               this.autoFix(projectId, fused.recommendations),
-              60000,
+              150000, // 按模块串行修复最多 4 个模块，给足时延余量
               `第${round}轮自动修复`,
             );
             if (newDemo) {
@@ -437,8 +439,8 @@ export class DeliveryIterationService {
   private async autoFix(projectId: string, recommendations: string[]): Promise<string | null> {
     if (recommendations.length === 0) return null;
 
-    const topRecs = recommendations.filter(r => !r.includes('整体质量')).slice(0, 5);
-    if (topRecs.length === 0) return null;
+    const usefulRecs = recommendations.filter(r => !r.includes('整体质量'));
+    if (usefulRecs.length === 0) return null;
 
     // 读取当前 Demo HTML
     const project = await this.prisma.project.findUnique({
@@ -450,6 +452,97 @@ export class DeliveryIterationService {
       this.logger.warn(`autoFix 无有效Demo HTML (${currentHtml.length} bytes)，跳过`);
       return null;
     }
+
+    // 多模块 SPA：把建议映射到具体模块，逐个在精简上下文里定向修复，突破整块截断/输出上限。
+    // 无模块锚点（旧 demo）或建议无法定位到任何模块时，回退到原有整块逻辑，保证不回归。
+    const modules = this.htmlExtractor.listModules(currentHtml);
+    if (modules.length === 0) {
+      return this.autoFixWholeHtml(currentHtml, usefulRecs.slice(0, 5));
+    }
+
+    const recsByModule = this.mapRecommendationsToModules(usefulRecs, modules);
+    if (recsByModule.size === 0) {
+      return this.autoFixWholeHtml(currentHtml, usefulRecs.slice(0, 5));
+    }
+
+    const MAX_FIX_MODULES = 4; // 单轮内限制串行 LLM 调用数，控制时延
+    const keysToFix = [...recsByModule.keys()].slice(0, MAX_FIX_MODULES);
+    let workingHtml = currentHtml;
+    let fixedCount = 0;
+    for (const key of keysToFix) {
+      try {
+        const fixed = await this.fixSingleModule(workingHtml, key, recsByModule.get(key)!);
+        // mergeModuleContent 仅替换目标模块的 render 内容，全局 script/head/data-theme 不动
+        if (fixed && fixed !== workingHtml) {
+          workingHtml = fixed;
+          fixedCount++;
+        }
+      } catch (e) {
+        this.logger.warn(`autoFix 模块 ${key} 修复失败，跳过: ${e}`);
+      }
+    }
+
+    if (fixedCount === 0) return null;
+    this.logger.log(`autoFix 按模块修复完成 ${fixedCount}/${keysToFix.length} 个模块 (${workingHtml.length} bytes)`);
+    return workingHtml;
+  }
+
+  /** 把扁平建议按"模块 key/中文 name 是否被提及"归到各模块；无法定位的建议忽略 */
+  private mapRecommendationsToModules(
+    recommendations: string[],
+    modules: { key: string; name: string }[],
+  ): Map<string, string[]> {
+    const byModule = new Map<string, string[]>();
+    for (const rec of recommendations) {
+      for (const m of modules) {
+        if ((m.name && rec.includes(m.name)) || rec.includes(m.key)) {
+          if (!byModule.has(m.key)) byModule.set(m.key, []);
+          byModule.get(m.key)!.push(rec);
+        }
+      }
+    }
+    return byModule;
+  }
+
+  /** 定向修复单个模块：精简上下文 → 只改该模块 → 合并回完整 HTML */
+  private async fixSingleModule(html: string, moduleKey: string, recs: string[]): Promise<string | null> {
+    const condensed = this.htmlExtractor.buildCondensedHtml(html, moduleKey);
+
+    const fixPrompt = `请修复以下 Demo HTML 中「data-module-key="${moduleKey}"」这一个模块的问题，输出完整 HTML。
+
+当前 HTML（其余模块已折叠为占位注释，请勿展开或改动它们）：
+\`\`\`html
+${condensed}
+\`\`\`
+
+针对该模块的修复建议：
+${recs.join('\n')}
+
+要求：
+1. 只修改 data-module-key="${moduleKey}" 模块 render() 返回的内容
+2. 不要改动全局 <script>（navigate/状态/pages 结构）、<head>、样式与 daisyUI data-theme
+3. 不要展开或重写其他模块的占位注释
+4. 保持该模块原有结构与功能，只做必要修复
+5. 输出完整 HTML，用 \`\`\`html 包裹`;
+
+    const response = await this.deepseek.chat(
+      [{ role: 'user', content: fixPrompt }],
+      { temperature: 0.2, maxTokens: 8192 },
+    );
+    const htmlMatch =
+      response.match(/```html?\s*([\s\S]*?)```/) ||
+      response.match(/(<!DOCTYPE[\s\S]*<\/html>)/i);
+    const modified = htmlMatch ? htmlMatch[1].trim() : response.trim();
+    if (modified.length < 200 || !/data-module-key/i.test(modified)) {
+      this.logger.warn(`autoFix 模块 ${moduleKey} 生成结果无效 (${modified.length} bytes)，跳过`);
+      return null;
+    }
+    return this.htmlExtractor.mergeModuleContent(html, modified, moduleKey);
+  }
+
+  /** 整块修复（旧逻辑回退）：无模块锚点或建议无法定位时使用 */
+  private async autoFixWholeHtml(currentHtml: string, topRecs: string[]): Promise<string | null> {
+    if (topRecs.length === 0) return null;
 
     // 截断过长的HTML（保留头尾关键部分）
     const maxHtmlLen = 20000;

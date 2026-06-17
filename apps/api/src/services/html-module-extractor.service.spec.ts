@@ -88,6 +88,31 @@ describe('HtmlModuleExtractorService', () => {
     });
   });
 
+  describe('listModules', () => {
+    it('should list all modules with key and chinese name', () => {
+      const modules = service.listModules(sampleSpaHtml);
+      expect(modules).toEqual([
+        { key: 'dashboard', name: '看板' },
+        { key: 'customer-list', name: '客户列表' },
+        { key: 'reports', name: '报表' },
+      ]);
+    });
+
+    it('should return empty array for html without pages', () => {
+      expect(service.listModules('<html><body>no modules</body></html>')).toEqual([]);
+    });
+  });
+
+  describe('extractAllModuleKeys', () => {
+    it('should expose all module keys for validation', () => {
+      expect(service.extractAllModuleKeys(sampleSpaHtml)).toEqual([
+        'dashboard',
+        'customer-list',
+        'reports',
+      ]);
+    });
+  });
+
   describe('mergeModuleContent', () => {
     it('should merge modified module content back into original', () => {
       const modifiedHtml = sampleSpaHtml.replace(
