@@ -9,6 +9,7 @@ import NavBar from '@/lib/nav-bar';
 import DeliveryStatusCard from '@/components/delivery-status-card';
 import DeliveryProgressBar from '@/components/delivery-progress-bar';
 import ServiceCard from '@/components/service-card';
+import GuardianCard from '@/components/guardian-card';
 
 const PREMIUM_SERVICES = [
   { key: 'code-review',     icon: '🔍', label: '代码审查报告',       desc: 'AI 深度审查 + 安全扫描 + 性能分析', price: '¥299/次' },
@@ -203,6 +204,9 @@ export default function DeliveryPage() {
               </>}
             />
           </section>
+
+          {/* ═══ 持续守护 ═══ */}
+          <GuardianCard projectId={projectId} />
 
           {/* ═══ 生成文件列表 ═══ */}
           <section className="mb-6 rounded-xl bg-white p-5 shadow-sm">

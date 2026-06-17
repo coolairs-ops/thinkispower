@@ -71,18 +71,18 @@ describe('GuardianService', () => {
       acceptance.verify.mockResolvedValue(report({ passRate: 1, overallScore: 90, total: 3, passed: 3 }));
       const rec = await service.runCheck('p1', 'manual');
       expect(acceptance.verify).toHaveBeenCalledWith('owner', 'p1');
-      expect(rec.healthScore).toBe(97);
-      expect(rec.status).toBe('healthy');
-      expect(rec.trigger).toBe('manual');
-      expect(rec.orgId).toBe('org1');
+      expect(rec!.healthScore).toBe(97);
+      expect(rec!.status).toBe('healthy');
+      expect(rec!.trigger).toBe('manual');
+      expect(rec!.orgId).toBe('org1');
     });
 
     it('验收抛错 → 记 unknown/0，不抛', async () => {
       prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: null });
       acceptance.verify.mockRejectedValue(new Error('llm down'));
       const rec = await service.runCheck('p1');
-      expect(rec.status).toBe('unknown');
-      expect(rec.healthScore).toBe(0);
+      expect(rec!.status).toBe('unknown');
+      expect(rec!.healthScore).toBe(0);
     });
 
     it('落库时摘要未通过场景', async () => {
@@ -92,7 +92,7 @@ describe('GuardianService', () => {
         scenarios: [{ scenarioName: '登录', status: 'pass' } as any, { scenarioName: '下单', status: 'fail' } as any],
       }));
       const rec = await service.runCheck('p1');
-      expect(rec.detail).toEqual({ failedScenarios: ['下单(fail)'] });
+      expect(rec!.detail).toEqual({ failedScenarios: ['下单(fail)'] });
     });
   });
 
