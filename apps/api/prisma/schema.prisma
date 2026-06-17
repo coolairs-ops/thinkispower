@@ -89,6 +89,7 @@ model Project {
   specConfirmedAt        DateTime? @map("spec_confirmed_at")
   specVersion            Int       @default(0) @map("spec_version")
   guardianEnabled        Boolean   @default(false) @map("guardian_enabled") // 是否进入 Guardian 守护生命周期（上线即入列）
+  autoIterateState       Json?     @map("auto_iterate_state") // 自迭代运行的持久状态（真相源）：status/round/score/rounds/phases/terminal，供前端对账自愈
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 

@@ -73,24 +73,48 @@ export class DeliveryIterationService {
     return { taskId };
   }
 
-  /** 查询全局迭代状态 */
-  async getAutoIterateStatus(projectId: string): Promise<{
-    active: boolean; taskId?: string;
-    currentProjectId?: string; currentProjectName?: string; startedAt?: string;
-  }> {
-    const lock = await this.prisma.systemLock.findUnique({
-      where: { id: 'auto_iteration' },
-      include: { project: { select: { name: true } } },
-    });
-    if (!lock) return { active: false };
+  /**
+   * 查询自迭代状态——以持久 autoIterateState 为真相源（不再依赖内存 Subject），
+   * 让前端在流断开后也能对账重建出运行/终态 UI，不会无限挂起。
+   */
+  async getAutoIterateStatus(projectId: string): Promise<any> {
+    const [project, lock] = await Promise.all([
+      this.prisma.project.findUnique({ where: { id: projectId }, select: { autoIterateState: true } }),
+      this.prisma.systemLock.findUnique({ where: { id: 'auto_iteration' }, include: { project: { select: { name: true } } } }),
+    ]);
 
-    const taskAlive = this.iterateSubjects.has(lock.taskId);
+    const st = (project?.autoIterateState as any) || null;
+    const otherProjectActive = !!lock && lock.projectId !== projectId;
+    const base = {
+      currentProjectId: lock?.projectId,
+      currentProjectName: lock?.project?.name,
+      otherProjectActive,
+    };
+
+    if (!st) return { active: false, status: 'idle', ...base };
+
+    const subjectAlive = st.taskId ? this.iterateSubjects.has(st.taskId) : false;
+    let status: string = st.status;
+    let active = status === 'running';
+    // 僵尸 running：进程重启等导致内存流已无、且超 3 分钟无更新 → 判为中断（避免前端永远转圈）
+    if (active && !subjectAlive) {
+      const last = st.updatedAt ? Date.parse(st.updatedAt) : 0;
+      if (!last || Date.now() - last > 3 * 60 * 1000) { active = false; status = 'interrupted'; }
+    }
+
     return {
-      active: taskAlive,
-      taskId: taskAlive ? lock.taskId : undefined,
-      currentProjectId: lock.projectId,
-      currentProjectName: lock.project.name,
-      startedAt: lock.createdAt.toISOString(),
+      active,
+      status,
+      taskId: st.taskId,
+      round: st.round ?? 0,
+      score: st.score ?? 0,
+      rounds: st.rounds || [],
+      phases: st.phases || [],
+      statusText: st.statusText,
+      terminal: st.terminal || null,
+      startedAt: st.startedAt,
+      updatedAt: st.updatedAt,
+      ...base,
     };
   }
 
@@ -130,6 +154,38 @@ export class DeliveryIterationService {
   // ─── 内部实现 ───
 
   private async runAutoIterate(taskId: string, projectId: string, subject: Subject<any>) {
+    // ── 持久化运行状态（真相源）：每个事件归并进 state 并落库，前端可对账自愈，不依赖内存流 ──
+    const state: {
+      taskId: string; status: string; round: number; score: number;
+      rounds: any[]; phases: any[]; statusText: string; terminal: any; startedAt: string;
+    } = { taskId, status: 'running', round: 0, score: 0, rounds: [], phases: [], statusText: '启动自迭代评估', terminal: null, startedAt: new Date().toISOString() };
+
+    let persistChain: Promise<unknown> = Promise.resolve();
+    const persist = () => {
+      const snap = { ...state, rounds: [...state.rounds], phases: [...state.phases], updatedAt: new Date().toISOString() };
+      persistChain = persistChain
+        .then(() => this.prisma.project.update({ where: { id: projectId }, data: { autoIterateState: snap as never } }))
+        .catch((e) => this.logger.warn(`持久化自迭代状态失败: ${e}`));
+      return persistChain;
+    };
+
+    // 终态事件类型 → 持久 status（与前端对账映射一致）
+    const TERMINAL: Record<string, string> = { needs_human: 'needs_human', stuck: 'awaiting_decision', done: 'done', error: 'error' };
+    const emit = (event: { type: string; message?: string; round?: number; overallScore?: number; score?: number; phases?: unknown[]; [k: string]: unknown }) => {
+      switch (event.type) {
+        case 'round': if (event.round != null) state.round = event.round; if (event.message) state.statusText = event.message; break;
+        case 'round_result': state.score = (event.overallScore ?? event.score ?? state.score) as number; state.rounds.push(event); break;
+        case 'phase_update': if (event.phases) state.phases = event.phases as unknown[]; break;
+        case 'fix_failed': case 'stuck_progress': if (event.message) state.statusText = event.message; break;
+        default:
+          if (TERMINAL[event.type]) { state.status = TERMINAL[event.type]; state.terminal = event; if (event.message) state.statusText = event.message; }
+      }
+      if (!subject.closed) subject.next(event);
+      persist();
+    };
+
+    await persist(); // 初始落库 running
+
     try {
       const MAX_ROUNDS = 10;
       const STUCK_LIMIT = 3;
@@ -146,7 +202,7 @@ export class DeliveryIterationService {
         { id: 'decide',    label: '达标判定',   color: '#14b8a6' },
       ];
       const pushPhase = (activeId: string, doneIds: string[]) => {
-        subject.next({
+        emit({
           type: 'phase_update',
           phases: phaseDefs.map(p => ({
             ...p,
@@ -160,10 +216,10 @@ export class DeliveryIterationService {
           where: { id: projectId },
           select: { demoHtml: true, planSummary: true, description: true, structuredRequirement: true },
         });
-        if (!project) { subject.next({ type: 'error', message: '项目不存在' }); break; }
+        if (!project) { emit({ type: 'error', message: '项目不存在' }); break; }
 
         // ── SENSE ──
-        subject.next({ type: 'round', round, phase: 'sense', message: `第${round}轮传感器分析...` });
+        emit({ type: 'round', round, phase: 'sense', message: `第${round}轮传感器分析...` });
         pushPhase('sense-l1', []);
         const doneSensorPhases: string[] = [];
         let fused: FusedReport;
@@ -182,7 +238,7 @@ export class DeliveryIterationService {
           );
         } catch (e) {
           this.logger.warn(`第${round}轮传感器超时/失败，使用降级评分: ${e}`);
-          subject.next({ type: 'round', round, phase: 'sense', message: `第${round}轮传感器超时，使用降级评分` });
+          emit({ type: 'round', round, phase: 'sense', message: `第${round}轮传感器超时，使用降级评分` });
           const quickReports: SensorReport[] = [];
           const quickProject = await this.prisma.project.findUnique({
             where: { id: projectId },
@@ -225,7 +281,7 @@ export class DeliveryIterationService {
 
         pushPhase('sense-l3', ['sense-l1', 'sense-l2']);
 
-        subject.next({
+        emit({
           type: 'round_result',
           round,
           overallScore: score,
@@ -245,7 +301,7 @@ export class DeliveryIterationService {
         let fixSucceeded = false;
         if (fused.recommendations.length > 0) {
           pushPhase('fix', ['sense-l1', 'sense-l2', 'sense-l3']);
-          subject.next({ type: 'round', round, phase: 'fix', message: `第${round}轮定向修复...` });
+          emit({ type: 'round', round, phase: 'fix', message: `第${round}轮定向修复...` });
           try {
             const newDemo = await DeliveryService.withTimeout(
               this.autoFix(projectId, fused.recommendations),
@@ -266,7 +322,7 @@ export class DeliveryIterationService {
 
           if (!fixSucceeded) {
             fixFailCount++;
-            subject.next({ type: 'fix_failed', round, fixFailCount, maxFixes: 3,
+            emit({ type: 'fix_failed', round, fixFailCount, maxFixes: 3,
               message: `自动修复失败 (${fixFailCount}/3)` });
           }
         }
@@ -283,21 +339,21 @@ export class DeliveryIterationService {
               data: { status: 'paused', publicStatusLabel: '需要人工介入' },
             });
           } catch {}
-          subject.next({ type: 'needs_human', round, fixFailCount, message: msg });
+          emit({ type: 'needs_human', round, fixFailCount, message: msg });
           subject.complete();
           return;
         }
 
         if (fused.stopIteration && score >= 90) {
           pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
-          subject.next({ type: 'done', reason: '达标', score, rounds: round, history });
+          emit({ type: 'done', reason: '达标', score, rounds: round, history });
           subject.complete();
           break;
         }
 
         if (fused.stopIteration && score < 90) {
           pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
-          subject.next({
+          emit({
             type: 'stuck',
             round, score, prevScore,
             stuckCount: STUCK_LIMIT, history,
@@ -310,10 +366,10 @@ export class DeliveryIterationService {
         if (round > 1) {
           if (score <= prevScore) {
             stuckCount++;
-            subject.next({ type: 'stuck_progress', round, stuckCount, stuckLimit: STUCK_LIMIT });
+            emit({ type: 'stuck_progress', round, stuckCount, stuckLimit: STUCK_LIMIT });
             if (stuckCount >= STUCK_LIMIT) {
               pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
-              subject.next({ type: 'stuck', round, score, prevScore, stuckCount, history, message: '连续3轮无改善' });
+              emit({ type: 'stuck', round, score, prevScore, stuckCount, history, message: '连续3轮无改善' });
               subject.complete();
               return;
             }
@@ -328,9 +384,12 @@ export class DeliveryIterationService {
 
       const last = history[history.length - 1];
       pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
-      subject.next({ type: 'done', reason: '达到最大轮数', score: last?.score ?? 0, rounds: history.length, history });
+      emit({ type: 'done', reason: '达到最大轮数', score: last?.score ?? 0, rounds: history.length, history });
       subject.complete();
     } finally {
+      // 兜底：循环异常退出时也标记终态，避免持久状态停在 running 误导前端
+      if (state.status === 'running') { state.status = 'error'; state.terminal = { type: 'error', message: '迭代异常结束' }; persist(); }
+      await persistChain; // 确保终态先落库，再释放锁/清理内存流
       this.iterateSubjects.delete(taskId);
       await this.clearIterationLock(projectId, taskId);
     }

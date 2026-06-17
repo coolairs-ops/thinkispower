@@ -61,6 +61,48 @@ export default function EvaluationPage() {
  const retryCountRef = useRef(0);
  const tidRef = useRef<string | null>(null);
 
+ // ── 对账：以服务端持久状态为真相，重建运行/终态 UI（流断/过期也不会无限挂起） ──
+ const applyStatus = useCallback((res: any): 'running' | 'terminal' | 'idle' | 'other' => {
+  if (Array.isArray(res?.rounds) && res.rounds.length) setRounds(res.rounds);
+  if (Array.isArray(res?.phases) && res.phases.length) setPhaseStates(res.phases);
+  if (typeof res?.score === 'number') setCurrentScore(res.score);
+  if (typeof res?.round === 'number') setCurrentRound(res.round);
+
+  if (res?.otherProjectActive && !res?.active) {
+   setBlockedByProject(res.currentProjectName || res.currentProjectId || '其他项目');
+   return 'other';
+  }
+
+  const t = res?.terminal || {};
+  switch (res?.status) {
+   case 'running':
+    return 'running';
+   case 'needs_human':
+    completedRef.current = true; setConnectionLost(false); setIterating(false);
+    setStuckModal({ ...t, needsHuman: true });
+    setStatusText(t.message || '需要人工介入');
+    return 'terminal';
+   case 'awaiting_decision':
+    completedRef.current = true; setConnectionLost(false); setIterating(false);
+    setStuckModal(t);
+    setStatusText(t.message || '请决策');
+    return 'terminal';
+   case 'done':
+    completedRef.current = true; setConnectionLost(false); setIterating(false);
+    if (t.reason === '达标' && (t.score ?? 0) >= 90) setPerfectModal(t);
+    else { setDoneModal(t); setStatusText(`已完成 ${t.rounds ?? ''} 轮（最终评分 ${t.score ?? ''}）`); }
+    return 'terminal';
+   case 'error':
+   case 'interrupted':
+    completedRef.current = true; setConnectionLost(false); setIterating(false);
+    setStatusText(res.status === 'interrupted' ? '上次迭代已中断，可重新启动' : `错误: ${t.message || ''}`);
+    return 'terminal';
+   default:
+    setIterating(false);
+    return 'idle';
+  }
+ }, []);
+
  // ── SSE 订阅逻辑（可复用：手动启动 + 自动重连） ──
  const subscribeToIteration = useCallback((tid: string) => {
  esRef.current?.close();
@@ -151,9 +193,11 @@ export default function EvaluationPage() {
  if (tidRef.current !== tid) return;
  // 最多重试 3 次
  if (retryCountRef.current >= 3) {
- console.log('[auto-iterate] Max retries reached, giving up');
- setStatusText('连接已断开');
- setConnectionLost(true);
+ console.log('[auto-iterate] Max retries reached, reconciling via durable status');
+ // 不再干转：用服务端持久状态对账——终态则重建结果 UI；仍在跑则提示可手动重连（心跳兜底）
+ api.get(`/api/projects/${projectId}/delivery/auto-iterate/status`)
+ .then((res) => { if (applyStatus(res) === 'running') setConnectionLost(true); })
+ .catch(() => { setStatusText('连接已断开'); setConnectionLost(true); });
  return;
  }
  retryCountRef.current++;
@@ -163,7 +207,7 @@ export default function EvaluationPage() {
  subscribeToIteration(tid);
  }, delay);
  };
- }, [projectId, token, toast]);
+ }, [projectId, token, toast, applyStatus]);
 
  // ── 手动启动 ──
  const startIterate = useCallback(async () => {
@@ -206,19 +250,17 @@ export default function EvaluationPage() {
  setStatusText('🔄 重新连接...');
  try {
  const res = await api.get(`/api/projects/${projectId}/delivery/auto-iterate/status`);
- if (res.active && res.taskId && res.currentProjectId === projectId) {
+ const kind = applyStatus(res);
+ if (kind === 'running' && res.taskId) {
  setTaskId(res.taskId);
  subscribeToIteration(res.taskId);
- } else {
- setStatusText('迭代已结束');
- setIterating(false);
  }
  } catch {
  setStatusText('无法连接');
  setConnectionLost(true);
  setIterating(false);
  }
- }, [projectId, subscribeToIteration]);
+ }, [projectId, subscribeToIteration, applyStatus]);
 
  // ── 自动连接：页面加载时检查全局锁状态 ──
  useEffect(() => {
@@ -229,22 +271,27 @@ export default function EvaluationPage() {
 
  api.get(`/api/projects/${projectId}/delivery/auto-iterate/status`)
  .then(res => {
- if (res.active && res.taskId) {
- if (res.currentProjectId === projectId) {
- // 本项目已有活跃迭代 → 恢复 SSE 连接
+ // 对账重建：running→恢复 SSE；终态→直接显示结果；其他项目→阻止横幅（均不挂起）
+ const kind = applyStatus(res);
+ if (kind === 'running' && res.taskId) {
  console.log('[auto-iterate] Auto-connecting to existing task:', res.taskId);
  setTaskId(res.taskId);
  setIterating(true);
  setStatusText('🔄 恢复连接...');
  subscribeToIteration(res.taskId);
- } else {
- // 其他项目正在迭代 → 显示被阻止横幅
- setBlockedByProject(res.currentProjectName || res.currentProjectId);
- }
  }
  })
  .catch(() => {});
- }, [isLoading, token, projectId, subscribeToIteration]);
+ }, [isLoading, token, projectId, subscribeToIteration, applyStatus]);
+
+ // ── 心跳对账：迭代进行中定期拉取持久状态兜底，SSE 静默失效也能自愈到终态 ──
+ useEffect(() => {
+ if (!iterating || !token) return;
+ const h = setInterval(() => {
+ api.get(`/api/projects/${projectId}/delivery/auto-iterate/status`).then(applyStatus).catch(() => {});
+ }, 6000);
+ return () => clearInterval(h);
+ }, [iterating, token, projectId, applyStatus]);
  
  // 页面卸载时清理 SSE
  useEffect(() => {
