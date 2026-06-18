@@ -133,13 +133,17 @@ export class CrudDataService {
     });
     const d = project?.backendRuntime as unknown as BackendRuntimeDescriptor | null;
     if (!d || !d.schemaName) throw new NotFoundException('该应用还没有数据服务');
-    if (!d.resources?.includes(resource)) throw new NotFoundException(`资源不存在: ${resource}`);
+    // 资源名大小写不敏感解析：appData 客户端常按模型名传驼峰(dailyStats)，
+    // 而置备的资源/表名是小写(dailystats)；用白名单里的规范名做后续查询与 SQL 拼接。
+    const canonical = d.resources?.find((r) => r.toLowerCase() === resource.toLowerCase());
+    if (!canonical) throw new NotFoundException(`资源不存在: ${resource}`);
+    if (!CrudDataService.IDENT.test(canonical)) throw new BadRequestException('后端配置异常');
     if (!CrudDataService.IDENT.test(d.schemaName)) throw new BadRequestException('后端配置异常');
 
     const colRows = await this.prisma.$queryRawUnsafe<{ column_name: string; data_type: string }[]>(
       `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`,
       d.schemaName,
-      resource,
+      canonical,
     );
     if (colRows.length === 0) throw new NotFoundException('资源不存在');
     const columns = new Map(colRows.map((c) => [c.column_name, c.data_type]));
@@ -148,11 +152,11 @@ export class CrudDataService {
       `SELECT a.attname AS pk FROM pg_index i
        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
        WHERE i.indrelid = ($1)::regclass AND i.indisprimary`,
-      `"${d.schemaName}"."${resource}"`,
+      `"${d.schemaName}"."${canonical}"`,
     );
     const pk = pkRows[0]?.pk ?? 'id';
 
-    return { ref: `"${d.schemaName}"."${resource}"`, pk, columns };
+    return { ref: `"${d.schemaName}"."${canonical}"`, pk, columns };
   }
 
   /** 把一个写入值绑定为参数化占位符；jsonb 列的对象/数组值序列化后 ::jsonb。 */

@@ -41,6 +41,22 @@ describe('CrudDataService', () => {
       withDescriptor(['todo']);
       await expect(service.list('p1', 'other', {})).rejects.toThrow(NotFoundException);
     });
+
+    it('资源名大小写不敏感：驼峰 dailyStats 解析到小写白名单 dailystats', async () => {
+      withDescriptor(['dailystats']);
+      prisma.$queryRawUnsafe
+        .mockResolvedValueOnce([{ column_name: 'id', data_type: 'text' }]) // columns
+        .mockResolvedValueOnce([{ pk: 'id' }]) // 主键
+        .mockResolvedValueOnce([{ n: 0 }]) // count
+        .mockResolvedValueOnce([]); // data
+
+      await service.list('p1', 'dailyStats', {});
+
+      // information_schema 用规范小写名查列
+      expect(prisma.$queryRawUnsafe.mock.calls[0].slice(1)).toEqual(['proj_x', 'dailystats']);
+      // 数据查询用规范小写表名拼 ref（而非传入的驼峰）
+      expect(prisma.$queryRawUnsafe.mock.calls[3][0]).toContain('"proj_x"."dailystats"');
+    });
   });
 
   describe('list', () => {
