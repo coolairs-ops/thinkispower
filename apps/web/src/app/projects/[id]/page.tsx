@@ -69,13 +69,24 @@ export default function ProjectChatPage() {
  setEditPrd(JSON.parse(JSON.stringify(raw)));
  }
 
+   // 已成形项目（已冻结规格 / 已有需求 / 已有数据模型，含导入类项目）不得再被塞进空白访谈，
+   // 否则新访谈会悄悄覆盖到旧项目上（串项目）。仅真正全新的项目才自动进访谈页。
+   const sr: any = proj.structuredRequirement;
+   const alreadyEstablished =
+     !!proj.specConfirmedAt ||
+     (proj.specVersion ?? 0) > 0 ||
+     !!proj.dataModel ||
+     !!(sr && (sr.prd || sr.coreFunctions));
+
    // 未开始访谈且无历史消息 → 跳转到独立访谈页
-   api.get(`/api/projects/${projectId}/idea`).then((idea: any) => {
-     if (idea && !idea.done && idea.question && actualMsgs.length === 0) {
-       router.push(`/projects/${projectId}/idea`);
-       return;
-     }
-   }).catch(() => {});
+   if (!alreadyEstablished) {
+     api.get(`/api/projects/${projectId}/idea`).then((idea: any) => {
+       if (idea && !idea.done && idea.question && actualMsgs.length === 0) {
+         router.push(`/projects/${projectId}/idea`);
+         return;
+       }
+     }).catch(() => {});
+   }
  })
  .catch(() => router.push('/dashboard'));
  }, [projectId, token, isLoading, router]);
