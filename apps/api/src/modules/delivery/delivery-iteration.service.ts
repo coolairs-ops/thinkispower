@@ -579,12 +579,33 @@ ${topRecs.join('\n')}
         this.logger.warn(`autoFix 生成结果无效 (${result.length} bytes)，跳过本轮修复`);
         return null;
       }
+      // 防退化护栏：整块修复在 prompt 里截断了 HTML，LLM 易据截断版重写而丢内容/丢批注，
+      // 使 L1（批注标注 / 模块覆盖率）越改越差。若结果显著缩水或批注数下降，判为退化、
+      // 丢弃本轮（宁可不改，不做负优化）。
+      const before = this.countAnnotations(currentHtml);
+      const after = this.countAnnotations(result);
+      if (result.length < currentHtml.length * 0.85) {
+        this.logger.warn(`autoFix 结果显著缩水 (${currentHtml.length}→${result.length} bytes < 85%)，判为退化，丢弃本轮`);
+        return null;
+      }
+      if (after.modules < before.modules || after.elements < before.elements) {
+        this.logger.warn(`autoFix 批注退化 (模块 ${before.modules}→${after.modules}, 元素 ${before.elements}→${after.elements})，丢弃本轮`);
+        return null;
+      }
       this.logger.log(`autoFix 生成 ${result.length} bytes`);
       return result;
     } catch (e) {
       this.logger.warn(`autoFix failed: ${e}`);
       return null;
     }
+  }
+
+  /** 统计 L1 关心的批注密度（模块键 + 元素路径），用于整块修复的防退化护栏 */
+  private countAnnotations(html: string): { modules: number; elements: number } {
+    return {
+      modules: (html.match(/data-module-key=/g) || []).length,
+      elements: (html.match(/data-element-path=/g) || []).length,
+    };
   }
 
   private async clearIterationLock(projectId: string, taskId: string): Promise<void> {
