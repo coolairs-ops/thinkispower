@@ -41,49 +41,99 @@ export class BuildOrchestratorService {
   }
 
   /**
-   * 单步（无状态、可重入）：挑下一 ready 模块 → 生成 → 测试门 → 写日志 → done|blocked。
-   * 返回本步动作；done=true 表示已无 ready 模块（全 done 或剩受阻）。
+   * 单步（无状态、可重入）：原子认领下一 ready 模块 → 生成 → 测试门 → done|blocked。
+   * 认领用 updateMany(pending→building) 守卫，并发下不会两个 worker 抢到同一模块。
    */
   async runNext(projectId: string): Promise<{ moduleId?: string; name?: string; status?: string; done?: boolean }> {
-    const m = await this.nextReady(projectId);
-    if (!m) return { done: true };
-    const ref: BuildModuleRef = { id: m.id, name: m.name, spec: m.spec };
+    const c = await this.claim(projectId);
+    if (c === 'done' || c === 'waiting') return { done: true };
+    const status = await this.buildClaimed(projectId, c);
+    return { moduleId: c.id, name: c.name, status };
+  }
 
-    // 生成
-    await this.prisma.buildModule.update({ where: { id: m.id }, data: { status: 'building' } });
+  /**
+   * 原子认领下一可建模块：pending 且 deps 全 done，updateMany(仅 pending→building) 守卫抢占。
+   * 返回模块 / 'waiting'(有 in-progress 依赖在跑、稍后重试) / 'done'(无 pending 或剩余受阻无法推进)。
+   */
+  private async claim(projectId: string): Promise<BuildModuleRef | 'waiting' | 'done'> {
+    const all = await this.prisma.buildModule.findMany({ where: { projectId }, orderBy: { orderIdx: 'asc' } });
+    const pending = all.filter((m) => m.status === 'pending');
+    if (pending.length === 0) return 'done';
+    const doneNames = new Set(all.filter((m) => m.status === 'done').map((m) => m.name));
+    const ready = pending.filter((m) => ((m.deps as string[] | null) ?? []).every((d) => doneNames.has(d)));
+    for (const cand of ready) {
+      // 原子抢占：仅当仍是 pending 才置 building；count===1 表示本 worker 抢到（否则被别人抢走）
+      const claimed = await this.prisma.buildModule.updateMany({ where: { id: cand.id, status: 'pending' }, data: { status: 'building' } });
+      if (claimed.count === 1) return { id: cand.id, name: cand.name, spec: cand.spec };
+    }
+    // 没抢到 ready：用「新鲜」状态判定（不能用开头的陈旧快照——并发下会把已被抢占的误判为无进展而提前停机）。
+    // 有 building/testing 在跑 → 'waiting'(其完成可能解锁依赖者，稍后重试)；纯 pending 却无可认领 → deps 受阻 → 'done'。
+    const fresh = await this.prisma.buildModule.findMany({ where: { projectId }, select: { status: true } });
+    const inProgress = fresh.some((m) => m.status === 'building' || m.status === 'testing');
+    return inProgress ? 'waiting' : 'done';
+  }
+
+  /** 对已认领(状态=building)的模块跑 生成→测试门→done|blocked，写日志。返回最终状态。 */
+  private async buildClaimed(projectId: string, ref: BuildModuleRef): Promise<'done' | 'blocked'> {
     const gen = await this.runner
       .generate(projectId, ref)
       .catch((e): { ok: boolean; summary?: string; result?: unknown } => ({ ok: false, summary: String(e) }));
     if (!gen.ok) {
       await this.fail(projectId, ref, 'generate', gen.summary ?? '生成失败');
-      return { moduleId: m.id, name: m.name, status: 'blocked' };
+      return 'blocked';
     }
     // 产物落库（供测试门/后续拼装读取）
-    await this.prisma.buildModule.update({ where: { id: m.id }, data: { status: 'testing', result: (gen.result ?? undefined) as never } });
-    await this.journal(projectId, m.id, 'generate', `生成完成：${m.name}${gen.summary ? ' — ' + gen.summary : ''}`, gen.summary ? { summary: gen.summary } : undefined);
+    await this.prisma.buildModule.update({ where: { id: ref.id }, data: { status: 'testing', result: (gen.result ?? undefined) as never } });
+    await this.journal(projectId, ref.id, 'generate', `生成完成：${ref.name}${gen.summary ? ' — ' + gen.summary : ''}`, gen.summary ? { summary: gen.summary } : undefined);
     const t = await this.runner.test(projectId, ref).catch((e) => ({ passed: false, detail: String(e) }));
     if (!t.passed) {
       await this.fail(projectId, ref, 'test', '测试门未通过', t.detail);
-      return { moduleId: m.id, name: m.name, status: 'blocked' };
+      return 'blocked';
     }
-
     await this.prisma.buildModule.update({
-      where: { id: m.id },
+      where: { id: ref.id },
       data: { status: 'done', result: { ...((gen.result as Record<string, unknown>) ?? {}), test: t.detail } as never },
     });
-    await this.journal(projectId, m.id, 'done', `模块完成：${m.name}（测试门通过）`, t.detail);
-    return { moduleId: m.id, name: m.name, status: 'done' };
+    await this.journal(projectId, ref.id, 'done', `模块完成：${ref.name}（测试门通过）`, t.detail);
+    return 'done';
   }
 
-  /** 跑到没有 ready 模块为止（确定性循环）。先对账续跑：把上次中断、卡在进行中的模块重置。 */
-  async run(projectId: string, maxSteps = 100): Promise<{ done: number; blocked: number; pending: number; total: number }> {
+  /**
+   * 建造到无可建模块为止。有界并行：concurrency 个 worker 各自原子认领→建造，尊重 DAG 依赖
+   * （依赖未就绪的模块等 in-progress 依赖完成再认领，无可推进则停）。先 reconcile 续跑。
+   * 并发可配（BUILD_CONCURRENCY 默认 4，硬顶 8）；扁平模块即纯并行，有依赖时自动按拓扑就绪推进。
+   */
+  async run(
+    projectId: string,
+    opts: { concurrency?: number; maxSteps?: number; pollMs?: number } = {},
+  ): Promise<{ done: number; blocked: number; pending: number; total: number }> {
     await this.reconcile(projectId);
+    const concurrency = Math.max(1, Math.min(8, opts.concurrency ?? (Number(process.env.BUILD_CONCURRENCY) || 4)));
+    const maxSteps = opts.maxSteps ?? 1000;
+    const pollMs = opts.pollMs ?? 200;
     let steps = 0;
-    while (steps++ < maxSteps) {
-      const r = await this.runNext(projectId);
-      if (r.done) break;
-    }
+    let stopped = false;
+    const worker = async () => {
+      while (!stopped && steps < maxSteps) {
+        const c = await this.claim(projectId);
+        if (c === 'done') {
+          stopped = true;
+          return;
+        }
+        if (c === 'waiting') {
+          await this.delay(pollMs);
+          continue;
+        }
+        steps++;
+        await this.buildClaimed(projectId, c);
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
     return this.summary(projectId);
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /** 建造状态：各模块 + 近 30 条日志。 */
@@ -106,18 +156,6 @@ export class BuildOrchestratorService {
     if (stuck.count > 0) {
       await this.journal(projectId, null, 'resume', `续跑对账：${stuck.count} 个中断模块重置为 pending 重做`);
     }
-  }
-
-  /** 下一个可建模块：pending 且所有 deps 都 done（拓扑就绪）；按 orderIdx 取最靠前。 */
-  private async nextReady(projectId: string) {
-    const all = await this.prisma.buildModule.findMany({ where: { projectId }, orderBy: { orderIdx: 'asc' } });
-    const done = new Set(all.filter((m) => m.status === 'done').map((m) => m.name));
-    for (const m of all) {
-      if (m.status !== 'pending') continue;
-      const deps = (m.deps as string[] | null) ?? [];
-      if (deps.every((d) => done.has(d))) return m;
-    }
-    return null;
   }
 
   private async summary(projectId: string) {

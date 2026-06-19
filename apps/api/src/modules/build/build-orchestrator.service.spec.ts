@@ -28,10 +28,12 @@ function makeFakePrisma() {
       updateMany: async ({ where, data }: any) => {
         let n = 0;
         for (const m of modules) {
-          if (m.projectId === where.projectId && where.status?.in?.includes(m.status)) {
-            Object.assign(m, data);
-            n++;
-          }
+          if (where.id !== undefined && m.id !== where.id) continue;
+          if (where.projectId !== undefined && m.projectId !== where.projectId) continue;
+          if (where.status?.in && !where.status.in.includes(m.status)) continue;
+          if (typeof where.status === 'string' && m.status !== where.status) continue;
+          Object.assign(m, data);
+          n++;
         }
         return { count: n };
       },
@@ -112,6 +114,51 @@ describe('BuildOrchestratorService（自治建造回路）', () => {
       await s.run(PID);
       expect(prisma._modules[0].status).toBe('blocked');
       expect(prisma._journal.some((e) => e.phase === 'blocked' && e.summary.includes('test'))).toBe(true);
+    });
+  });
+
+  describe('并行建造（有界并发 + 原子认领）', () => {
+    it('独立模块并行：in-flight 并发 >1 且 ≤ 上限，每模块只建一次（无重复认领）', async () => {
+      let inflight = 0;
+      let max = 0;
+      let genCalls = 0;
+      const runner = {
+        generate: async () => {
+          inflight++;
+          genCalls++;
+          max = Math.max(max, inflight);
+          await new Promise((r) => setTimeout(r, 10));
+          inflight--;
+          return { ok: true };
+        },
+        test: async () => ({ passed: true }),
+      };
+      const s = svc(runner);
+      await s.plan(PID, [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }, { name: 'E' }, { name: 'F' }]);
+
+      const res = await s.run(PID, { concurrency: 3, pollMs: 5 });
+      expect(res).toMatchObject({ done: 6, total: 6 });
+      expect(max).toBeGreaterThan(1); // 确实并行了（非串行）
+      expect(max).toBeLessThanOrEqual(3); // 不超并发上限
+      expect(genCalls).toBe(6); // 每模块只建一次 → 原子认领无重复抢占
+    });
+
+    it('依赖链在并发下仍按拓扑就绪：A→B→C 严格顺序，不会先于依赖建', async () => {
+      const order: string[] = [];
+      const runner = {
+        generate: async (_p: string, m: any) => {
+          order.push(m.name);
+          await new Promise((r) => setTimeout(r, 5));
+          return { ok: true };
+        },
+        test: async () => ({ passed: true }),
+      };
+      const s = svc(runner);
+      await s.plan(PID, [{ name: 'A' }, { name: 'B', deps: ['A'] }, { name: 'C', deps: ['B'] }]);
+
+      const res = await s.run(PID, { concurrency: 4, pollMs: 5 });
+      expect(res).toMatchObject({ done: 3, total: 3 });
+      expect(order).toEqual(['A', 'B', 'C']); // 链式依赖：并发也不破坏拓扑序
     });
   });
 

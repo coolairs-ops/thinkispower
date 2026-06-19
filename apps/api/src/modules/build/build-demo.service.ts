@@ -74,10 +74,11 @@ export class BuildDemoService {
   pageItems(planSummary: unknown): { name: string; brief: string }[] {
     const raw = (planSummary as { pages?: unknown })?.pages;
     const list = Array.isArray(raw) ? raw : [];
+    const maxPages = Math.max(1, Math.min(30, Number(process.env.DEMO_MAX_PAGES) || 20));
     const labels = list
       .map((p) => (typeof p === 'string' ? p : (p as { name?: string } | null)?.name || ''))
       .filter(Boolean)
-      .slice(0, 6);
+      .slice(0, maxPages);
     const short = (s: string) => ((s.split(/[—–\-:：(（\s]/)[0].trim() || s).slice(0, 8));
     return (labels.length ? labels : ['总览', '列表']).map((label) => ({ name: short(label), brief: label }));
   }
