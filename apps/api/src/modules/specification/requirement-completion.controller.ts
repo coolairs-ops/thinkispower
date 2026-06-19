@@ -19,4 +19,10 @@ export class RequirementCompletionController {
   async get(@Req() req: any, @Param('projectId') projectId: string) {
     return this.svc.get(req.user.id, projectId);
   }
+
+  /** 升级D：对已存缺口做处置分类（autofill/ask/info），富集回缺口并返回 */
+  @Post('disposition')
+  async classify(@Req() req: any, @Param('projectId') projectId: string) {
+    return this.svc.classify(req.user.id, projectId);
+  }
 }

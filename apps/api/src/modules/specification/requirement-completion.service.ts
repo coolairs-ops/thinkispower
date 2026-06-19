@@ -21,7 +21,14 @@ export interface CompletenessGap {
   why: string;
   ignorableIf?: string;
   source?: string; // archetype | uncovered-dimension
+  // 升级D 处置分类（阶段4.5）：autofill 自动补默认 / ask 回去问用户 / info 仅提示
+  disposition?: 'autofill' | 'ask' | 'info';
+  question?: string; // 仅 disposition=ask：给非技术用户的二选一/单选小问题
+  options?: string[]; // 仅 disposition=ask：可选项
 }
+
+type Disposition = 'autofill' | 'ask' | 'info';
+const DISPOSITIONS: Disposition[] = ['autofill', 'ask', 'info'];
 
 @Injectable()
 export class RequirementCompletionService {
@@ -77,6 +84,35 @@ export class RequirementCompletionService {
     return { gaps: (sr.completenessGaps as CompletenessGap[]) ?? [] };
   }
 
+  /**
+   * 升级D 处置分类（阶段4.5）：对已存的完备性缺口逐条判 autofill/ask/info，
+   * ask 类附带给用户的小问题，富集回 completenessGaps + 返回。需先跑过 analyze(A)。
+   */
+  async classify(userId: string, projectId: string): Promise<{ gaps: CompletenessGap[] }> {
+    const project = await this.requireProject(userId, projectId);
+    const sr = (project.structuredRequirement as Record<string, unknown>) || {};
+    const gaps = (sr.completenessGaps as CompletenessGap[]) ?? [];
+    if (gaps.length === 0) return { gaps: [] };
+
+    let classified = gaps;
+    try {
+      const resp = await this.deepseek.chat([{ role: 'user', content: this.buildDispositionPrompt(gaps) }], {
+        temperature: 0.3,
+        maxTokens: 4096,
+      });
+      classified = this.applyDispositions(gaps, resp);
+    } catch (e) {
+      this.logger.warn(`处置分类失败 ${projectId}: ${e instanceof Error ? e.message : e}`);
+      classified = gaps.map((g) => ({ ...g, disposition: 'info' as Disposition }));
+    }
+
+    sr.completenessGaps = classified as unknown;
+    await this.prisma.project.update({ where: { id: projectId }, data: { structuredRequirement: sr as never } });
+    const counts = classified.reduce<Record<string, number>>((a, g) => ((a[g.disposition || 'info'] = (a[g.disposition || 'info'] || 0) + 1), a), {});
+    this.logger.log(`处置分类 ${projectId}: ${JSON.stringify(counts)}`);
+    return { gaps: classified };
+  }
+
   /** v2 §1 提示词：只查"整块缺失"，不查字段级细节；对照典型构成 + 30题补集。 */
   private buildPrompt(reqJson: string): string {
     return `# 角色
@@ -124,6 +160,58 @@ ${reqJson}
     } catch {
       return [];
     }
+  }
+
+  /** v2 §3 提示词：对每条 gap 判处置方式，ask 类给非技术用户的小问题。按序号对齐输出。 */
+  private buildDispositionPrompt(gaps: CompletenessGap[]): string {
+    const list = gaps.map((g, i) => `${i + 1}. [${g.kind}] ${g.missing}（${g.why}）`).join('\n');
+    return `# 任务
+下面是对一份B端需求做完备性批判后发现的"整块缺口"。请对**每一条**判定处置方式 disposition：
+- "autofill"：有业界默认、低风险，直接补默认即可，无需问用户（如空数据态/加载态/删除二次确认/字段级校验/分页/基础列表页这类标配）。
+- "ask"：属业务决策、无通用默认、答错代价高（如数据权限可见范围/状态机谁可改/是否需审批流/金额精度规则/谁能删数据）→ **不要替用户猜默认**，而是生成一个给非技术用户的二选一或单选小问题。
+- "info"：可选增值能力（如导出、批量导入、对外接口）→ 仅提示，默认不做。
+
+# 缺口清单
+${list}
+
+# 输出
+仅输出严格JSON数组，无任何额外文字/注释/markdown围栏。每条对应上面一个序号，index 从1开始：
+[{ "index":1, "disposition":"autofill|ask|info", "question":"销售之间能互相看客户吗？", "options":["只看自己负责的","看本部门全部","都能看"] }]
+其中 question 与 options 仅在 disposition 为 "ask" 时给出；其余情况省略它们。`;
+  }
+
+  /** 把模型的处置结果按 index 对齐回 gaps；非法/未分类降级 info，ask 缺问题也降级 info。 */
+  private applyDispositions(gaps: CompletenessGap[], resp: string): CompletenessGap[] {
+    const byIndex = new Map<number, { disposition?: string; question?: unknown; options?: unknown }>();
+    const m = (resp || '').match(/\[[\s\S]*\]/);
+    if (m) {
+      try {
+        for (const item of JSON.parse(m[0]) as Array<Record<string, unknown>>) {
+          const idx = Number(item?.index);
+          if (Number.isInteger(idx)) byIndex.set(idx, item as never);
+        }
+      } catch {
+        /* 解析失败：全部走默认 info */
+      }
+    }
+    return gaps.map((g, i) => {
+      const r = byIndex.get(i + 1);
+      let disposition: Disposition = DISPOSITIONS.includes(r?.disposition as Disposition)
+        ? (r!.disposition as Disposition)
+        : 'info';
+      const base: CompletenessGap = { ...g };
+      delete base.question;
+      delete base.options;
+      if (disposition === 'ask') {
+        const question = typeof r?.question === 'string' ? r.question.trim() : '';
+        const options = Array.isArray(r?.options) ? (r!.options as unknown[]).filter((o): o is string => typeof o === 'string') : [];
+        if (question && options.length >= 2) {
+          return { ...base, disposition, question, options };
+        }
+        disposition = 'info'; // ask 但模型没给可用问题/选项 → 降级，不抛半成品追问给前端
+      }
+      return { ...base, disposition };
+    });
   }
 
   private async requireProject(userId: string, projectId: string) {
