@@ -91,4 +91,35 @@ describe('L2RuntimeSensor', () => {
     const taskCheck = report.checks.find(c => c.name === '任务执行健康度');
     expect(taskCheck).toBeUndefined();
   });
+
+  it('MinIO 主机名解析失败（本地连不到 docker 内网名）→ 跳过、不计分、不报"不可用"', async () => {
+    // undici fetch 的 DNS 失败：TypeError: fetch failed，真实错误在 err.cause.code
+    const dnsErr: any = new TypeError('fetch failed');
+    dnsErr.cause = { code: 'ENOTFOUND', message: 'getaddrinfo ENOTFOUND minio' };
+    (global.fetch as jest.Mock).mockImplementation((url: string) =>
+      typeof url === 'string' && url.includes('minio') ? Promise.reject(dnsErr) : Promise.reject(new Error('n/a')),
+    );
+
+    const report = await sensor.run();
+    const minio = report.checks.find(c => c.name === 'MinIO 存储');
+    expect(minio).toBeDefined();
+    expect(minio!.passed).toBe(true);        // 不拉低 passed
+    expect(minio!.weight).toBe(0);           // 不计入评分
+    expect(minio!.error).toBeUndefined();    // 不报 "MinIO 不可用"
+    expect(minio!.detail).toContain('本地环境');
+  });
+
+  it('MinIO 真宕机（连接被拒，非 DNS）→ 照旧计为失败', async () => {
+    const refused: any = new TypeError('fetch failed');
+    refused.cause = { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED' };
+    (global.fetch as jest.Mock).mockImplementation((url: string) =>
+      typeof url === 'string' && url.includes('minio') ? Promise.reject(refused) : Promise.reject(new Error('n/a')),
+    );
+
+    const report = await sensor.run();
+    const minio = report.checks.find(c => c.name === 'MinIO 存储');
+    expect(minio!.passed).toBe(false);
+    expect(minio!.weight).toBe(20);
+    expect(minio!.error).toBe('MinIO 不可用');
+  });
 });

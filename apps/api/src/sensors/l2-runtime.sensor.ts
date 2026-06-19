@@ -102,6 +102,20 @@ export class L2RuntimeSensor {
         detail: passed ? '可用' : `状态码 ${res.status}`,
       };
     } catch (err) {
+      // 主机名解析失败（getaddrinfo ENOTFOUND/EAI_AGAIN）≈ 本地起后端连不到 docker 内网名 minio:9000，
+      // 而非生产对象存储真宕机。标"本地环境跳过"且 weight=0 不计分，别把环境坑当产品缺陷报给用户。
+      // （生产 docker 内 minio 能解析；真宕机会是 ECONNREFUSED/超时，下面照旧计为失败。）
+      const e = err as { code?: string; message?: string; cause?: { code?: string; message?: string } };
+      const blob = `${e?.code ?? ''} ${e?.message ?? ''} ${e?.cause?.code ?? ''} ${e?.cause?.message ?? ''}`;
+      if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(blob)) {
+        return {
+          name: 'MinIO 存储',
+          passed: true,
+          score: 100,
+          weight: 0,
+          detail: '本地环境未接入对象存储，跳过（非生产缺陷）',
+        };
+      }
       this.logger.warn(`MinIO健康检查失败(不阻断): ${err}`);
       return {
         name: 'MinIO 存储',
