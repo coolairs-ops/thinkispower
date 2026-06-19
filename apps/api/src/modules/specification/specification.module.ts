@@ -10,6 +10,8 @@ import { DecisionEngineService } from './decision-engine.service';
 import { WarningService } from './warning.service';
 import { TestDeploymentService } from './test-deployment.service';
 import { IdeaInterviewService } from './idea-interview.service';
+import { RequirementCompletionController } from './requirement-completion.controller';
+import { RequirementCompletionService } from './requirement-completion.service';
 import { SharedCoreModule } from '../../shared/shared-core.module';
 
 @Module({
@@ -21,6 +23,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     TestDeploymentController,
     IdeaInterviewController,
     ImprovementController,
+    RequirementCompletionController,
   ],
   providers: [
     SpecificationService,
@@ -28,6 +31,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     WarningService,
     TestDeploymentService,
     IdeaInterviewService,
+    RequirementCompletionService,
   ],
   exports: [SpecificationService],
 })
