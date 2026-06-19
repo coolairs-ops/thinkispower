@@ -113,4 +113,63 @@ describe('RequirementCompletionService（IR 完备性批判 · 升级A）', () =
       expect(deepseek.chat).not.toHaveBeenCalled();
     });
   });
+
+  describe('apply（回写 screen 缺口 → planSummary.pages · 升级E）', () => {
+    const withState = (gaps: any[], pages: any[] = ['首页概览', '门店列表'], userId = 'u1') =>
+      prisma.project.findUnique.mockResolvedValue({
+        userId,
+        name: '门店巡检',
+        planSummary: { pages },
+        structuredRequirement: { ...project.structuredRequirement, completenessGaps: gaps },
+      });
+
+    it('autofill 的 screen 缺口自动回写为页面，并标记 applied', async () => {
+      withState([{ kind: 'screen', missing: '操作日志/审计记录页面', disposition: 'autofill' }]);
+      const r = await svc.apply('u1', 'p1');
+      expect(r.added).toEqual(['操作日志']);
+      const saved = prisma.project.update.mock.calls[0][0].data;
+      expect(saved.planSummary.pages).toEqual(['首页概览', '门店列表', '操作日志']);
+      expect(saved.structuredRequirement.completenessGaps[0].applied).toBe(true);
+    });
+
+    it('ask 的 screen 缺口默认不写；在 accept 里则写', async () => {
+      const gap = { kind: 'screen', missing: '数据看板/统计报表页面', disposition: 'ask' };
+      withState([gap]);
+      const r1 = await svc.apply('u1', 'p1'); // 不传 accept
+      expect(r1.added).toEqual([]);
+
+      withState([gap]);
+      const r2 = await svc.apply('u1', 'p1', ['数据看板/统计报表页面']);
+      expect(r2.added).toEqual(['数据看板']);
+    });
+
+    it('非 screen 缺口（entity/flow/dimension）一律不回写为页面', async () => {
+      withState([
+        { kind: 'entity', missing: '门店实体', disposition: 'autofill' },
+        { kind: 'flow', missing: '审批流程', disposition: 'autofill' },
+        { kind: 'dimension', missing: '数据权限', disposition: 'autofill' },
+      ]);
+      const r = await svc.apply('u1', 'p1');
+      expect(r.added).toEqual([]);
+      expect(prisma.project.update).not.toHaveBeenCalled();
+    });
+
+    it('已存在的同名页面去重，不重复添加', async () => {
+      withState([{ kind: 'screen', missing: '门店列表页面', disposition: 'autofill' }], ['首页概览', '门店列表']);
+      const r = await svc.apply('u1', 'p1');
+      expect(r.added).toEqual([]); // 门店列表 已存在
+    });
+
+    it('已 applied 的缺口幂等：再调不重复回写', async () => {
+      withState([{ kind: 'screen', missing: '操作日志页面', disposition: 'autofill', applied: true }]);
+      const r = await svc.apply('u1', 'p1');
+      expect(r.added).toEqual([]);
+      expect(r.applied).toBe(0);
+    });
+
+    it('ownership：非属主拒绝', async () => {
+      withState([{ kind: 'screen', missing: '看板', disposition: 'autofill' }], ['首页'], 'owner');
+      await expect(svc.apply('intruder', 'p1')).rejects.toThrow(ForbiddenException);
+    });
+  });
 });

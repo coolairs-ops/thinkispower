@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RequirementCompletionService } from './requirement-completion.service';
 
@@ -24,5 +24,11 @@ export class RequirementCompletionController {
   @Post('disposition')
   async classify(@Req() req: any, @Param('projectId') projectId: string) {
     return this.svc.classify(req.user.id, projectId);
+  }
+
+  /** 升级E 回写：把采纳的 screen 缺口写进 planSummary.pages（accept=用户显式选中的 missing 列表） */
+  @Post('apply')
+  async apply(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { accept?: string[] }) {
+    return this.svc.apply(req.user.id, projectId, body?.accept ?? []);
   }
 }

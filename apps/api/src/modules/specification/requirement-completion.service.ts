@@ -25,6 +25,8 @@ export interface CompletenessGap {
   disposition?: 'autofill' | 'ask' | 'info';
   question?: string; // 仅 disposition=ask：给非技术用户的二选一/单选小问题
   options?: string[]; // 仅 disposition=ask：可选项
+  // 升级E 回写（kit §1「回流补进 IR」）：该缺口是否已回写进 planSummary，避免重复回写
+  applied?: boolean;
 }
 
 type Disposition = 'autofill' | 'ask' | 'info';
@@ -111,6 +113,57 @@ export class RequirementCompletionService {
     const counts = classified.reduce<Record<string, number>>((a, g) => ((a[g.disposition || 'info'] = (a[g.disposition || 'info'] || 0) + 1), a), {});
     this.logger.log(`处置分类 ${projectId}: ${JSON.stringify(counts)}`);
     return { gaps: classified };
+  }
+
+  /**
+   * 升级E 回写（kit §1「命中的整块缺失应回流补进 IR」）：把采纳的 **screen 类**缺口
+   * 写进 planSummary.pages，让生成/设计建议真正吃到补齐结果，闭合"分析→产物"链路。
+   * 采纳口径：disposition=autofill（低风险自动补）或用户在 accept 里显式选中（覆盖 ask/info）。
+   * 仅 screen→pages（最稳、对生成立竿见影）；entity/flow 回写涉及数据模型，留作下一步。
+   */
+  async apply(userId: string, projectId: string, accept: string[] = []): Promise<{ added: string[]; pageCount: number; applied: number }> {
+    const project = await this.requireProject(userId, projectId);
+    const sr = (project.structuredRequirement as Record<string, unknown>) || {};
+    const gaps = (sr.completenessGaps as CompletenessGap[]) ?? [];
+    const acceptSet = new Set(accept);
+
+    const toApply = gaps.filter(
+      (g) => g.kind === 'screen' && !g.applied && (g.disposition === 'autofill' || acceptSet.has(g.missing)),
+    );
+    if (toApply.length === 0) {
+      const plan = (project.planSummary as { pages?: unknown[] }) || {};
+      return { added: [], pageCount: Array.isArray(plan.pages) ? plan.pages.length : 0, applied: 0 };
+    }
+
+    const plan = (project.planSummary as Record<string, unknown>) || {};
+    const pages: unknown[] = Array.isArray(plan.pages) ? [...plan.pages] : [];
+    const existing = new Set(pages.map((p) => this.pageName(p)));
+    const added: string[] = [];
+    for (const g of toApply) {
+      const name = this.pageName(g.missing);
+      if (name && !existing.has(name)) {
+        pages.push(name);
+        existing.add(name);
+        added.push(name);
+      }
+      g.applied = true; // 标记已回写，apply 幂等（再调不会重复加）
+    }
+
+    plan.pages = pages;
+    sr.completenessGaps = gaps as unknown;
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { planSummary: plan as never, structuredRequirement: sr as never },
+    });
+    this.logger.log(`需求回写 ${projectId}: 采纳 ${toApply.length} 个 screen 缺口，新增页面 ${JSON.stringify(added)}`);
+    return { added, pageCount: pages.length, applied: toApply.length };
+  }
+
+  /** 从缺口描述/页面项提取简洁页面名："数据看板/统计报表页面" → "数据看板"。 */
+  private pageName(p: unknown): string {
+    const s = (typeof p === 'string' ? p : (p as { name?: string } | null)?.name || '').trim();
+    const first = (s.split(/[/／、,，(（]/)[0] || s).trim();
+    return first.replace(/(页面|页)$/u, '').trim() || s;
   }
 
   /** v2 §1 提示词：只查"整块缺失"，不查字段级细节；对照典型构成 + 30题补集。 */
@@ -217,7 +270,7 @@ ${list}
   private async requireProject(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, name: true, structuredRequirement: true },
+      select: { userId: true, name: true, structuredRequirement: true, planSummary: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
