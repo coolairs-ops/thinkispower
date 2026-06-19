@@ -82,6 +82,11 @@ export class WarningService {
 
   /** 模式匹配 */
   private matchPattern(signals: any, ctx: any): boolean {
+    // 日志匹配型 signals（regex/keywords）属生成/验证管线的 autoFix 错误模式，
+    // 由 error-matcher 对运行时错误日志匹配；它们的 signal 键这里一个都不认识，
+    // 会一路跳到末尾 return true 而被无条件命中。项目状态提醒面板不该出现它们。
+    if (signals.regex || signals.keywords) return false;
+
     // 状态过滤
     if (signals.statusIn && !signals.statusIn.includes(ctx.status)) return false;
 
