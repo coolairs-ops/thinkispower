@@ -35,6 +35,18 @@ const DISPOSITIONS: Disposition[] = ['autofill', 'ask', 'info'];
 /** 回写后正式规格的同步结果：无操作 / 无规格 / 已并入 / 已冻结待重确认 */
 type SpecSync = 'noop' | 'no-spec' | 'updated' | 'stale-frozen';
 
+/**
+ * 回写映射表（kit §1「整块缺失回流补进 IR」）：每个缺口 kind → planSummary 字段 + 正式规格字段 + 规格条目形状。
+ * 只回写 screen/flow/entity（有明确生成/规格落点）；role/dimension 跨切面、无干净落点，不回写。
+ */
+const WRITEBACK = {
+  screen: { plan: 'pages', spec: 'pages', toSpec: (n: string) => ({ name: n, route: `/${n}`, description: '' }) },
+  flow: { plan: 'features', spec: 'coreFunctions', toSpec: (n: string) => ({ name: n, description: '', priority: 'must' }) },
+  entity: { plan: 'dataObjects', spec: 'dataModels', toSpec: (n: string) => ({ name: n, fields: [{ name: 'id', type: 'string', required: true }] }) },
+} as const;
+type WbKind = keyof typeof WRITEBACK;
+const WB_KINDS = Object.keys(WRITEBACK) as WbKind[];
+
 @Injectable()
 export class RequirementCompletionService {
   private readonly logger = new Logger(RequirementCompletionService.name);
@@ -119,98 +131,119 @@ export class RequirementCompletionService {
   }
 
   /**
-   * 升级E 回写（kit §1「命中的整块缺失应回流补进 IR」）：把采纳的 **screen 类**缺口
-   * 写进 planSummary.pages，让生成/设计建议真正吃到补齐结果，闭合"分析→产物"链路。
+   * 升级E 回写（kit §1「命中的整块缺失应回流补进 IR」）：把采纳的缺口按 kind 写回 planSummary——
+   * screen→pages、flow→features、entity→dataObjects，让生成/设计建议/规格真正吃到补齐结果。
    * 采纳口径：disposition=autofill（低风险自动补）或用户在 accept 里显式选中（覆盖 ask/info）。
-   * 仅 screen→pages（最稳、对生成立竿见影）；entity/flow 回写涉及数据模型，留作下一步。
+   * role/dimension 跨切面、无干净落点，不回写。回写后同步正式规格（syncSpec）。
    */
   async apply(
     userId: string,
     projectId: string,
     accept: string[] = [],
-  ): Promise<{ added: string[]; pageCount: number; applied: number; specSync: SpecSync }> {
+  ): Promise<{ added: Record<string, string[]>; applied: number; specSync: SpecSync }> {
     const project = await this.requireProject(userId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const gaps = (sr.completenessGaps as CompletenessGap[]) ?? [];
     const acceptSet = new Set(accept);
-
-    const toApply = gaps.filter(
-      (g) => g.kind === 'screen' && !g.applied && (g.disposition === 'autofill' || acceptSet.has(g.missing)),
-    );
-    if (toApply.length === 0) {
-      const plan = (project.planSummary as { pages?: unknown[] }) || {};
-      return { added: [], pageCount: Array.isArray(plan.pages) ? plan.pages.length : 0, applied: 0, specSync: 'noop' };
-    }
-
     const plan = (project.planSummary as Record<string, unknown>) || {};
-    const pages: unknown[] = Array.isArray(plan.pages) ? [...plan.pages] : [];
-    const existing = new Set(pages.map((p) => this.pageName(p)));
-    const added: string[] = [];
-    for (const g of toApply) {
-      const name = this.pageName(g.missing);
-      if (name && !existing.has(name)) {
-        pages.push(name);
-        existing.add(name);
-        added.push(name);
+
+    const added: Record<WbKind, string[]> = { screen: [], flow: [], entity: [] };
+    let applied = 0;
+    for (const kind of WB_KINDS) {
+      const field = WRITEBACK[kind].plan;
+      const list: unknown[] = Array.isArray(plan[field]) ? [...(plan[field] as unknown[])] : [];
+      const existing = new Set(list.map((x) => this.shortName(x)));
+      for (const g of gaps) {
+        if (g.kind !== kind || g.applied) continue;
+        if (!(g.disposition === 'autofill' || acceptSet.has(g.missing))) continue;
+        const name = this.shortName(g.missing);
+        if (name && !existing.has(name)) {
+          list.push(name);
+          existing.add(name);
+          added[kind].push(name);
+        }
+        g.applied = true; // 标记已回写，apply 幂等（再调不会重复加）
+        applied++;
       }
-      g.applied = true; // 标记已回写，apply 幂等（再调不会重复加）
+      plan[field] = list;
     }
 
-    plan.pages = pages;
+    if (applied === 0) {
+      return { added: { pages: [], features: [], dataObjects: [] }, applied: 0, specSync: 'noop' };
+    }
+
     sr.completenessGaps = gaps as unknown;
     await this.prisma.project.update({
       where: { id: projectId },
       data: { planSummary: plan as never, structuredRequirement: sr as never },
     });
     // 让正式规格随动：回写改的是 planSummary，但 Specification 是另一份快照，不会自动更新。
-    const specSync = await this.syncSpecPages(projectId, added);
-    this.logger.log(`需求回写 ${projectId}: 采纳 ${toApply.length} 个 screen 缺口，新增页面 ${JSON.stringify(added)}，规格同步=${specSync}`);
-    return { added, pageCount: pages.length, applied: toApply.length, specSync };
+    const specSync = await this.syncSpec(projectId, added);
+    this.logger.log(`需求回写 ${projectId}: 采纳 ${applied} 个缺口，新增 ${JSON.stringify(added)}，规格同步=${specSync}`);
+    return {
+      added: { pages: added.screen, features: added.flow, dataObjects: added.entity },
+      applied,
+      specSync,
+    };
   }
 
   /**
-   * 把回写新增的页面同步进正式规格：未冻结→直接并入 spec.pages；已冻结→不偷改内容，
-   * 只在 changeLog 留"待重新确认"信号，把解冻重确认的决定权交回用户。
+   * 把回写新增项同步进正式规格：未冻结→并入各对应字段(spec.pages/coreFunctions/dataModels)；
+   * 已冻结→不偷改内容，只在 changeLog 留"待重新确认"信号，把解冻重确认的决定权交回用户。
    */
-  private async syncSpecPages(projectId: string, added: string[]): Promise<SpecSync> {
-    if (added.length === 0) return 'noop';
+  private async syncSpec(projectId: string, added: Record<WbKind, string[]>): Promise<SpecSync> {
+    const allAdded = WB_KINDS.flatMap((k) => added[k]);
+    if (allAdded.length === 0) return 'noop';
     const spec = await this.prisma.specification.findUnique({ where: { projectId } });
-    if (!spec) return 'no-spec'; // 规格尚未生成，日后 draft 会从已含新页的 planSummary 组装
+    if (!spec) return 'no-spec'; // 规格尚未生成，日后 draft 会从已含新项的 planSummary 组装
 
     const changeLog = Array.isArray(spec.changeLog) ? [...(spec.changeLog as unknown[])] : [];
     if (spec.status === 'frozen') {
       changeLog.push({
         changedAt: new Date().toISOString(),
         action: 'pending-sync',
-        pendingPages: added,
-        note: '需求补全新增页面，规格已冻结；建议解冻后重新确认',
+        pendingItems: allAdded,
+        note: '需求补全新增页面/功能/实体，规格已冻结；建议解冻后重新确认',
       });
       await this.prisma.specification.update({ where: { projectId }, data: { changeLog: changeLog as never } });
       return 'stale-frozen';
     }
 
-    const specPages: unknown[] = Array.isArray(spec.pages) ? [...(spec.pages as unknown[])] : [];
-    const existing = new Set(specPages.map((p) => this.pageName(p)));
-    const newOnes = added.filter((n) => !existing.has(n));
-    for (const n of newOnes) specPages.push({ name: n, route: `/${n}`, description: '' });
-    if (newOnes.length === 0) return 'updated';
+    const specRec = spec as unknown as Record<string, unknown>;
+    const data: Record<string, unknown> = {};
+    const addedToSpec: string[] = [];
+    for (const kind of WB_KINDS) {
+      if (added[kind].length === 0) continue;
+      const cfg = WRITEBACK[kind];
+      const cur: unknown[] = Array.isArray(specRec[cfg.spec]) ? [...(specRec[cfg.spec] as unknown[])] : [];
+      const existing = new Set(cur.map((x) => this.shortName(x)));
+      for (const n of added[kind]) {
+        if (!existing.has(n)) {
+          cur.push(cfg.toSpec(n));
+          existing.add(n);
+          addedToSpec.push(n);
+        }
+      }
+      data[cfg.spec] = cur;
+    }
+    if (addedToSpec.length === 0) return 'updated'; // 各项规格里已存在
     changeLog.push({
       version: spec.version,
       changedAt: new Date().toISOString(),
-      field: 'pages',
       action: 'auto-sync',
-      addedPages: newOnes,
+      addedItems: addedToSpec,
       reason: '需求补全回写',
     });
-    await this.prisma.specification.update({ where: { projectId }, data: { pages: specPages as never, changeLog: changeLog as never } });
+    data.changeLog = changeLog;
+    await this.prisma.specification.update({ where: { projectId }, data: data as never });
     return 'updated';
   }
 
-  /** 从缺口描述/页面项提取简洁页面名："数据看板/统计报表页面" → "数据看板"。 */
-  private pageName(p: unknown): string {
+  /** 从缺口描述/项提取简洁名："数据看板/统计报表页面"→"数据看板"、"门店基础信息实体"→"门店基础信息"。 */
+  private shortName(p: unknown): string {
     const s = (typeof p === 'string' ? p : (p as { name?: string } | null)?.name || '').trim();
     const first = (s.split(/[/／、,，(（]/)[0] || s).trim();
-    return first.replace(/(页面|页)$/u, '').trim() || s;
+    return first.replace(/(页面|页|实体|流程|模块)$/u, '').trim() || s;
   }
 
   /** v2 §1 提示词：只查"整块缺失"，不查字段级细节；对照典型构成 + 30题补集。 */

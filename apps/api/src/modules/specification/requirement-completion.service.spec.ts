@@ -115,61 +115,73 @@ describe('RequirementCompletionService（IR 完备性批判 · 升级A）', () =
     });
   });
 
-  describe('apply（回写 screen 缺口 → planSummary.pages · 升级E）', () => {
-    const withState = (gaps: any[], pages: any[] = ['首页概览', '门店列表'], userId = 'u1') =>
+  describe('apply（回写缺口 → planSummary · 升级E）', () => {
+    const withState = (gaps: any[], plan: any = { pages: ['首页概览', '门店列表'] }, userId = 'u1') =>
       prisma.project.findUnique.mockResolvedValue({
         userId,
         name: '门店巡检',
-        planSummary: { pages },
+        planSummary: plan,
         structuredRequirement: { ...project.structuredRequirement, completenessGaps: gaps },
       });
 
-    it('autofill 的 screen 缺口自动回写为页面，并标记 applied', async () => {
+    it('autofill 的 screen 缺口回写为页面，并标记 applied', async () => {
       withState([{ kind: 'screen', missing: '操作日志/审计记录页面', disposition: 'autofill' }]);
       const r = await svc.apply('u1', 'p1');
-      expect(r.added).toEqual(['操作日志']);
+      expect(r.added.pages).toEqual(['操作日志']);
       const saved = prisma.project.update.mock.calls[0][0].data;
       expect(saved.planSummary.pages).toEqual(['首页概览', '门店列表', '操作日志']);
       expect(saved.structuredRequirement.completenessGaps[0].applied).toBe(true);
     });
 
-    it('ask 的 screen 缺口默认不写；在 accept 里则写', async () => {
+    it('flow→features、entity→dataObjects 回写；dimension/role 不回写', async () => {
+      withState(
+        [
+          { kind: 'flow', missing: '数据同步与离线操作流程', disposition: 'autofill' },
+          { kind: 'entity', missing: '巡检记录实体', disposition: 'autofill' },
+          { kind: 'dimension', missing: '操作审计与留痕', disposition: 'autofill' },
+          { kind: 'role', missing: '系统管理员', disposition: 'autofill' },
+        ],
+        { pages: [], features: ['巡检上报'], dataObjects: ['门店'] },
+      );
+      const r = await svc.apply('u1', 'p1');
+      expect(r.added.features).toEqual(['数据同步与离线操作']);
+      expect(r.added.dataObjects).toEqual(['巡检记录']);
+      expect(r.added.pages).toEqual([]);
+      const saved = prisma.project.update.mock.calls[0][0].data;
+      expect(saved.planSummary.features).toEqual(['巡检上报', '数据同步与离线操作']);
+      expect(saved.planSummary.dataObjects).toEqual(['门店', '巡检记录']);
+      // dimension/role 既未进 plan，也不计入 applied 的回写字段
+      expect(r.applied).toBe(2);
+    });
+
+    it('ask 缺口默认不写；在 accept 里则写', async () => {
       const gap = { kind: 'screen', missing: '数据看板/统计报表页面', disposition: 'ask' };
       withState([gap]);
       const r1 = await svc.apply('u1', 'p1'); // 不传 accept
-      expect(r1.added).toEqual([]);
+      expect(r1.added.pages).toEqual([]);
+      expect(r1.specSync).toBe('noop');
 
       withState([gap]);
       const r2 = await svc.apply('u1', 'p1', ['数据看板/统计报表页面']);
-      expect(r2.added).toEqual(['数据看板']);
+      expect(r2.added.pages).toEqual(['数据看板']);
     });
 
-    it('非 screen 缺口（entity/flow/dimension）一律不回写为页面', async () => {
-      withState([
-        { kind: 'entity', missing: '门店实体', disposition: 'autofill' },
-        { kind: 'flow', missing: '审批流程', disposition: 'autofill' },
-        { kind: 'dimension', missing: '数据权限', disposition: 'autofill' },
-      ]);
+    it('已存在的同名项去重，不重复添加', async () => {
+      withState([{ kind: 'screen', missing: '门店列表页面', disposition: 'autofill' }], { pages: ['首页概览', '门店列表'] });
       const r = await svc.apply('u1', 'p1');
-      expect(r.added).toEqual([]);
-      expect(prisma.project.update).not.toHaveBeenCalled();
-    });
-
-    it('已存在的同名页面去重，不重复添加', async () => {
-      withState([{ kind: 'screen', missing: '门店列表页面', disposition: 'autofill' }], ['首页概览', '门店列表']);
-      const r = await svc.apply('u1', 'p1');
-      expect(r.added).toEqual([]); // 门店列表 已存在
+      expect(r.added.pages).toEqual([]); // 门店列表 已存在
     });
 
     it('已 applied 的缺口幂等：再调不重复回写', async () => {
       withState([{ kind: 'screen', missing: '操作日志页面', disposition: 'autofill', applied: true }]);
       const r = await svc.apply('u1', 'p1');
-      expect(r.added).toEqual([]);
+      expect(r.added.pages).toEqual([]);
       expect(r.applied).toBe(0);
+      expect(prisma.project.update).not.toHaveBeenCalled();
     });
 
     it('ownership：非属主拒绝', async () => {
-      withState([{ kind: 'screen', missing: '看板', disposition: 'autofill' }], ['首页'], 'owner');
+      withState([{ kind: 'screen', missing: '看板', disposition: 'autofill' }], { pages: ['首页'] }, 'owner');
       await expect(svc.apply('intruder', 'p1')).rejects.toThrow(ForbiddenException);
     });
 
@@ -181,7 +193,7 @@ describe('RequirementCompletionService（IR 完备性批判 · 升级A）', () =
         expect(r.specSync).toBe('updated');
         const specData = prisma.specification.update.mock.calls[0][0].data;
         expect(specData.pages.map((p: any) => p.name)).toEqual(['首页概览', '数据看板']);
-        expect(specData.changeLog.at(-1)).toMatchObject({ action: 'auto-sync', addedPages: ['数据看板'] });
+        expect(specData.changeLog.at(-1)).toMatchObject({ action: 'auto-sync', addedItems: ['数据看板'] });
       });
 
       it('已冻结规格 → 不改 spec.pages，只在 changeLog 记 pending-sync，返回 stale-frozen', async () => {
@@ -191,7 +203,7 @@ describe('RequirementCompletionService（IR 完备性批判 · 升级A）', () =
         expect(r.specSync).toBe('stale-frozen');
         const specData = prisma.specification.update.mock.calls[0][0].data;
         expect(specData.pages).toBeUndefined(); // 不动冻结内容
-        expect(specData.changeLog.at(-1)).toMatchObject({ action: 'pending-sync', pendingPages: ['数据看板'] });
+        expect(specData.changeLog.at(-1)).toMatchObject({ action: 'pending-sync', pendingItems: ['数据看板'] });
       });
 
       it('无规格 → 不报错，返回 no-spec（日后 draft 会从已含新页的 planSummary 组装）', async () => {
@@ -203,7 +215,7 @@ describe('RequirementCompletionService（IR 完备性批判 · 升级A）', () =
       });
 
       it('没有实际新增页面（dedup）→ 不查规格，specSync=noop', async () => {
-        withState([{ kind: 'screen', missing: '门店列表页面', disposition: 'autofill' }], ['首页概览', '门店列表']);
+        withState([{ kind: 'screen', missing: '门店列表页面', disposition: 'autofill' }], { pages: ['首页概览', '门店列表'] });
         const r = await svc.apply('u1', 'p1');
         expect(r.specSync).toBe('noop');
         expect(prisma.specification.findUnique).not.toHaveBeenCalled();
