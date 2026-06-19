@@ -388,6 +388,13 @@ describe('CloudecodeClient', () => {
       expect(demoHtml).not.toContain('<!--TIP_PAGE:'); // 占位符全替换
       expect(demoHtml).toContain('window.appData');    // appData 注入
     });
+
+    it('generatePageContent：一次调用产单页内容 HTML（供建造回路复用）', async () => {
+      mockDeepseekService.chatWithRetry.mockResolvedValue('```html\n<div data-module-key="list">门店表格</div>\n```');
+      const html = await client.generatePageContent('门店巡检', '门店列表', 'model Store{ id String @id }');
+      expect(html).toBe('<div data-module-key="list">门店表格</div>');
+      expect(mockDeepseekService.chatWithRetry).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('injectAnnotationSupport (元素级取色 + 档位)', () => {

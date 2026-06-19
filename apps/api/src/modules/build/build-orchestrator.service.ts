@@ -58,10 +58,9 @@ export class BuildOrchestratorService {
       await this.fail(projectId, ref, 'generate', gen.summary ?? '生成失败');
       return { moduleId: m.id, name: m.name, status: 'blocked' };
     }
-    await this.journal(projectId, m.id, 'generate', `生成完成：${m.name}${gen.summary ? ' — ' + gen.summary : ''}`, gen.result);
-
-    // 测试门
-    await this.prisma.buildModule.update({ where: { id: m.id }, data: { status: 'testing' } });
+    // 产物落库（供测试门/后续拼装读取）
+    await this.prisma.buildModule.update({ where: { id: m.id }, data: { status: 'testing', result: (gen.result ?? undefined) as never } });
+    await this.journal(projectId, m.id, 'generate', `生成完成：${m.name}${gen.summary ? ' — ' + gen.summary : ''}`, gen.summary ? { summary: gen.summary } : undefined);
     const t = await this.runner.test(projectId, ref).catch((e) => ({ passed: false, detail: String(e) }));
     if (!t.passed) {
       await this.fail(projectId, ref, 'test', '测试门未通过', t.detail);
@@ -70,7 +69,7 @@ export class BuildOrchestratorService {
 
     await this.prisma.buildModule.update({
       where: { id: m.id },
-      data: { status: 'done', result: { test: t.detail } as never },
+      data: { status: 'done', result: { ...((gen.result as Record<string, unknown>) ?? {}), test: t.detail } as never },
     });
     await this.journal(projectId, m.id, 'done', `模块完成：${m.name}（测试门通过）`, t.detail);
     return { moduleId: m.id, name: m.name, status: 'done' };

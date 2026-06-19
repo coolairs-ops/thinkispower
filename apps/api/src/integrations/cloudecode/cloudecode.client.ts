@@ -320,14 +320,7 @@ export class CloudecodeClient {
     for (let i = 0; i < pages.length; i++) {
       const p = pages[i];
       try {
-        const resp = await this.deepseek.chatWithRetry(
-          [
-            { role: 'system', content: buildDemoPagePrompt(i === 0) },
-            { role: 'user', content: `## 应用\n${appName}\n## 本页\n${p.brief}\n## 数据模型\n${dataModel || '（无，本页用静态内容即可）'}\n\n只输出本页的**功能界面** HTML（列表/表单/按钮，不是介绍页）。` },
-          ],
-          { temperature: 0.3, maxTokens: 8192, timeoutMs: 180_000 },
-        );
-        const content = this.extractPageContent(resp || '');
+        const content = await this.generatePageContent(appName, p.brief, dataModel, i === 0);
         pageHtmls[p.key] = content || `<div class="alert">「${p.label}」内容暂未生成</div>`;
       } catch (e) {
         this.logger.warn(`分段生成页「${p.label}」失败: ${e instanceof Error ? e.message : e}`);
@@ -344,6 +337,21 @@ export class CloudecodeClient {
     });
     this.logger.log(`分段生成完成 for project ${projectId}: ${pages.length} 页 / ${finalHtml.length} bytes`);
     return { success: true, summary: `分段生成 ${pages.length} 页` };
+  }
+
+  /**
+   * 生成单个页面的功能界面 HTML（一次 LLM 调用，各享完整预算）。
+   * 供分段生成与自治建造回路（ADR-0005 的 generate 步）共用。
+   */
+  async generatePageContent(appName: string, brief: string, dataModel: string | null, isFirst = false): Promise<string> {
+    const resp = await this.deepseek.chatWithRetry(
+      [
+        { role: 'system', content: buildDemoPagePrompt(isFirst) },
+        { role: 'user', content: `## 应用\n${appName}\n## 本页\n${brief}\n## 数据模型\n${dataModel || '（无，本页用静态内容即可）'}\n\n只输出本页的**功能界面** HTML（列表/表单/按钮，不是介绍页）。` },
+      ],
+      { temperature: 0.3, maxTokens: 8192, timeoutMs: 180_000 },
+    );
+    return this.extractPageContent(resp || '');
   }
 
   /** 从单页 LLM 响应抽出内容 HTML：去 ```html 围栏，去掉误带的 <html>/<head>/<body> 外壳，保留内容 */
