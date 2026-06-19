@@ -11,8 +11,8 @@
  * 本接口只负责后端的"生命周期 + 自省"：置备 / 健康 / 拆除。
  */
 
-/** 后端运行时类型：crud=固定运行时(B)；generated=生成代码容器(C，预留) */
-export type BackendRuntimeKind = 'crud' | 'generated';
+/** 后端运行时类型：crud=固定运行时(B)；generated=生成代码容器(C，预留)；ruoyi=若依底座(ADR-0003，预留 M3 实现) */
+export type BackendRuntimeKind = 'crud' | 'generated' | 'ruoyi';
 
 /**
  * 单个项目应用的后端运行时描述符——持久在 `Project.backendRuntime`。
