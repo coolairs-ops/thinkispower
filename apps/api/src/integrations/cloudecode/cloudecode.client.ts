@@ -287,7 +287,9 @@ export class CloudecodeClient {
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true, structuredRequirement: true } });
     const designNotes = adoptedDesignNotes(project?.structuredRequirement);
     const labels = this.itemNames(planSummary?.pages);
-    const pageLabels = (labels.length ? labels : ['总览', '列表']).slice(0, 6);
+    // 页数上限可配（柱三·分段生成放开 6 页硬上限）。硬顶 30 防失控；超限的页由 E 覆盖批判显式报出。
+    const maxPages = Math.max(1, Math.min(30, Number(this.config.get('DEMO_MAX_PAGES', '20')) || 20));
+    const pageLabels = (labels.length ? labels : ['总览', '列表']).slice(0, maxPages);
     const features = this.itemNames(planSummary?.features);
     // 应用名用短项目名（别把整句价值描述塞进侧栏标题）；菜单取页面短名，完整描述单独传给每页 prompt
     const appName = (project?.name || planSummary?.positioning || '应用').slice(0, 20);
@@ -321,10 +323,10 @@ export class CloudecodeClient {
     // 2. 确定性外壳
     const shell = buildDemoShell({ appName, tailwindCdn: tailwindCdnUrl(), daisyuiCss: daisyuiCssUrl(), pages });
 
-    // 3. 每页一次调用
+    // 3. 每页一次调用（有界并行，绕开串行 15 页 ~20-40min；并发可配，避免打爆 DeepSeek 限流）
+    const concurrency = Math.max(1, Math.min(8, Number(this.config.get('DEMO_PAGE_CONCURRENCY', '4')) || 4));
     const pageHtmls: Record<string, string> = {};
-    for (let i = 0; i < pages.length; i++) {
-      const p = pages[i];
+    await this.mapLimit(pages, concurrency, async (p, i) => {
       try {
         const content = await this.generatePageContent(appName, p.brief, dataModel, i === 0, designNotes);
         pageHtmls[p.key] = content || `<div class="alert">「${p.label}」内容暂未生成</div>`;
@@ -332,7 +334,7 @@ export class CloudecodeClient {
         this.logger.warn(`分段生成页「${p.label}」失败: ${e instanceof Error ? e.message : e}`);
         pageHtmls[p.key] = `<div class="alert alert-warning">「${p.label}」生成失败，可重试</div>`;
       }
-    }
+    });
 
     // 4. 拼装 + 注入 appData/批注 + 保存
     const assembled = assembleDemoPages(shell, pageHtmls);
@@ -371,6 +373,18 @@ export class CloudecodeClient {
     if (body) return body[1].trim();
     s = s.replace(/<!DOCTYPE[^>]*>/i, '').replace(/<\/?html[^>]*>/gi, '').replace(/<head>[\s\S]*?<\/head>/i, '').trim();
     return s;
+  }
+
+  /** 有界并发 map：最多 limit 个 worker 并行消费 items（无外部依赖）。各任务写各自 key，无竞态。 */
+  private async mapLimit<T>(items: T[], limit: number, fn: (item: T, index: number) => Promise<void>): Promise<void> {
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (cursor < items.length) {
+        const i = cursor++;
+        await fn(items[i], i);
+      }
+    });
+    await Promise.all(workers);
   }
 
   /** @deprecated 保留兼容 Pipeline（通过 executeTask 首次生成），新链路请用 generateDemoHtmlDirect */

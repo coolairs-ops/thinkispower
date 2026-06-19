@@ -395,6 +395,37 @@ describe('CloudecodeClient', () => {
       expect(html).toBe('<div data-module-key="list">门店表格</div>');
       expect(mockDeepseekService.chatWithRetry).toHaveBeenCalledTimes(1);
     });
+
+    it('柱三·放开页数：>6 页全部生成（不再砍到 6）', async () => {
+      mockPrismaService.project.update.mockResolvedValue({});
+      mockBackend.provision.mockResolvedValue({ descriptor: {} });
+      mockDeepseekService.chatWithRetry
+        .mockResolvedValueOnce('```prisma\nmodel X { id String @id @default(uuid()) }\n```') // 数据模型
+        .mockResolvedValue('<div data-module-key="m">页面内容</div>'); // 各页
+      const pages = Array.from({ length: 8 }, (_, i) => `页面${i + 1}`);
+      const res = await client.generateDemoStaged('p-cap', { summary: 'X', pages, features: [] });
+      expect(res.success).toBe(true);
+      expect(mockDeepseekService.chatWithRetry).toHaveBeenCalledTimes(9); // 1 数据模型 + 8 页
+    });
+
+    it('柱三·每页有界并行：并发不超过上限（默认 4），且确实并行', async () => {
+      mockPrismaService.project.update.mockResolvedValue({});
+      let inflight = 0;
+      let maxInflight = 0;
+      mockDeepseekService.chatWithRetry
+        .mockResolvedValueOnce('```prisma\nmodel X { id String @id @default(uuid()) }\n```')
+        .mockImplementation(async () => {
+          inflight++;
+          maxInflight = Math.max(maxInflight, inflight);
+          await new Promise((r) => setTimeout(r, 5));
+          inflight--;
+          return '<div data-module-key="m">x</div>';
+        });
+      const pages = Array.from({ length: 8 }, (_, i) => `页面${i + 1}`);
+      await client.generateDemoStaged('p-conc', { summary: 'X', pages, features: [] });
+      expect(maxInflight).toBeLessThanOrEqual(4); // DEMO_PAGE_CONCURRENCY 默认 4
+      expect(maxInflight).toBeGreaterThan(1); // 确实并行了（非串行）
+    });
   });
 
   describe('injectAnnotationSupport (元素级取色 + 档位)', () => {
