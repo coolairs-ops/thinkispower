@@ -115,6 +115,8 @@ model Project {
   importBatches             ImportBatch[]
   guardianChecks            GuardianCheck[]
   guardianRemediations      GuardianRemediation[]
+  buildModules              BuildModule[]
+  buildJournal              BuildJournalEntry[]
 
   @@index([userId])
   @@index([orgId])
@@ -173,6 +175,48 @@ model GuardianRemediation {
 
   @@index([projectId, createdAt])
   @@map("guardian_remediations")
+}
+
+// ============ 自治建造回路（ADR-0005）============
+
+/**
+ * 建造计划的一个模块（模块 DAG 的节点）。状态机：pending→building→testing→done|blocked。
+ * 编排器无状态地读这张表 + BuildJournal 决定下一步，使建造跨上下文/会话续跑。
+ */
+model BuildModule {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  name      String   // 模块名（DAG 内唯一，供 deps 引用）
+  spec      String?  // 模块规格（自然语言/结构化）
+  deps      Json?    // 依赖的模块 name 数组（拓扑序约束）
+  status    String   @default("pending") // pending | building | testing | done | blocked
+  orderIdx  Int      @default(0) @map("order_idx")
+  result    Json?    // 产物引用 / 测试结果摘要
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, orderIdx])
+  @@map("build_modules")
+}
+
+/**
+ * append-only 交接日志（= ADR/记忆/小结 的产品内化）。库是真相源，编排器据此续跑。
+ */
+model BuildJournalEntry {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  moduleId  String?  @map("module_id") @db.Uuid
+  phase     String   // plan | generate | test | done | blocked | resume
+  summary   String
+  detail    Json?    // decisions / knownIssues / testResult / shotRef
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@map("build_journal_entries")
 }
 
 // ============ 项目消息 ============
