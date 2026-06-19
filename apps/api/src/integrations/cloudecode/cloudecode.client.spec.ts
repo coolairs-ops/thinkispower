@@ -46,6 +46,7 @@ describe('CloudecodeClient', () => {
     },
     project: {
       update: jest.fn(),
+      findUnique: jest.fn().mockResolvedValue({ name: '门店巡检' }),
     },
     demoSnapshot: {
       findFirst: jest.fn(),
@@ -359,6 +360,33 @@ describe('CloudecodeClient', () => {
       await appData.create('todo', { title: '买菜' });
       expect(calls[1].method).toBe('POST');
       expect(JSON.parse(calls[1].body as string)).toEqual({ title: '买菜' });
+    });
+  });
+
+  describe('generateDemoStaged (分段生成：外壳 + 每页一次调用)', () => {
+    it('数据模型一次 + 每页一次 → 拼装含外壳与各页内容', async () => {
+      mockPrismaService.project.update.mockResolvedValue({});
+      mockBackend.provision.mockResolvedValue({ descriptor: {} });
+      mockDeepseekService.chatWithRetry
+        .mockResolvedValueOnce('```prisma\nmodel Store {\n  id String @id @default(uuid())\n  name String\n}\n```')
+        .mockResolvedValueOnce('```html\n<div data-module-key="ov" class="stats">总览页内容</div>\n```')
+        .mockResolvedValueOnce('<div data-module-key="st">门店页内容</div>');
+
+      const res = await client.generateDemoStaged('p9', { summary: '门店巡检', pages: ['总览', '门店'], features: ['巡检'] });
+      expect(res.success).toBe(true);
+
+      // 3 次调用：1 数据模型 + 2 页
+      expect(mockDeepseekService.chatWithRetry).toHaveBeenCalledTimes(3);
+      expect(mockBackend.provision).toHaveBeenCalledWith('p9', expect.stringContaining('model Store'));
+
+      const demoCall = mockPrismaService.project.update.mock.calls.find((c: any) => c[0].data.demoHtml);
+      const demoHtml = demoCall[0].data.demoHtml as string;
+      expect(demoHtml).toContain("navigate('p0')");   // 外壳菜单
+      expect(demoHtml).toContain('data-page="p1"');    // 外壳 section
+      expect(demoHtml).toContain('总览页内容');        // p0 内容已拼入
+      expect(demoHtml).toContain('门店页内容');        // p1 内容已拼入
+      expect(demoHtml).not.toContain('<!--TIP_PAGE:'); // 占位符全替换
+      expect(demoHtml).toContain('window.appData');    // appData 注入
     });
   });
 
