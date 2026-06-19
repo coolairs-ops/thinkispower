@@ -67,7 +67,8 @@ export class DemoService {
       this.logger.warn(`Demo generation stale for ${projectId}, marked as failed`);
     }
 
-    const ready = ['demo_ready', 'awaiting_demo_feedback', 'developing', 'completed'];
+    // paused：自迭代停在"需人工介入"后，demo 仍在，须返回 html 供继续查看与手动编辑
+    const ready = ['demo_ready', 'awaiting_demo_feedback', 'developing', 'completed', 'paused'];
     // 注入主题覆盖层（皮肤），令预览与已保存的外观一致；demoHtml 本身不变
     const themeConfig = this.theme.normalize(project.themeConfig as never);
     const html = ready.includes(status) && project.demoHtml ? this.theme.applyTheme(project.demoHtml, themeConfig) : null;

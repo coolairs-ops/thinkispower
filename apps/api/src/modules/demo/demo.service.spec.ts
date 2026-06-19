@@ -114,6 +114,15 @@ describe('DemoService', () => {
       expect(result.html).toBeNull();
     });
 
+    it('should return HTML when paused（自迭代需人工介入后仍可看/可编辑 demo）', async () => {
+      prisma.project.findUnique.mockResolvedValue({ ...baseProject, status: 'paused' });
+
+      const result = await service.getDemo(mockUserId, mockProjectId);
+
+      expect(result.html).toContain('Hello');
+      expect(result.status).toBe('paused');
+    });
+
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 

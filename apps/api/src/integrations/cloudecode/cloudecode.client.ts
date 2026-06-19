@@ -304,10 +304,16 @@ window.addEventListener('message', function(e) {
   } else if (d.type === 'clear-highlight') {
     document.querySelectorAll('.annotation-highlight').forEach(function(el) { el.classList.remove('annotation-highlight'); });
   } else if (d.type === 'adjust-element' && __tipCurrentEl) {
-    // 档位调整：对齐 / 字号（先移除同组旧 class，再加新）
-    var groups = { align: ['text-left','text-center','text-right'], size: ['text-xs','text-sm','text-base','text-lg','text-xl','text-2xl'] };
-    var g = groups[d.group];
-    if (g && d.value) { g.forEach(function(c){ __tipCurrentEl.classList.remove(c); }); __tipCurrentEl.classList.add('text-' + d.value); }
+    // 档位调整：对齐 / 字号（class 切换）；颜色：文字 / 背景（inline style，支持任意取色，保存时随 outerHTML 持久化）
+    if (d.group === 'color' && d.value) {
+      __tipCurrentEl.style.color = d.value;
+    } else if (d.group === 'bg' && d.value) {
+      __tipCurrentEl.style.backgroundColor = d.value;
+    } else {
+      var groups = { align: ['text-left','text-center','text-right'], size: ['text-xs','text-sm','text-base','text-lg','text-xl','text-2xl'] };
+      var g = groups[d.group];
+      if (g && d.value) { g.forEach(function(c){ __tipCurrentEl.classList.remove(c); }); __tipCurrentEl.classList.add('text-' + d.value); }
+    }
   }
 });`;
 

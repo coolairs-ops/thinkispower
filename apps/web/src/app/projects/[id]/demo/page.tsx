@@ -257,8 +257,8 @@ export default function DemoPage() {
     });
   };
 
-  // 档位调整：通知 iframe 对选中元素改 class（即时预览，需保存才持久化）
-  const adjustElement = (group: 'align' | 'size', value: string) => {
+  // 档位/颜色调整：通知 iframe 对选中元素改 class 或 inline style（即时预览，需保存才持久化）
+  const adjustElement = (group: 'align' | 'size' | 'color' | 'bg', value: string) => {
     iframeRef.current?.contentWindow?.postMessage({ type: 'adjust-element', group, value }, '*');
     setEditMsg('');
   };
@@ -286,8 +286,9 @@ export default function DemoPage() {
     setEditMsg('');
   };
 
-  const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing' || status === 'demo_failed';
-  const showGenerateButton = status === 'prd_ready' || status === 'plan_ready' || status === 'spec_confirmed' || status === 'demo_ready' || status === 'demo_generating' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing' || status === 'demo_failed';
+  // paused：自迭代停在"需人工介入"后的状态——demo 仍在，须继续可看可手动编辑
+  const showPreview = status === 'demo_ready' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing' || status === 'demo_failed' || status === 'paused';
+  const showGenerateButton = status === 'prd_ready' || status === 'plan_ready' || status === 'spec_confirmed' || status === 'demo_ready' || status === 'demo_generating' || status === 'awaiting_demo_feedback' || status === 'completed' || status === 'developing' || status === 'demo_failed' || status === 'paused';
 
   if (isLoading) return null;
 
@@ -451,6 +452,14 @@ export default function DemoPage() {
                       <button key={v} onClick={() => adjustElement('size', v)}
                         className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">{l}</button>
                     ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-8 text-xs text-gray-400">文字</span>
+                    <input type="color" onChange={(e) => adjustElement('color', e.target.value)}
+                      title="文字颜色" className="h-7 w-9 cursor-pointer rounded border border-gray-300 bg-white p-0.5" />
+                    <span className="ml-3 w-8 text-xs text-gray-400">背景</span>
+                    <input type="color" onChange={(e) => adjustElement('bg', e.target.value)}
+                      title="背景颜色" className="h-7 w-9 cursor-pointer rounded border border-gray-300 bg-white p-0.5" />
                   </div>
                   <button onClick={handleSaveEdit} disabled={savingEdit}
                     className="w-full rounded-lg bg-green-600 px-3 py-1.5 text-sm text-white hover:bg-green-700 disabled:opacity-50">

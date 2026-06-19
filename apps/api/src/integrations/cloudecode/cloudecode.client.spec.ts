@@ -361,4 +361,53 @@ describe('CloudecodeClient', () => {
       expect(JSON.parse(calls[1].body as string)).toEqual({ title: '买菜' });
     });
   });
+
+  describe('injectAnnotationSupport (元素级取色 + 档位)', () => {
+    const baseHtml =
+      '<html><head></head><body><div data-module-key="m"></div><script>var x=1;</script></body></html>';
+
+    it('注入 color/bg inline-style 分支，且整段注入脚本是可解析的 JS', () => {
+      const out = client.injectAnnotationSupport(baseHtml);
+      // 元素级取色：文字色 / 背景色走 inline style
+      expect(out).toContain("d.group === 'color'");
+      expect(out).toContain('__tipCurrentEl.style.color');
+      expect(out).toContain("d.group === 'bg'");
+      expect(out).toContain('__tipCurrentEl.style.backgroundColor');
+
+      // 注入脚本若有语法错误会拖垮所有新 demo —— 取含 __tipCurrentEl 的脚本块确认能编译
+      const scripts = out.match(/<script>([\s\S]*?)<\/script>/g) || [];
+      const handler = scripts.find((s) => s.includes('__tipCurrentEl'));
+      expect(handler).toBeDefined();
+      const code = handler!.replace(/^<script>/, '').replace(/<\/script>$/, '');
+      expect(() => new vm.Script(code)).not.toThrow();
+    });
+
+    it('选中元素后 adjust-element color/bg 真的写入 inline style（行为验证）', () => {
+      const out = client.injectAnnotationSupport(baseHtml);
+      const handler = (out.match(/<script>([\s\S]*?)<\/script>/g) || [])
+        .find((s) => s.includes('__tipCurrentEl'))!
+        .replace(/^<script>/, '').replace(/<\/script>$/, '');
+
+      // 最小 DOM mock：捕获脚本注册的 click / message 监听器
+      const L: Record<string, (e: any) => void> = {};
+      const el: any = { style: {}, classList: { add() {}, remove() {} }, getAttribute: () => 'm', scrollIntoView() {} };
+      const sandbox: any = {
+        window: { addEventListener: (t: string, f: any) => { L['w:' + t] = f; }, parent: { postMessage() {} } },
+        document: {
+          addEventListener: (t: string, f: any) => { L['d:' + t] = f; },
+          querySelector: () => el, querySelectorAll: () => [],
+        },
+      };
+      vm.createContext(sandbox);
+      vm.runInContext(handler, sandbox);
+
+      // 模拟：点击选中 el → 取文字色 → 取背景色
+      L['d:click']({ target: { closest: () => el } });
+      L['w:message']({ data: { type: 'adjust-element', group: 'color', value: '#ff0000' } });
+      L['w:message']({ data: { type: 'adjust-element', group: 'bg', value: '#00ff00' } });
+
+      expect(el.style.color).toBe('#ff0000');
+      expect(el.style.backgroundColor).toBe('#00ff00');
+    });
+  });
 });
