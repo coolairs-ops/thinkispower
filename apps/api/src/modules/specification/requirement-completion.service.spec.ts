@@ -15,6 +15,7 @@ describe('RequirementCompletionService（IR 完备性批判 · 升级A）', () =
   beforeEach(() => {
     prisma = {
       project: { findUnique: jest.fn().mockResolvedValue(project), update: jest.fn().mockResolvedValue({}) },
+      specification: { findUnique: jest.fn().mockResolvedValue(null), update: jest.fn().mockResolvedValue({}) },
     };
     deepseek = { chat: jest.fn() };
     svc = new RequirementCompletionService(prisma as never, deepseek as never);
@@ -170,6 +171,43 @@ describe('RequirementCompletionService（IR 完备性批判 · 升级A）', () =
     it('ownership：非属主拒绝', async () => {
       withState([{ kind: 'screen', missing: '看板', disposition: 'autofill' }], ['首页'], 'owner');
       await expect(svc.apply('intruder', 'p1')).rejects.toThrow(ForbiddenException);
+    });
+
+    describe('规格随动（apply→Specification 同步）', () => {
+      it('未冻结规格 → 新页并入 spec.pages + changeLog auto-sync，返回 updated', async () => {
+        withState([{ kind: 'screen', missing: '数据看板页面', disposition: 'autofill' }]);
+        prisma.specification.findUnique.mockResolvedValue({ status: 'draft', version: 1, pages: [{ name: '首页概览' }], changeLog: [] });
+        const r = await svc.apply('u1', 'p1');
+        expect(r.specSync).toBe('updated');
+        const specData = prisma.specification.update.mock.calls[0][0].data;
+        expect(specData.pages.map((p: any) => p.name)).toEqual(['首页概览', '数据看板']);
+        expect(specData.changeLog.at(-1)).toMatchObject({ action: 'auto-sync', addedPages: ['数据看板'] });
+      });
+
+      it('已冻结规格 → 不改 spec.pages，只在 changeLog 记 pending-sync，返回 stale-frozen', async () => {
+        withState([{ kind: 'screen', missing: '数据看板页面', disposition: 'autofill' }]);
+        prisma.specification.findUnique.mockResolvedValue({ status: 'frozen', version: 1, pages: [{ name: '首页概览' }], changeLog: [] });
+        const r = await svc.apply('u1', 'p1');
+        expect(r.specSync).toBe('stale-frozen');
+        const specData = prisma.specification.update.mock.calls[0][0].data;
+        expect(specData.pages).toBeUndefined(); // 不动冻结内容
+        expect(specData.changeLog.at(-1)).toMatchObject({ action: 'pending-sync', pendingPages: ['数据看板'] });
+      });
+
+      it('无规格 → 不报错，返回 no-spec（日后 draft 会从已含新页的 planSummary 组装）', async () => {
+        withState([{ kind: 'screen', missing: '数据看板页面', disposition: 'autofill' }]);
+        prisma.specification.findUnique.mockResolvedValue(null);
+        const r = await svc.apply('u1', 'p1');
+        expect(r.specSync).toBe('no-spec');
+        expect(prisma.specification.update).not.toHaveBeenCalled();
+      });
+
+      it('没有实际新增页面（dedup）→ 不查规格，specSync=noop', async () => {
+        withState([{ kind: 'screen', missing: '门店列表页面', disposition: 'autofill' }], ['首页概览', '门店列表']);
+        const r = await svc.apply('u1', 'p1');
+        expect(r.specSync).toBe('noop');
+        expect(prisma.specification.findUnique).not.toHaveBeenCalled();
+      });
     });
   });
 });

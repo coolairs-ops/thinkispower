@@ -32,6 +32,9 @@ export interface CompletenessGap {
 type Disposition = 'autofill' | 'ask' | 'info';
 const DISPOSITIONS: Disposition[] = ['autofill', 'ask', 'info'];
 
+/** 回写后正式规格的同步结果：无操作 / 无规格 / 已并入 / 已冻结待重确认 */
+type SpecSync = 'noop' | 'no-spec' | 'updated' | 'stale-frozen';
+
 @Injectable()
 export class RequirementCompletionService {
   private readonly logger = new Logger(RequirementCompletionService.name);
@@ -121,7 +124,11 @@ export class RequirementCompletionService {
    * 采纳口径：disposition=autofill（低风险自动补）或用户在 accept 里显式选中（覆盖 ask/info）。
    * 仅 screen→pages（最稳、对生成立竿见影）；entity/flow 回写涉及数据模型，留作下一步。
    */
-  async apply(userId: string, projectId: string, accept: string[] = []): Promise<{ added: string[]; pageCount: number; applied: number }> {
+  async apply(
+    userId: string,
+    projectId: string,
+    accept: string[] = [],
+  ): Promise<{ added: string[]; pageCount: number; applied: number; specSync: SpecSync }> {
     const project = await this.requireProject(userId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const gaps = (sr.completenessGaps as CompletenessGap[]) ?? [];
@@ -132,7 +139,7 @@ export class RequirementCompletionService {
     );
     if (toApply.length === 0) {
       const plan = (project.planSummary as { pages?: unknown[] }) || {};
-      return { added: [], pageCount: Array.isArray(plan.pages) ? plan.pages.length : 0, applied: 0 };
+      return { added: [], pageCount: Array.isArray(plan.pages) ? plan.pages.length : 0, applied: 0, specSync: 'noop' };
     }
 
     const plan = (project.planSummary as Record<string, unknown>) || {};
@@ -155,8 +162,48 @@ export class RequirementCompletionService {
       where: { id: projectId },
       data: { planSummary: plan as never, structuredRequirement: sr as never },
     });
-    this.logger.log(`需求回写 ${projectId}: 采纳 ${toApply.length} 个 screen 缺口，新增页面 ${JSON.stringify(added)}`);
-    return { added, pageCount: pages.length, applied: toApply.length };
+    // 让正式规格随动：回写改的是 planSummary，但 Specification 是另一份快照，不会自动更新。
+    const specSync = await this.syncSpecPages(projectId, added);
+    this.logger.log(`需求回写 ${projectId}: 采纳 ${toApply.length} 个 screen 缺口，新增页面 ${JSON.stringify(added)}，规格同步=${specSync}`);
+    return { added, pageCount: pages.length, applied: toApply.length, specSync };
+  }
+
+  /**
+   * 把回写新增的页面同步进正式规格：未冻结→直接并入 spec.pages；已冻结→不偷改内容，
+   * 只在 changeLog 留"待重新确认"信号，把解冻重确认的决定权交回用户。
+   */
+  private async syncSpecPages(projectId: string, added: string[]): Promise<SpecSync> {
+    if (added.length === 0) return 'noop';
+    const spec = await this.prisma.specification.findUnique({ where: { projectId } });
+    if (!spec) return 'no-spec'; // 规格尚未生成，日后 draft 会从已含新页的 planSummary 组装
+
+    const changeLog = Array.isArray(spec.changeLog) ? [...(spec.changeLog as unknown[])] : [];
+    if (spec.status === 'frozen') {
+      changeLog.push({
+        changedAt: new Date().toISOString(),
+        action: 'pending-sync',
+        pendingPages: added,
+        note: '需求补全新增页面，规格已冻结；建议解冻后重新确认',
+      });
+      await this.prisma.specification.update({ where: { projectId }, data: { changeLog: changeLog as never } });
+      return 'stale-frozen';
+    }
+
+    const specPages: unknown[] = Array.isArray(spec.pages) ? [...(spec.pages as unknown[])] : [];
+    const existing = new Set(specPages.map((p) => this.pageName(p)));
+    const newOnes = added.filter((n) => !existing.has(n));
+    for (const n of newOnes) specPages.push({ name: n, route: `/${n}`, description: '' });
+    if (newOnes.length === 0) return 'updated';
+    changeLog.push({
+      version: spec.version,
+      changedAt: new Date().toISOString(),
+      field: 'pages',
+      action: 'auto-sync',
+      addedPages: newOnes,
+      reason: '需求补全回写',
+    });
+    await this.prisma.specification.update({ where: { projectId }, data: { pages: specPages as never, changeLog: changeLog as never } });
+    return 'updated';
   }
 
   /** 从缺口描述/页面项提取简洁页面名："数据看板/统计报表页面" → "数据看板"。 */
