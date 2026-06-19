@@ -409,5 +409,30 @@ describe('CloudecodeClient', () => {
       expect(el.style.color).toBe('#ff0000');
       expect(el.style.backgroundColor).toBe('#00ff00');
     });
+
+    it('点击无 data-module-key 的元素也能选中并编辑（编辑与标注解耦）', () => {
+      const out = client.injectAnnotationSupport(baseHtml);
+      const handler = (out.match(/<script>([\s\S]*?)<\/script>/g) || [])
+        .find((s) => s.includes('__tipCurrentEl'))!
+        .replace(/^<script>/, '').replace(/<\/script>$/, '');
+
+      const L: Record<string, (e: any) => void> = {};
+      // 被点元素本身没有 data-module-key：closest 返回 null，应回退到 e.target
+      const bare: any = { tagName: 'SPAN', style: {}, classList: { add() {}, remove() {} }, getAttribute: () => null };
+      const sandbox: any = {
+        window: { addEventListener: (t: string, f: any) => { L['w:' + t] = f; }, parent: { postMessage() {} } },
+        document: {
+          addEventListener: (t: string, f: any) => { L['d:' + t] = f; },
+          querySelector: () => null, querySelectorAll: () => [],
+        },
+      };
+      vm.createContext(sandbox);
+      vm.runInContext(handler, sandbox);
+
+      L['d:click']({ target: { closest: () => null, ...bare } });
+      L['w:message']({ data: { type: 'adjust-element', group: 'color', value: '#123456' } });
+
+      expect(bare.style.color).toBe('#123456');
+    });
   });
 });
