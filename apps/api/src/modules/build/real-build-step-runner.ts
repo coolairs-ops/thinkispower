@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
+import { adoptedDesignNotes } from '../../common/design-notes';
 import { BuildModuleRef, BuildStepRunner } from './build-step-runner.interface';
 
 /**
@@ -22,14 +23,15 @@ export class RealBuildStepRunner implements BuildStepRunner {
   async generate(projectId: string, module: BuildModuleRef): Promise<{ ok: boolean; summary?: string; result?: unknown }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { name: true, dataModel: true },
+      select: { name: true, dataModel: true, structuredRequirement: true },
     });
     const appName = (project?.name || '应用').slice(0, 20);
     const brief = module.spec || module.name;
+    const designNotes = adoptedDesignNotes(project?.structuredRequirement);
 
     let html = '';
     try {
-      html = await this.cloudecode.generatePageContent(appName, brief, project?.dataModel ?? null);
+      html = await this.cloudecode.generatePageContent(appName, brief, project?.dataModel ?? null, false, designNotes);
     } catch (e) {
       return { ok: false, summary: `生成调用失败: ${e instanceof Error ? e.message : e}` };
     }

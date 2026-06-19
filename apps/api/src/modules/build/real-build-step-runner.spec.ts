@@ -10,7 +10,7 @@ describe('RealBuildStepRunner（真实 generate + 测试门）', () => {
 
   beforeEach(() => {
     prisma = {
-      project: { findUnique: jest.fn().mockResolvedValue({ name: '门店巡检', dataModel: 'model Store{ id String @id }' }) },
+      project: { findUnique: jest.fn().mockResolvedValue({ name: '门店巡检', dataModel: 'model Store{ id String @id }', structuredRequirement: null }) },
       buildModule: { findUnique: jest.fn() },
     };
     cloudecode = { generatePageContent: jest.fn() };
@@ -24,7 +24,25 @@ describe('RealBuildStepRunner（真实 generate + 测试门）', () => {
       expect(r.ok).toBe(true);
       expect((r.result as any).html).toBe(richHtml);
       expect((r.result as any).len).toBe(richHtml.length);
-      expect(cloudecode.generatePageContent).toHaveBeenCalledWith('门店巡检', '门店列表 — 增删改查', 'model Store{ id String @id }');
+      expect(cloudecode.generatePageContent).toHaveBeenCalledWith('门店巡检', '门店列表 — 增删改查', 'model Store{ id String @id }', false, '');
+    });
+
+    it('把已采纳设计建议作为设计约束传给生成', async () => {
+      prisma.project.findUnique.mockResolvedValue({
+        name: '门店巡检',
+        dataModel: null,
+        structuredRequirement: {
+          designSuggestions: [
+            { category: 'navigation', title: '底部标签导航', description: '三个主入口', adopted: true },
+            { category: 'layout', title: '卡片布局', description: '网格卡片', adopted: false }, // 未采纳，不传
+          ],
+        },
+      });
+      cloudecode.generatePageContent.mockResolvedValue(richHtml);
+      await runner.generate('p1', mod);
+      const notes = cloudecode.generatePageContent.mock.calls[0][4];
+      expect(notes).toContain('底部标签导航');
+      expect(notes).not.toContain('卡片布局');
     });
 
     it('生成内容过短 → ok=false（→编排器 blocked）', async () => {

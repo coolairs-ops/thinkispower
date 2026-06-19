@@ -10,6 +10,7 @@ import { BACKEND_RUNTIME, BackendRuntime } from '../../modules/app-runtime/backe
 const FILE_PATH_REQUIREMENT = `【重要】每个文件必须用 \`\`\`文件路径 格式标记（不要用语言名）。正确格式：\`\`\`backend/src/user/user.service.ts\n内容\n\`\`\`。错误格式：\`\`\`typescript （会被丢弃）。\n`;
 
 import { tailwindCdnUrl, daisyuiCssUrl } from '../../common/asset-urls';
+import { adoptedDesignNotes } from '../../common/design-notes';
 import { buildDemoShell, assembleDemoPages } from './demo-shell';
 
 const HTML_MODIFICATION_PROMPT = `你是一个前端开发工程师。根据任务描述，生成/修改 Demo HTML 文件。
@@ -227,7 +228,11 @@ export class CloudecodeClient {
     const features = this.itemNames(planSummary?.features);
     const name = planSummary?.summary || planSummary?.positioning || '应用';
 
-    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f) => `- ${f}`).join('\n')}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { structuredRequirement: true } });
+    const designNotes = adoptedDesignNotes(project?.structuredRequirement);
+    const designBlock = designNotes ? `\n\n## 设计约束（用户已采纳，务必遵循）\n${designNotes}` : '';
+
+    const prompt = `## 项目\n${name}\n\n## 页面\n${pages.map((p) => `- ${p}`).join('\n')}\n\n## 功能\n${features.map((f) => `- ${f}`).join('\n')}${designBlock}\n\n生成包含所有页面的完整 SPA HTML 预览。`;
 
     const response = await this.deepseek.chatWithRetry(
       [
@@ -279,7 +284,8 @@ export class CloudecodeClient {
     summary?: string;
     rawError?: string;
   }> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true } });
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true, structuredRequirement: true } });
+    const designNotes = adoptedDesignNotes(project?.structuredRequirement);
     const labels = this.itemNames(planSummary?.pages);
     const pageLabels = (labels.length ? labels : ['总览', '列表']).slice(0, 6);
     const features = this.itemNames(planSummary?.features);
@@ -320,7 +326,7 @@ export class CloudecodeClient {
     for (let i = 0; i < pages.length; i++) {
       const p = pages[i];
       try {
-        const content = await this.generatePageContent(appName, p.brief, dataModel, i === 0);
+        const content = await this.generatePageContent(appName, p.brief, dataModel, i === 0, designNotes);
         pageHtmls[p.key] = content || `<div class="alert">「${p.label}」内容暂未生成</div>`;
       } catch (e) {
         this.logger.warn(`分段生成页「${p.label}」失败: ${e instanceof Error ? e.message : e}`);
@@ -343,11 +349,12 @@ export class CloudecodeClient {
    * 生成单个页面的功能界面 HTML（一次 LLM 调用，各享完整预算）。
    * 供分段生成与自治建造回路（ADR-0005 的 generate 步）共用。
    */
-  async generatePageContent(appName: string, brief: string, dataModel: string | null, isFirst = false): Promise<string> {
+  async generatePageContent(appName: string, brief: string, dataModel: string | null, isFirst = false, designNotes = ''): Promise<string> {
+    const designBlock = designNotes ? `\n## 设计约束（用户已采纳，务必遵循）\n${designNotes}` : '';
     const resp = await this.deepseek.chatWithRetry(
       [
         { role: 'system', content: buildDemoPagePrompt(isFirst) },
-        { role: 'user', content: `## 应用\n${appName}\n## 本页\n${brief}\n## 数据模型\n${dataModel || '（无，本页用静态内容即可）'}\n\n只输出本页的**功能界面** HTML（列表/表单/按钮，不是介绍页）。` },
+        { role: 'user', content: `## 应用\n${appName}\n## 本页\n${brief}\n## 数据模型\n${dataModel || '（无，本页用静态内容即可）'}${designBlock}\n\n只输出本页的**功能界面** HTML（列表/表单/按钮，不是介绍页）。` },
       ],
       { temperature: 0.3, maxTokens: 8192, timeoutMs: 180_000 },
     );
