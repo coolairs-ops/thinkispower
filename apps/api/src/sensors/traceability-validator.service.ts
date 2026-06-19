@@ -167,6 +167,18 @@ export class TraceabilityValidator {
       criteria.push(...prd.pages.map((p: string) => `页面: ${p}`));
     }
 
-    return criteria;
+    // 去重：同一需求常从多个源重复收集（如"多用户权限"既在 features 又在 prd.mvpScope），
+    // 否则 LLM 会逐条重复评测、产出"重复需求X，已验证"的虚胖条目、白烧预算。
+    // 按"剥掉 页面:/功能:/MVP: 前缀后的内容"为 key 去重，保留首次出现（含其分类标签）。
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const c of criteria) {
+      const key = c.replace(/^(页面|功能|MVP|需求|场景)[:：]\s*/u, '').trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        deduped.push(c);
+      }
+    }
+    return deduped;
   }
 }
