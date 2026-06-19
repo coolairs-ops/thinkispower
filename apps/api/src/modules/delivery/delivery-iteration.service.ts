@@ -436,6 +436,14 @@ export class DeliveryIterationService {
       .filter((r): r is string => r !== null && r.length > 0);
   }
 
+  /**
+   * 供守护分级修复复用：对给定建议做一次定向修复，返回新 HTML 或 null（不持久化）。
+   * 复用 autoFix（含防退化护栏 + 按模块/整块修复）。
+   */
+  async runTargetedFix(projectId: string, recommendations: string[]): Promise<string | null> {
+    return this.autoFix(projectId, recommendations);
+  }
+
   private async autoFix(projectId: string, recommendations: string[]): Promise<string | null> {
     if (recommendations.length === 0) return null;
 

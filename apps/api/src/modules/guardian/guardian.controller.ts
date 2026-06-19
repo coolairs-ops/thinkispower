@@ -18,4 +18,20 @@ export class GuardianController {
   async check(@Req() req: any, @Param('projectId') projectId: string) {
     return this.guardian.manualCheck(req.user.id, projectId);
   }
+
+  /** 分级修复记录列表 */
+  @Get('remediations')
+  async remediations(@Req() req: any, @Param('projectId') projectId: string) {
+    return this.guardian.listRemediations(req.user.id, projectId);
+  }
+
+  /** 人工触发应用一条修复（建议/确认级）：快照→修复→重验→劣化回滚 */
+  @Post('remediations/:remediationId/apply')
+  async applyRemediation(
+    @Req() req: any,
+    @Param('projectId') projectId: string,
+    @Param('remediationId') remediationId: string,
+  ) {
+    return this.guardian.applyRemediation(req.user.id, projectId, remediationId);
+  }
 }

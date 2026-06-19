@@ -114,6 +114,7 @@ model Project {
   testDeployments           TestDeployment[]
   importBatches             ImportBatch[]
   guardianChecks            GuardianCheck[]
+  guardianRemediations      GuardianRemediation[]
 
   @@index([userId])
   @@index([orgId])
@@ -146,6 +147,32 @@ model GuardianCheck {
 
   @@index([projectId, checkedAt])
   @@map("guardian_checks")
+}
+
+/**
+ * 守护分级修复记录（Phase 2）。
+ * 巡检发现问题后，按风险分四级：alert 提醒 / suggest 建议修复 / confirm 确认修复 / auto 低风险自动修复。
+ * 每条修复都带：影响范围(impactScope)、验证结果(verifyResult 修复前后健康分)、回滚点(rollbackPointId)。
+ */
+model GuardianRemediation {
+  id              String    @id @default(uuid()) @db.Uuid
+  projectId       String    @map("project_id") @db.Uuid
+  orgId           String?   @map("org_id") @db.Uuid
+  checkId         String?   @map("check_id") @db.Uuid // 触发它的巡检记录
+  level           String    // alert | suggest | confirm | auto
+  issue           String    // 问题描述（如未通过场景）
+  proposedAction  String?   @map("proposed_action") // 拟修复动作
+  status          String    @default("pending") // pending | applied | skipped | rolled_back | failed
+  impactScope     Json?     @map("impact_scope")  // 影响范围（模块/资源/文件）
+  verifyResult    Json?     @map("verify_result") // 验证结果（修复前后健康分等）
+  rollbackPointId String?   @map("rollback_point_id") @db.Uuid // 回滚点（DemoSnapshot id）
+  createdAt       DateTime  @default(now()) @map("created_at")
+  resolvedAt      DateTime? @map("resolved_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@map("guardian_remediations")
 }
 
 // ============ 项目消息 ============

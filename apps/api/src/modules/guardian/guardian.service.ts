@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AcceptanceVerificationService, AcceptanceReport } from '../delivery/acceptance-verification.service';
+import { GuardianRemediationService } from './guardian-remediation.service';
 import { GUARDIAN_QUEUE, GUARDIAN_SWEEP_JOB, GUARDIAN_CHECK_JOB } from './guardian.queue';
 
 const HEALTHY_MIN = 90;
@@ -22,6 +23,7 @@ export class GuardianService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private acceptance: AcceptanceVerificationService,
+    private remediation: GuardianRemediationService,
     private config: ConfigService,
     @InjectQueue(GUARDIAN_QUEUE) private queue: Queue,
   ) {}
@@ -74,7 +76,48 @@ export class GuardianService implements OnModuleInit {
     }
 
     const { healthScore, status } = report ? this.computeHealth(report) : { healthScore: 0, status: 'unknown' };
-    return this.record(project, trigger, healthScore, status, report);
+    const check = await this.record(project, trigger, healthScore, status, report);
+
+    // 分级修复：按风险定级并留痕（pending）；auto 级当场自动应用（带快照/重验/回滚兜底），
+    // 其余级别等人工触发。失败不影响巡检落库。
+    try {
+      const planned = await this.remediation.planFromCheck({
+        projectId: project.id,
+        orgId: project.orgId,
+        checkId: check.id,
+        status,
+        healthScore,
+        report,
+      });
+      if (planned?.level === 'auto') {
+        await this.remediation.apply(planned.id);
+      }
+    } catch (e) {
+      this.logger.warn(`Guardian 分级修复失败 ${projectId}: ${e}`);
+    }
+
+    return check;
+  }
+
+  /** 列出某项目的分级修复记录（ownership 校验） */
+  async listRemediations(userId: string, projectId: string) {
+    await this.assertOwner(userId, projectId);
+    return this.remediation.list(projectId);
+  }
+
+  /** 人工触发应用一条修复（建议/确认级）（ownership 校验） */
+  async applyRemediation(userId: string, projectId: string, remediationId: string) {
+    await this.assertOwner(userId, projectId);
+    return this.remediation.apply(remediationId);
+  }
+
+  private async assertOwner(userId: string, projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { userId: true },
+    });
+    if (!project) throw new NotFoundException('项目不存在');
+    if (project.userId !== userId) throw new ForbiddenException('无权访问');
   }
 
   /** 健康分：有验收场景 → 通过率(0.7)+传感器分(0.3)；否则退到传感器分；都无 → unknown */

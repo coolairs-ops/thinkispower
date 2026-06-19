@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { GuardianController } from './guardian.controller';
 import { GuardianService } from './guardian.service';
+import { GuardianRemediationService } from './guardian-remediation.service';
 import { GuardianProcessor } from './guardian.processor';
 import { GUARDIAN_QUEUE } from './guardian.queue';
 import { DeliveryModule } from '../delivery/delivery.module';
@@ -13,7 +14,7 @@ import { DeliveryModule } from '../delivery/delivery.module';
 @Module({
   imports: [DeliveryModule, BullModule.registerQueue({ name: GUARDIAN_QUEUE })],
   controllers: [GuardianController],
-  providers: [GuardianService, GuardianProcessor],
-  exports: [GuardianService],
+  providers: [GuardianService, GuardianRemediationService, GuardianProcessor],
+  exports: [GuardianService, GuardianRemediationService],
 })
 export class GuardianModule {}
