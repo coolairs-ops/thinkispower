@@ -31,7 +31,8 @@ describe('GuardianService', () => {
     queue = { add: jest.fn().mockResolvedValue(undefined) };
     const config = { get: (_: string, d?: any) => d } as any;
     const remediation = { planFromCheck: jest.fn().mockResolvedValue(null) } as any;
-    service = new GuardianService(prisma, acceptance as any, remediation, config, queue as any);
+    const report = { monthly: jest.fn() } as any;
+    service = new GuardianService(prisma, acceptance as any, remediation, report, config, queue as any);
   });
 
   describe('computeHealth', () => {

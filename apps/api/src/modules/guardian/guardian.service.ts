@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AcceptanceVerificationService, AcceptanceReport } from '../delivery/acceptance-verification.service';
 import { GuardianRemediationService } from './guardian-remediation.service';
+import { GuardianReportService } from './guardian-report.service';
 import { GUARDIAN_QUEUE, GUARDIAN_SWEEP_JOB, GUARDIAN_CHECK_JOB } from './guardian.queue';
 
 const HEALTHY_MIN = 90;
@@ -24,6 +25,7 @@ export class GuardianService implements OnModuleInit {
     private prisma: PrismaService,
     private acceptance: AcceptanceVerificationService,
     private remediation: GuardianRemediationService,
+    private report: GuardianReportService,
     private config: ConfigService,
     @InjectQueue(GUARDIAN_QUEUE) private queue: Queue,
   ) {}
@@ -109,6 +111,12 @@ export class GuardianService implements OnModuleInit {
   async applyRemediation(userId: string, projectId: string, remediationId: string) {
     await this.assertOwner(userId, projectId);
     return this.remediation.apply(remediationId);
+  }
+
+  /** 月度健康报告（ownership 校验）。month 形如 YYYY-MM */
+  async monthlyReport(userId: string, projectId: string, month: string) {
+    await this.assertOwner(userId, projectId);
+    return this.report.monthly(projectId, month);
   }
 
   private async assertOwner(userId: string, projectId: string) {
