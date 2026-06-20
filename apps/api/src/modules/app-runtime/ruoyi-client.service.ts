@@ -71,6 +71,84 @@ export class RuoyiClient {
     return files;
   }
 
+  /**
+   * 下载生成代码 zip（download 端点，返回二进制）。
+   * 与 preview 不同：zip 内是**正确的若依工程相对路径**（main/java/.../Xxx.java、main/resources/mapper/...），
+   * 部署驱动据此落盘，无需手工映射模板名→路径。
+   */
+  async downloadZip(cfg: RuoyiClientConfig, token: string, tableId: number): Promise<Buffer> {
+    const res = await fetch(`${cfg.baseUrl}/tool/gen/download/${tableId}`, {
+      method: 'GET',
+      headers: this.headers(token, cfg),
+    });
+    if (!res.ok) throw new Error(`download 失败: tableId=${tableId} HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0) throw new Error(`download 空 zip: tableId=${tableId}`);
+    return buf;
+  }
+
+  /** 导表并下载 zip（部署驱动用）：登录→importTable→findTableId→downloadZip。 */
+  async importAndDownload(cfg: RuoyiClientConfig, tableName: string): Promise<Buffer> {
+    const token = await this.login(cfg);
+    await this.importTable(cfg, token, tableName);
+    const tableId = await this.findTableId(cfg, token, tableName);
+    return this.downloadZip(cfg, token, tableId);
+  }
+
+  // ─── RBAC 运行时配（混合管线：角色/数据权限走运行时 SQL，零重编译，见 ADR-0003 §4）───
+
+  /** 已存在角色的 roleKey 集合（幂等 seed 用，避免重复建）。 */
+  async listRoleKeys(cfg: RuoyiClientConfig, token: string): Promise<Set<string>> {
+    const data = await this.get(cfg, `/system/role/list?pageNum=1&pageSize=200`, token);
+    const rows = (data?.rows ?? data?.data?.rows ?? []) as Array<{ roleKey: string }>;
+    return new Set(rows.map((r) => r.roleKey).filter(Boolean));
+  }
+
+  /**
+   * 建角色（sys_role），核心是 dataScope 数据权限：'1'全部 / '5'仅本人（demo 修不出、若依开箱即有那块）。
+   * menuIds 留空＝不挂菜单权限（超管不受限；普通角色的菜单挂载随 codegen 菜单 seed 后另配）。
+   */
+  async createRole(
+    cfg: RuoyiClientConfig,
+    token: string,
+    role: { roleName: string; roleKey: string; dataScope: string; roleSort?: number; menuIds?: number[] },
+  ): Promise<void> {
+    const body = {
+      roleName: role.roleName,
+      roleKey: role.roleKey,
+      roleSort: role.roleSort ?? 1,
+      dataScope: role.dataScope,
+      status: '0',
+      menuCheckStrictly: true,
+      deptCheckStrictly: true,
+      menuIds: role.menuIds ?? [],
+      deptIds: [],
+    };
+    const data = await this.post(cfg, '/system/role', body, token);
+    if (data?.code !== 200) throw new Error(`createRole 失败(${role.roleKey}): ${JSON.stringify(data).slice(0, 200)}`);
+  }
+
+  /** 幂等 seed 一批角色：已存在 roleKey 跳过。返回新建数。 */
+  async seedRoles(
+    cfg: RuoyiClientConfig,
+    roles: Array<{ roleName: string; roleKey: string; dataScope: string; roleSort?: number }>,
+  ): Promise<{ created: number; skipped: number }> {
+    const token = await this.login(cfg);
+    const existing = await this.listRoleKeys(cfg, token);
+    let created = 0;
+    let skipped = 0;
+    for (const r of roles) {
+      if (existing.has(r.roleKey)) {
+        skipped++;
+        continue;
+      }
+      await this.createRole(cfg, token, r);
+      created++;
+    }
+    this.logger.log(`若依 RBAC seed: 新建 ${created} 角色 / 跳过 ${skipped}（已存在）`);
+    return { created, skipped };
+  }
+
   // ─── HTTP ───
   private headers(token?: string, cfg?: RuoyiClientConfig): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };

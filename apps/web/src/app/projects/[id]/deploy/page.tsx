@@ -61,6 +61,45 @@ export default function TestDeployPage() {
   const [message, setMessage] = useState('');
   const [showPass, setShowPass] = useState(false);
 
+  // 若依真后端：enabled=平台是否接了若依实例；be=项目当前后端 {kind,status,resources}
+  const [ruoyi, setRuoyi] = useState<{ enabled: boolean; be: any } | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const ruoyiPollRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fetchRuoyi = useCallback(async () => {
+    if (!token || authLoading) return;
+    try {
+      const r = await api.get(`/api/projects/${projectId}/ruoyi`);
+      setRuoyi({ enabled: r.enabled, be: r.backendRuntime });
+    } catch { /* 未接若依实例时端点可能 400/404，静默 */ }
+  }, [token, authLoading, projectId]);
+
+  useEffect(() => { fetchRuoyi(); }, [fetchRuoyi]);
+
+  // 置备中轮询若依状态
+  useEffect(() => {
+    if (ruoyi?.be?.status === 'provisioning') {
+      ruoyiPollRef.current = setInterval(fetchRuoyi, 5000);
+      return () => { if (ruoyiPollRef.current) clearInterval(ruoyiPollRef.current); };
+    }
+    if (ruoyiPollRef.current) { clearInterval(ruoyiPollRef.current); ruoyiPollRef.current = null; }
+  }, [ruoyi?.be?.status, fetchRuoyi]);
+
+  const handleProvisionRuoyi = async () => {
+    if (!confirm('用若依做真后端：平台将据本项目数据模型自动建表、生成 RBAC/数据权限的真后端（约需几分钟编译重启）。继续？')) return;
+    setProvisioning(true);
+    setMessage('');
+    try {
+      const r = await api.post(`/api/projects/${projectId}/ruoyi/provision`);
+      setRuoyi((p) => ({ enabled: true, be: { kind: 'ruoyi', status: 'provisioning', resources: r.entities } }));
+      setMessage(`已开始用若依做真后端（${(r.entities || []).join('、')}），后台置备中…`);
+    } catch (e: any) {
+      setMessage('启动失败: ' + (e?.message || ''));
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
   const fetchStatus = useCallback(async () => {
     if (!token || authLoading) return;
     try {
@@ -178,6 +217,47 @@ export default function TestDeployPage() {
         {message && (
           <div className={`mb-4 p-3 rounded-lg text-sm ${message.includes('失败') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
             {message}
+          </div>
+        )}
+
+        {/* 真后端：若依 */}
+        {ruoyi?.enabled && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">真后端（若依）</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  把演示升级为带 RBAC、数据权限、级联的真后端；升级后预览/部署自动显示真数据。
+                </p>
+              </div>
+              <div className="shrink-0">
+                {ruoyi.be?.kind === 'ruoyi' && ruoyi.be?.status === 'ready' ? (
+                  <span className="text-xs px-2.5 py-1 rounded-full font-medium text-green-700 bg-green-50">✅ 若依真后端已就绪</span>
+                ) : ruoyi.be?.status === 'provisioning' ? (
+                  <span className="text-xs px-2.5 py-1 rounded-full font-medium text-amber-700 bg-amber-50 animate-pulse">🔄 正在构建真后端…</span>
+                ) : (
+                  <button
+                    onClick={handleProvisionRuoyi}
+                    disabled={provisioning}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
+                  >
+                    {provisioning ? '启动中...' : '用若依做真后端'}
+                  </button>
+                )}
+              </div>
+            </div>
+            {ruoyi.be?.status === 'provisioning' && (
+              <p className="mt-3 text-xs text-amber-600">后台建表→生成代码→编译→重启中，约需几分钟，可离开本页，完成后预览自动切真数据。</p>
+            )}
+            {ruoyi.be?.kind === 'ruoyi' && ruoyi.be?.status === 'ready' && Array.isArray(ruoyi.be?.resources) && (
+              <p className="mt-3 text-xs text-gray-500">真后端资源：{ruoyi.be.resources.join('、')}　·　<button onClick={() => router.push(`/projects/${projectId}/demo`)} className="text-indigo-600 hover:underline">去预览看真数据</button></p>
+            )}
+            {ruoyi.be?.status === 'error' && (
+              <div className="mt-3">
+                <p className="text-xs text-red-600 font-mono">{ruoyi.be?.error || '构建失败'}</p>
+                <button onClick={handleProvisionRuoyi} disabled={provisioning} className="mt-2 px-3 py-1.5 border border-indigo-300 text-indigo-600 rounded-lg hover:bg-indigo-50 text-xs">重试</button>
+              </div>
+            )}
           </div>
         )}
 

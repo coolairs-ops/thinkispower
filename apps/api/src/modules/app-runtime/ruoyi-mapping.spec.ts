@@ -88,8 +88,8 @@ describe('ruoyi-mapping（IR → 若依 codegen 输入 · M2）', () => {
       expect(out.store['controller.java.vm']).toBe('class X{}');
     });
 
-    it('provision/health/teardown 诚实抛 M3c 待实现（不假装能跑）', async () => {
-      await expect(svc.provision('p1', 'model X{}')).rejects.toThrow('M3c');
+    it('窄签名 provision 抛错指向 provisionApp；health/teardown 诚实抛 M3c 待实现', async () => {
+      await expect(svc.provision('p1', 'model X{}')).rejects.toThrow('provisionApp');
       await expect(svc.health('p1', {} as any)).rejects.toThrow('M3c');
       await expect(svc.teardown('p1', {} as any)).rejects.toThrow('M3c');
     });
