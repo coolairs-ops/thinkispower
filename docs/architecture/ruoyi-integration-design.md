@@ -53,10 +53,27 @@ AppSpec {
 - **SaaS·多租户单实例**：在共享若依里 `sys_tenant` 建租户 → 租户内跑实体 codegen → seed 配置。轻，共享。
 > 两路径共用「IR→若依映射」与「运行时配 RBAC」，只在"实例从哪来/租户隔离"分叉。
 
-## 4. 待实例核实（M1 的目标）❓
-1. **codegen 自动化路径**：若依 codegen 正常是 UI（导入表→配置→生成→下载/写盘）。自动化候选：① 直接 insert `gen_table`/`gen_table_column` + 调其 `/tool/gen/genCode` 接口；② 直接用其 Velocity 模板引擎离线产码。**起实例跑通一遍手动 codegen，看真实 gen_table 结构与产物。**
-2. **产码是否必重编译**：RuoYi-Vue-Plus codegen 产 Java 源码→需 build。确认有无任何运行时动态表/在线表单能力可减重编译（影响"混合"里 codegen 的占比）。
-3. gen_table 各字段（queryType/htmlType/dictType 等）的确切枚举值。
+## 4. 关键事实（2026-06-20 已据源码核实，非推断）✅
+> 读 RuoYi-Vue-Plus 源码 `ruoyi-modules/ruoyi-generator` 得，未起实例：
+1. **codegen 自动化 = REST API**（`GenController` `/tool/gen/*`）：
+   - `POST /importTable?tables=&dataName=` 从**已存在的 DB 表**反射列 → 落 `gen_table`/`gen_table_column`。
+   - `PUT /tool/gen`（editSave）改字段配置（javaType/isList/isQuery/htmlType/queryType/dictType…）。
+   - `GET /preview/{tableId}` → **返回 `Map<文件名,代码>`（内存，不落盘）** ← 自动化可直接拿产码。
+   - `GET /download/{tableId}` / `batchGenCode` → zip。
+   → **provision 流程**：据 ParsedModel **先建实体表** → importTable → (editSave 配字段) → preview 取码。
+2. **产码必重编译 = 是**（base RuoYi-Vue-Plus **无运行时动态表/在线表单**，grep online/动态表单 0 命中）。codegen 产 `.java/.vue/.ts/.xml` 源码 → 必须塞进若依工程 **Maven build + 重部署**才跑得起。
+   - **但** 菜单/按钮权限是 `sys_menu` 的 SQL insert（模板 `sql.vm`，menu_type C菜单/F按钮+perms），角色=`sys_role`、字典=`sys_dict`、**数据权限=`sys_role.data_scope`**——全是 sys_* 表数据、**运行时 SQL 可配、零重编译**。
+   - ⇒ **强化"混合"决策**：只有**实体 CRUD（Java/Vue 源码）背负一次 build**；RBAC/菜单/字典/数据权限全运行时配。每个生成 App（或实体模型变更）= 一次 Java build+deploy（分钟级）——这是最重的一环，也是与路 B「运行时通用 CRUD、零 build」的根本差异。
+3. **gen_table_column 元数据**（16 字段）已确认：columnName/columnComment/columnType/javaType/javaField/isPk/isIncrement/isRequired/isInsert/isEdit/isList/isQuery/queryType(EQ/NE/GT/LT/LIKE/BETWEEN)/htmlType(input/textarea/select/checkbox/radio/datetime/image/upload/editor)/dictType/sort。§2.1 映射表据此成立。
+4. **docker-compose 现成**：`script/docker/docker-compose.yml`（MySQL/Redis/Nginx），起实例端到端验证用。
+
+### M3 端到端已实测（2026-06-20，真·运行的 RuoYi-Vue-Plus）✅
+- **起实例**：maven 容器从源码构建 `ruoyi-admin.jar`(163MB fat jar，首次含依赖下载，分钟级) → eclipse-temurin:17-jre 跑 jar + MySQL8 + Redis(同 docker 网络，容器名互连)。
+- **跑通 codegen**：登录拿 JWT → `POST /tool/gen/importTable?tables=demo_store&dataName=master` → `GET /tool/gen/list` 取 tableId → `GET /tool/gen/preview/{tableId}` → **返回 12 个文件**：domain/vo/bo/mapper/service/serviceImpl/**controller**(Java) + mapper.xml + **sql(菜单)** + api.ts/types.ts + **index.vue**。controller 是完整 RuoYi CRUD（SaCheckPermission/分页/Excel）。**证实：实体 → 完整可跑 CRUD 源码。**
+- **起实例踩的坑（M3b/provision 自动化要处理）**：① host 连容器要用 `127.0.0.1` 不能 `localhost`(IPv6) ② Redis 必须配密码(dev 默认 `ruoyi123`，Redisson 发 AUTH) ③ 多租户登录要 `clientId`(sys_client，PC=`e5cd7e4891bf95d1d19206ce24a7b32e`) ④ **默认开**验证码(`captcha.enable`)+**全局接口加密**(`api-decrypt.enabled`，login 体 RSA/AES)——自动化要么关、要么 RuoyiRuntime 实现 RSA 握手 ⑤ snail-job 客户端连不到调度server(8800)会刷 grpc 重连日志，非致命。
+- **未做（M3b）**：把这 12 文件塞回工程 Maven build + 部署起 module（"每 App 一次 build"的真实耗时待量）；`RuoyiRuntime.provision` 接这套真 REST 流程。
+
+> 实例容器：`ruoyi-mysql`/`ruoyi-redis`/`ruoyi-server`(8080) 在 docker 网络 `ruoyi-net`；源码 `D:\ruoyi-study`。启动 jar 需覆盖：`api-decrypt.enabled=false`、`captcha.enable=false`、`spring.data.redis.host/password`、datasource url 的 host→容器名。
 
 ## 5. 落地里程碑
 - **M1 起实例·学 codegen**：Docker 跑 RuoYi-Vue-Plus(MySQL/Redis)，手动 codegen 一个实体，记录输入(gen_table)/输出(产物+菜单SQL)。→ 核实 §4。
