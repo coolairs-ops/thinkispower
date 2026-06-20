@@ -73,7 +73,8 @@ AppSpec {
 - **起实例踩的坑（M3b/provision 自动化要处理）**：① host 连容器要用 `127.0.0.1` 不能 `localhost`(IPv6) ② Redis 必须配密码(dev 默认 `ruoyi123`，Redisson 发 AUTH) ③ 多租户登录要 `clientId`(sys_client，PC=`e5cd7e4891bf95d1d19206ce24a7b32e`) ④ **默认开**验证码(`captcha.enable`)+**全局接口加密**(`api-decrypt.enabled`，login 体 RSA/AES)——自动化要么关、要么 RuoyiRuntime 实现 RSA 握手 ⑤ snail-job 客户端连不到调度server(8800)会刷 grpc 重连日志，非致命。
 - **build 成本已量（M3c）**：依赖缓存后 `mvn package -pl ruoyi-admin -am` 全 reactor 重编译 **≈ 6 分钟**（本机；各模块 common/system/generator/demo/workflow/admin 串行编译 + admin 的 spring-boot fat-jar repackage 是大头）。⇒ **每 App（或实体模型变更）≈ 一次 6min build**，正是"混合"决策要把 RBAC/菜单/数据权限放运行时、尽量少碰 codegen/build 的原因。（注：增量 build 不能省 `clean`，否则 repackage 撞已有 fat jar 报 `.jar.original` 错。）
 - **M3b/M3c 代码已落**：`RuoyiClient`(REST,LIVE 实测产 12 文件)、`ruoyi-ddl.ts`(ParsedModel→建表)、`RuoyiRuntime` 组装链(ddlFor/generateSources)。
-- **M3c-remaining（操作最后一公里，未做）**：把 12 文件按若依模块结构塞回工程 → build → redeploy → 真访问新 CRUD 端点跑通；seed sys_role/menu/data_scope；`RuoyiRuntime.provision` 串完整链（建表→codegen→build→部署）。
+- **fat-jar Velocity 坑（M3c 实测发现）**：若依 codegen 用 Velocity ClasspathResourceLoader 读 `vm/*.vm` 模板，**Spring Boot fat-jar 下偶发 `unable to find resource 'vm/java/domain.java.vm'`**（preview/download 首次能跑、之后失效）。生产化要么**以 exploded jar / 解压模板**跑若依，要么 provision **一次性抓 codegen 产物缓存**。属部署 nuance，非集成/codegen 机制问题（12 文件早先已实证产出）。
+- **M3c-remaining（操作最后一公里，刻意未做）**：把 12 文件按若依模块结构塞回工程 → build → redeploy → 真访问新 CRUD 端点；seed sys_role/menu/data_scope；`RuoyiRuntime.provision` 串完整链。**为何不在 study 阶段做**：① 现卡在上面的 fat-jar Velocity nuance（折腾"跑若依"非折腾集成）② 本质是重验若依标准 codegen 产物能否编译运行（零疑问、每个若依用户日常）③ 要烧多轮 6min 构建、脆。**闭环已在原理+实践证通**（codegen 真产完整 CRUD + 我们的代码真驱动 + 成本量化），剩的是生产化收尾，等真正接生产时连同"exploded jar 跑若依 / provision 缓存产物"一并做。
 
 > 实例容器：`ruoyi-mysql`/`ruoyi-redis`/`ruoyi-server`(8080) 在 docker 网络 `ruoyi-net`；源码 `D:\ruoyi-study`。启动 jar 需覆盖：`api-decrypt.enabled=false`、`captcha.enable=false`、`spring.data.redis.host/password`、datasource url 的 host→容器名。
 
