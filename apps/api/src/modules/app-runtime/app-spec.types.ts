@@ -26,6 +26,17 @@ export interface AppMenu {
   entity?: string;
 }
 
+/** 实体关系（来自 relation-completion，回写在 structuredRequirement.relations）。
+ *  parent/child 用实体名或表名（ruoyi-relations 按 name/table 忽略大小写匹配）。 */
+export interface AppRelation {
+  parent: string;
+  child: string;
+  cardinality: string; // '1-N' | '1-1' | 'N-N' | 'none'
+  fkField?: string; // child 上的外键，如 storeId
+  required?: boolean;
+  onDelete?: string; // cascade | setNull | restrict
+}
+
 export interface AppSpec {
   /** 实体模型（LLM 产 Prisma → ParsedModel），喂若依 codegen */
   entities: ParsedModel[];
@@ -33,4 +44,6 @@ export interface AppSpec {
   roles: AppRole[];
   /** 页面菜单，运行时配进 sys_menu */
   menus: AppMenu[];
+  /** 实体关系（1—N 主子表）：补外键列 + 父表 sub-table codegen 配置 */
+  relations?: AppRelation[];
 }

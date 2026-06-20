@@ -3,6 +3,7 @@ import { BackendRuntime, BackendRuntimeDescriptor, BackendHealth, ProvisionResul
 import { AppSpec } from './app-spec.types';
 import { RuoyiGenTable, toRuoyiGenTable } from './ruoyi-mapping';
 import { toMysqlCreateTable } from './ruoyi-ddl';
+import { ensureFkColumns, genTableMeta, RuoyiGenTableMeta } from './ruoyi-relations';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
 
 /**
@@ -21,14 +22,20 @@ export class RuoyiRuntime implements BackendRuntime {
 
   constructor(private readonly client: RuoyiClient) {}
 
-  /** 实体 → 若依 codegen 输入（gen_table_column）。 */
+  /** 实体 → 若依 codegen 输入（gen_table_column）。含关系时子表补外键列。 */
   buildGenTables(spec: AppSpec): RuoyiGenTable[] {
-    return spec.entities.map((e) => toRuoyiGenTable(e));
+    return ensureFkColumns(spec.entities, spec.relations).map((e) => toRuoyiGenTable(e));
   }
 
-  /** 实体 → MySQL 建表 DDL（importTable 前置：若依从已存在的表反射列）。 */
+  /** 实体 → MySQL 建表 DDL（importTable 前置）。含关系时 child 表带外键列。 */
   ddlFor(spec: AppSpec): string[] {
-    return spec.entities.map((e) => toMysqlCreateTable(e));
+    return ensureFkColumns(spec.entities, spec.relations).map((e) => toMysqlCreateTable(e));
+  }
+
+  /** 每个实体的若依 gen_table 模板配置（1—N 父表→主子表 sub，否则 crud）。供 editSave 推给若依。 */
+  genTableMetas(spec: AppSpec): Array<{ table: string } & RuoyiGenTableMeta> {
+    const withFk = ensureFkColumns(spec.entities, spec.relations);
+    return withFk.map((e) => ({ table: e.table, ...genTableMeta(e, withFk, spec.relations ?? []) }));
   }
 
   /** 经 RuoyiClient 驱动真若依 codegen，按实体取源码：{ 表名: { 文件: 代码 } }。 */
