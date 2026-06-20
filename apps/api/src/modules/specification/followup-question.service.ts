@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RequirementCompletionService } from './requirement-completion.service';
 import { RelationCompletionService } from './relation-completion.service';
+import { BusinessRuleCompletionService } from './business-rule-completion.service';
 
 /**
  * 追加问答合批（relationship-completion-design.md §7 + 问答窗口时机建议）。
@@ -12,13 +13,14 @@ import { RelationCompletionService } from './relation-completion.service';
  */
 export interface FollowUpQuestion {
   id: string;
-  group: 'requirement' | 'relation';
-  kind: string; // gap kind / 'cardinality' | 'onDelete'
+  group: 'requirement' | 'relation' | 'businessRule';
+  kind: string; // gap kind / 'cardinality' | 'onDelete' / 'rule'
   title: string; // 上下文标签（问的是什么）
   question: string;
   options: { label: string; value: string }[];
   missing?: string; // requirement gap 的 missing（供前端组 acceptGaps）
   relationKey?: string; // 关系的 `parent->child`（供前端组 relations 答案）
+  ruleName?: string; // 业务规则名（供前端组 businessRules 答案）
 }
 
 @Injectable()
@@ -28,13 +30,15 @@ export class FollowUpQuestionService {
   constructor(
     private req: RequirementCompletionService,
     private rel: RelationCompletionService,
+    private biz: BusinessRuleCompletionService,
   ) {}
 
-  /** 合批取追加问答：D 的 ask 缺口 + 关系 ask 候选 → 统一问题列表。无 ask 项 → 空（前端不弹窗）。 */
+  /** 合批取追加问答：D 的 ask 缺口 + 关系 ask + 业务规则 ask → 统一问题列表。无 ask 项 → 空（前端不弹窗）。 */
   async getQuestions(userId: string, projectId: string): Promise<{ questions: FollowUpQuestion[] }> {
-    const [{ gaps }, { candidates }] = await Promise.all([
+    const [{ gaps }, { candidates }, { candidates: ruleCands }] = await Promise.all([
       this.req.get(userId, projectId),
       this.rel.get(userId, projectId),
+      this.biz.get(userId, projectId),
     ]);
     const questions: FollowUpQuestion[] = [];
 
@@ -68,6 +72,20 @@ export class FollowUpQuestionService {
       }
     }
 
+    for (const c of ruleCands) {
+      if (c.disposition === 'ask' && c.question && (c.options?.length ?? 0) > 0) {
+        questions.push({
+          id: `rule:${c.name}`,
+          group: 'businessRule',
+          kind: 'rule',
+          title: c.name,
+          question: c.question,
+          options: c.options ?? [],
+          ruleName: c.name,
+        });
+      }
+    }
+
     return { questions };
   }
 
@@ -79,11 +97,18 @@ export class FollowUpQuestionService {
   async submit(
     userId: string,
     projectId: string,
-    body: { relations?: Record<string, { cardinality?: string; onDelete?: string; required?: boolean }>; acceptGaps?: string[] },
-  ): Promise<{ relations: unknown; requirement: unknown }> {
+    body: {
+      relations?: Record<string, { cardinality?: string; onDelete?: string; required?: boolean }>;
+      acceptGaps?: string[];
+      businessRules?: Record<string, string>;
+    },
+  ): Promise<{ relations: unknown; requirement: unknown; businessRules: unknown }> {
     const rel = await this.rel.apply(userId, projectId, body.relations ?? {});
     const req = await this.req.apply(userId, projectId, body.acceptGaps ?? []);
-    this.logger.log(`追加问答提交 ${projectId}: 关系 ${rel.relations.length} 条 / 采纳缺口 ${(body.acceptGaps ?? []).length} 个`);
-    return { relations: rel.relations, requirement: req };
+    const biz = await this.biz.apply(userId, projectId, body.businessRules ?? {});
+    this.logger.log(
+      `追加问答提交 ${projectId}: 关系 ${rel.relations.length} / 采纳缺口 ${(body.acceptGaps ?? []).length} / 业务规则 ${biz.rules.length}`,
+    );
+    return { relations: rel.relations, requirement: req, businessRules: biz.rules };
   }
 }

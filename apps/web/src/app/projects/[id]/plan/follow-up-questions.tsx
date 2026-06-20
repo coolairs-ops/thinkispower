@@ -6,13 +6,14 @@ import { api } from '@/lib/api';
 /** 追加问答窗口：D 的 ask 缺口 + 关系 ask 候选合批，一窗答完（消费 .../requirement/followup）。 */
 interface Question {
   id: string;
-  group: 'requirement' | 'relation';
+  group: 'requirement' | 'relation' | 'businessRule';
   kind: string;
   title: string;
   question: string;
   options: { label: string; value: string }[];
   missing?: string;
   relationKey?: string;
+  ruleName?: string;
 }
 
 // 否定型答案 → 不采纳该需求缺口
@@ -53,6 +54,7 @@ export default function FollowUpQuestions({
   if (!enabled || loading || questions.length === 0) return null;
 
   const reqQs = questions.filter((q) => q.group === 'requirement');
+  const bizQs = questions.filter((q) => q.group === 'businessRule');
   const relGroups = groupBy(
     questions.filter((q) => q.group === 'relation'),
     (q) => q.relationKey || q.title,
@@ -74,10 +76,15 @@ export default function FollowUpQuestions({
       .filter((q) => answers[q.id] && !NEGATIVE.test(answers[q.id]))
       .map((q) => q.missing!)
       .filter(Boolean);
+    const businessRules: Record<string, string> = {};
+    for (const q of bizQs) {
+      if (q.ruleName && answers[q.id]) businessRules[q.ruleName] = answers[q.id];
+    }
     try {
-      const r: any = await api.post(`/api/projects/${projectId}/requirement/followup`, { relations, acceptGaps });
+      const r: any = await api.post(`/api/projects/${projectId}/requirement/followup`, { relations, acceptGaps, businessRules });
       const relCount = (r?.relations || []).length;
-      setDone(`✓ 已保存：确认 ${relCount} 条实体关系、采纳 ${acceptGaps.length} 项需求`);
+      const ruleCount = (r?.businessRules || []).length;
+      setDone(`✓ 已保存：确认 ${relCount} 条实体关系、${ruleCount} 条业务规则、采纳 ${acceptGaps.length} 项需求`);
       onDone?.();
     } catch {
       setDone('保存失败，可重试');
@@ -132,6 +139,13 @@ export default function FollowUpQuestions({
             <div className="space-y-2">{qs.map(renderQuestion)}</div>
           </section>
         ))}
+
+        {bizQs.length > 0 && (
+          <section>
+            <h4 className="text-xs font-semibold text-gray-500 mb-2">业务规则</h4>
+            <div className="space-y-2">{bizQs.map(renderQuestion)}</div>
+          </section>
+        )}
 
         <div className="flex items-center justify-between pt-2 border-t border-amber-100">
           <span className="text-xs text-amber-600">{done || `已答 ${answered}/${total}`}</span>

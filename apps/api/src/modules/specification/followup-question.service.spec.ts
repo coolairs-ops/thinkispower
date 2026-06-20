@@ -3,12 +3,14 @@ import { FollowUpQuestionService } from './followup-question.service';
 describe('FollowUpQuestionService（追加问答合批）', () => {
   let req: { get: jest.Mock; apply: jest.Mock };
   let rel: { get: jest.Mock; apply: jest.Mock };
+  let biz: { get: jest.Mock; apply: jest.Mock };
   let svc: FollowUpQuestionService;
 
   beforeEach(() => {
-    req = { get: jest.fn(), apply: jest.fn() };
-    rel = { get: jest.fn(), apply: jest.fn() };
-    svc = new FollowUpQuestionService(req as never, rel as never);
+    req = { get: jest.fn().mockResolvedValue({ gaps: [] }), apply: jest.fn().mockResolvedValue({}) };
+    rel = { get: jest.fn().mockResolvedValue({ candidates: [] }), apply: jest.fn().mockResolvedValue({ relations: [] }) };
+    biz = { get: jest.fn().mockResolvedValue({ candidates: [] }), apply: jest.fn().mockResolvedValue({ rules: [] }) };
+    svc = new FollowUpQuestionService(req as never, rel as never, biz as never);
   });
 
   describe('getQuestions', () => {
@@ -41,6 +43,23 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
       const relQ = questions.filter((q) => q.group === 'relation');
       expect(relQ.map((q) => q.id)).toEqual(['rel:客户->工单:cardinality', 'rel:客户->工单:onDelete']);
       expect(relQ[0].relationKey).toBe('客户->工单');
+    });
+
+    it('业务规则 ask 候选也并进问题列表（group=businessRule）', async () => {
+      biz.get.mockResolvedValue({
+        candidates: [
+          { name: '金额精度', disposition: 'ask', question: '几位小数？', options: [{ label: '2位', value: '保留2位' }] },
+          { name: '路径审批', disposition: 'autofill' }, // 非 ask 不进
+        ],
+      });
+      const { questions } = await svc.getQuestions('u1', 'p1');
+      expect(questions).toHaveLength(1);
+      expect(questions[0]).toMatchObject({ id: 'rule:金额精度', group: 'businessRule', title: '金额精度', ruleName: '金额精度' });
+    });
+
+    it('submit 把 businessRules 答案路由业务规则 apply', async () => {
+      await svc.submit('u1', 'p1', { businessRules: { 金额精度: '保留2位' } });
+      expect(biz.apply).toHaveBeenCalledWith('u1', 'p1', { 金额精度: '保留2位' });
     });
 
     it('无 ask 项 → 空列表（前端据此不弹窗）', async () => {

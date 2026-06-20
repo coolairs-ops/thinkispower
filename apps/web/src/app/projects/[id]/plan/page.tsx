@@ -122,7 +122,13 @@ export default function PlanPage() {
  const handleDesignSaved = async () => {
    setDesignReady(true);
    setDetecting(true);
-   try { await api.post(`/api/projects/${projectId}/requirement/relations/detect`); } catch {}
+   // 基于已采纳的设计，并行检测实体关系 + 业务规则 → 一起进追加问答
+   try {
+     await Promise.all([
+       api.post(`/api/projects/${projectId}/requirement/relations/detect`),
+       api.post(`/api/projects/${projectId}/requirement/business-rules/detect`),
+     ]);
+   } catch {}
    setDetecting(false);
    setRelKey(k => k + 1);
  };
@@ -364,7 +370,7 @@ export default function PlanPage() {
  <DesignSuggestions projectId={projectId} onSaved={handleDesignSaved} />
  {detecting && (
  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
- 正在根据你采纳的设计分析实体关系…
+ 正在根据你采纳的设计分析实体关系与业务规则…
  </div>
  )}
  <FollowUpQuestions projectId={projectId} enabled={designReady} refreshKey={relKey} onDone={() => setActiveTab('plan')} />

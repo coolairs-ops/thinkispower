@@ -14,6 +14,8 @@ import { RequirementCompletionController } from './requirement-completion.contro
 import { RequirementCompletionService } from './requirement-completion.service';
 import { RelationCompletionController } from './relation-completion.controller';
 import { RelationCompletionService } from './relation-completion.service';
+import { BusinessRuleCompletionController } from './business-rule-completion.controller';
+import { BusinessRuleCompletionService } from './business-rule-completion.service';
 import { FollowUpQuestionController } from './followup-question.controller';
 import { FollowUpQuestionService } from './followup-question.service';
 import { SharedCoreModule } from '../../shared/shared-core.module';
@@ -29,6 +31,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     ImprovementController,
     RequirementCompletionController,
     RelationCompletionController,
+    BusinessRuleCompletionController,
     FollowUpQuestionController,
   ],
   providers: [
@@ -39,6 +42,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     IdeaInterviewService,
     RequirementCompletionService,
     RelationCompletionService,
+    BusinessRuleCompletionService,
     FollowUpQuestionService,
   ],
   exports: [SpecificationService],

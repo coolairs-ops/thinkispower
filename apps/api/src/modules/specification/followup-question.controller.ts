@@ -19,7 +19,11 @@ export class FollowUpQuestionController {
   async submit(
     @Req() req: any,
     @Param('projectId') projectId: string,
-    @Body() body: { relations?: Record<string, { cardinality?: string; onDelete?: string; required?: boolean }>; acceptGaps?: string[] },
+    @Body() body: {
+      relations?: Record<string, { cardinality?: string; onDelete?: string; required?: boolean }>;
+      acceptGaps?: string[];
+      businessRules?: Record<string, string>;
+    },
   ) {
     return this.svc.submit(req.user.id, projectId, body ?? {});
   }
