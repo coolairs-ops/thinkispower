@@ -71,7 +71,9 @@ AppSpec {
 - **起实例**：maven 容器从源码构建 `ruoyi-admin.jar`(163MB fat jar，首次含依赖下载，分钟级) → eclipse-temurin:17-jre 跑 jar + MySQL8 + Redis(同 docker 网络，容器名互连)。
 - **跑通 codegen**：登录拿 JWT → `POST /tool/gen/importTable?tables=demo_store&dataName=master` → `GET /tool/gen/list` 取 tableId → `GET /tool/gen/preview/{tableId}` → **返回 12 个文件**：domain/vo/bo/mapper/service/serviceImpl/**controller**(Java) + mapper.xml + **sql(菜单)** + api.ts/types.ts + **index.vue**。controller 是完整 RuoYi CRUD（SaCheckPermission/分页/Excel）。**证实：实体 → 完整可跑 CRUD 源码。**
 - **起实例踩的坑（M3b/provision 自动化要处理）**：① host 连容器要用 `127.0.0.1` 不能 `localhost`(IPv6) ② Redis 必须配密码(dev 默认 `ruoyi123`，Redisson 发 AUTH) ③ 多租户登录要 `clientId`(sys_client，PC=`e5cd7e4891bf95d1d19206ce24a7b32e`) ④ **默认开**验证码(`captcha.enable`)+**全局接口加密**(`api-decrypt.enabled`，login 体 RSA/AES)——自动化要么关、要么 RuoyiRuntime 实现 RSA 握手 ⑤ snail-job 客户端连不到调度server(8800)会刷 grpc 重连日志，非致命。
-- **未做（M3b）**：把这 12 文件塞回工程 Maven build + 部署起 module（"每 App 一次 build"的真实耗时待量）；`RuoyiRuntime.provision` 接这套真 REST 流程。
+- **build 成本已量（M3c）**：依赖缓存后 `mvn package -pl ruoyi-admin -am` 全 reactor 重编译 **≈ 6 分钟**（本机；各模块 common/system/generator/demo/workflow/admin 串行编译 + admin 的 spring-boot fat-jar repackage 是大头）。⇒ **每 App（或实体模型变更）≈ 一次 6min build**，正是"混合"决策要把 RBAC/菜单/数据权限放运行时、尽量少碰 codegen/build 的原因。（注：增量 build 不能省 `clean`，否则 repackage 撞已有 fat jar 报 `.jar.original` 错。）
+- **M3b/M3c 代码已落**：`RuoyiClient`(REST,LIVE 实测产 12 文件)、`ruoyi-ddl.ts`(ParsedModel→建表)、`RuoyiRuntime` 组装链(ddlFor/generateSources)。
+- **M3c-remaining（操作最后一公里，未做）**：把 12 文件按若依模块结构塞回工程 → build → redeploy → 真访问新 CRUD 端点跑通；seed sys_role/menu/data_scope；`RuoyiRuntime.provision` 串完整链（建表→codegen→build→部署）。
 
 > 实例容器：`ruoyi-mysql`/`ruoyi-redis`/`ruoyi-server`(8080) 在 docker 网络 `ruoyi-net`；源码 `D:\ruoyi-study`。启动 jar 需覆盖：`api-decrypt.enabled=false`、`captcha.enable=false`、`spring.data.redis.host/password`、datasource url 的 host→容器名。
 
