@@ -12,6 +12,8 @@ import { TestDeploymentService } from './test-deployment.service';
 import { IdeaInterviewService } from './idea-interview.service';
 import { RequirementCompletionController } from './requirement-completion.controller';
 import { RequirementCompletionService } from './requirement-completion.service';
+import { RelationCompletionController } from './relation-completion.controller';
+import { RelationCompletionService } from './relation-completion.service';
 import { SharedCoreModule } from '../../shared/shared-core.module';
 
 @Module({
@@ -24,6 +26,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     IdeaInterviewController,
     ImprovementController,
     RequirementCompletionController,
+    RelationCompletionController,
   ],
   providers: [
     SpecificationService,
@@ -32,6 +35,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     TestDeploymentService,
     IdeaInterviewService,
     RequirementCompletionService,
+    RelationCompletionService,
   ],
   exports: [SpecificationService],
 })
