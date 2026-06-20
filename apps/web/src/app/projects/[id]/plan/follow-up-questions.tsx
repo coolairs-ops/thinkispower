@@ -22,7 +22,17 @@ function groupBy<T>(arr: T[], key: (t: T) => string): Record<string, T[]> {
   return arr.reduce<Record<string, T[]>>((acc, x) => ((acc[key(x)] = acc[key(x)] || []).push(x), acc), {});
 }
 
-export default function FollowUpQuestions({ projectId, onDone }: { projectId: string; onDone?: () => void }) {
+export default function FollowUpQuestions({
+  projectId,
+  enabled = true,
+  refreshKey = 0,
+  onDone,
+}: {
+  projectId: string;
+  enabled?: boolean; // 仅在「设计已采纳」后开启（关系据已采纳设计推，顺序：设计→关系）
+  refreshKey?: number; // 检测完成后 +1 触发重取
+  onDone?: () => void;
+}) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -30,17 +40,17 @@ export default function FollowUpQuestions({ projectId, onDone }: { projectId: st
   const [done, setDone] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !enabled) return;
     setLoading(true);
     api
       .get(`/api/projects/${projectId}/requirement/followup`)
       .then((r: any) => setQuestions(r?.questions || []))
       .catch(() => setQuestions([]))
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, enabled, refreshKey]);
 
-  // 无 ask 项 → 不弹（设计：检测到模糊的才出现）
-  if (loading || questions.length === 0) return null;
+  // 未开启 / 加载中 / 无 ask 项 → 不渲染（设计：设计采纳后、检测到模糊的才出现）
+  if (!enabled || loading || questions.length === 0) return null;
 
   const reqQs = questions.filter((q) => q.group === 'requirement');
   const relGroups = groupBy(

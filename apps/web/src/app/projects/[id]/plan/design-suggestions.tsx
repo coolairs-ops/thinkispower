@@ -35,7 +35,7 @@ const CATEGORY_ICONS: Record<string, string> = {
   color: '◈',
 };
 
-export default function DesignSuggestions({ projectId }: { projectId: string }) {
+export default function DesignSuggestions({ projectId, onSaved }: { projectId: string; onSaved?: () => void }) {
   const [suggestions, setSuggestions] = useState<DesignSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,6 +78,7 @@ export default function DesignSuggestions({ projectId }: { projectId: string }) 
     try {
       await api.put(`/api/projects/${projectId}/plan/design-suggestions`, { suggestions });
       setSaved(true);
+      onSaved?.(); // 通知父级：设计已采纳保存 → 触发实体关系检测（基于已采纳的设计）
     } catch { }
     setSaving(false);
   };

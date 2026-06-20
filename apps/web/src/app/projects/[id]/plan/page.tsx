@@ -44,6 +44,11 @@ export default function PlanPage() {
  const [editDays, setEditDays] = useState(0);
  const [editPrice, setEditPrice] = useState('');
 
+ // 关系补录：设计采纳后才开启（顺序：设计→关系）。relKey 触发问答重取。
+ const [designReady, setDesignReady] = useState(false);
+ const [relKey, setRelKey] = useState(0);
+ const [detecting, setDetecting] = useState(false);
+
  useEffect(() => {
  if (isLoading) return;
  if (!token) { router.push('/'); return; }
@@ -105,6 +110,23 @@ export default function PlanPage() {
  router.push(`/projects/${projectId}/demo`);
  };
 
+ // 进页时若设计已采纳过 → 直接开启关系问答（返场用户也能看到）
+ useEffect(() => {
+   if (!token) return;
+   api.get(`/api/projects/${projectId}/plan/design-suggestions`)
+     .then((ds: any) => { if (Array.isArray(ds) && ds.some((s: any) => s?.adopted)) setDesignReady(true); })
+     .catch(() => {});
+ }, [projectId, token]);
+
+ // 设计采纳保存后：基于已采纳的设计检测实体关系 → 出追加问答
+ const handleDesignSaved = async () => {
+   setDesignReady(true);
+   setDetecting(true);
+   try { await api.post(`/api/projects/${projectId}/requirement/relations/detect`); } catch {}
+   setDetecting(false);
+   setRelKey(k => k + 1);
+ };
+
  const updateArrayItem = (arr: string[], index: number, value: string, setter: (v: string[]) => void) => {
  const next = [...arr];
  next[index] = value;
@@ -126,7 +148,6 @@ export default function PlanPage() {
 
   <div className="px-6 pt-4 space-y-3">
     <WarningCard projectId={projectId} refreshKey={refreshKey} />
-    <FollowUpQuestions projectId={projectId} />
     <NextStepCard projectId={projectId} />
   </div>
 
@@ -339,7 +360,15 @@ export default function PlanPage() {
  </button>
  </div>
  )) : (
- <DesignSuggestions projectId={projectId} />
+ <div className="space-y-4">
+ <DesignSuggestions projectId={projectId} onSaved={handleDesignSaved} />
+ {detecting && (
+ <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+ 正在根据你采纳的设计分析实体关系…
+ </div>
+ )}
+ <FollowUpQuestions projectId={projectId} enabled={designReady} refreshKey={relKey} onDone={() => setActiveTab('plan')} />
+ </div>
  )}
  </div>
  </div>

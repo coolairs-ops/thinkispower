@@ -135,7 +135,11 @@ export class RelationCompletionService {
     const plan = (planSummary as Record<string, unknown>) || {};
     const names = (raw: unknown): string[] =>
       Array.isArray(raw) ? raw.map((x) => (typeof x === 'string' ? x : (x as { name?: string } | null)?.name || '')).filter(Boolean) : [];
-    const ds = (sr.designSuggestions as Array<{ title?: string; description?: string }> | undefined) ?? [];
+    // 优先用「已采纳」的设计建议作关系证据（采纳后的设计才是确定的、最全面的，关系问答据此最准）；
+    // 若一条都没采纳则退回全部，避免空证据。
+    const dsAll = (sr.designSuggestions as Array<{ title?: string; description?: string; adopted?: boolean }> | undefined) ?? [];
+    const adopted = dsAll.filter((s) => s.adopted);
+    const ds = adopted.length ? adopted : dsAll;
     return {
       entities: names(plan.dataObjects),
       pages: names(plan.pages),
