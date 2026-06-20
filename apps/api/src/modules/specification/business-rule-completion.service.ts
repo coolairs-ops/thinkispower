@@ -86,7 +86,9 @@ export class BusinessRuleCompletionService {
       if (c.disposition === 'ask') {
         const ans = answers[c.name];
         if (ans === '__skip__') continue; // 客户选"不需要此规则"
-        rules.push({ name: c.name, description: c.description, trigger: c.trigger, outcome: ans || c.outcome, source: c.source, confirmed: true });
+        const outcome = ans || c.outcome;
+        if (!outcome) continue; // ask 无答案且无默认 → 不写"空结果"的半成品规则，留作追加问答
+        rules.push({ name: c.name, description: c.description, trigger: c.trigger, outcome, source: c.source, confirmed: true });
       } else {
         rules.push({ name: c.name, description: c.description, trigger: c.trigger, outcome: c.outcome, source: c.source, confirmed: true });
       }
