@@ -59,23 +59,39 @@ describe('ruoyi-mapping（IR → 若依 codegen 输入 · M2）', () => {
     });
   });
 
-  describe('RuoyiRuntime 骨架', () => {
-    const svc = new RuoyiRuntime();
-    it('kind=ruoyi；buildGenTables 把 AppSpec.entities 映射成 gen_table', () => {
+  describe('RuoyiRuntime（组装 M2 映射 + M3b 客户端 + M3c DDL）', () => {
+    const mockClient = { generate: jest.fn() } as any;
+    const svc = new RuoyiRuntime(mockClient);
+    const spec = {
+      entities: [{ name: 'Store', table: 'store', fields: [field({ name: 'id', isId: true }), field({ name: 'store_name' })] }],
+      roles: [{ name: '管理员', dataScope: '1' as const }],
+      menus: [{ name: '门店', path: '/store', entity: 'store' }],
+    };
+
+    it('kind=ruoyi；buildGenTables 把 entities 映射成 gen_table', () => {
       expect(svc.kind).toBe('ruoyi');
-      const tables = svc.buildGenTables({
-        entities: [{ name: 'Store', table: 'store', fields: [field({ name: 'id', isId: true })] }],
-        roles: [{ name: '管理员', dataScope: '1' }],
-        menus: [{ name: '门店', path: '/store', entity: 'store' }],
-      });
+      const tables = svc.buildGenTables(spec);
       expect(tables).toHaveLength(1);
       expect(tables[0].tableName).toBe('store');
     });
 
-    it('provision/health/teardown 诚实抛 M3 待实现（不假装能跑）', async () => {
-      await expect(svc.provision('p1', 'model X{}')).rejects.toThrow('M3');
-      await expect(svc.health('p1', {} as any)).rejects.toThrow('M3');
-      await expect(svc.teardown('p1', {} as any)).rejects.toThrow('M3');
+    it('ddlFor：entities → MySQL 建表 DDL', () => {
+      const ddls = svc.ddlFor(spec);
+      expect(ddls[0]).toContain('create table if not exists `store`');
+      expect(ddls[0]).toContain('`store_name` varchar(255)');
+    });
+
+    it('generateSources：经 RuoyiClient 按实体取源码', async () => {
+      mockClient.generate.mockResolvedValue({ 'controller.java.vm': 'class X{}' });
+      const out = await svc.generateSources({ baseUrl: 'x', clientId: 'c', username: 'a', password: 'p', tenantId: '0' }, spec);
+      expect(mockClient.generate).toHaveBeenCalledWith(expect.anything(), 'store');
+      expect(out.store['controller.java.vm']).toBe('class X{}');
+    });
+
+    it('provision/health/teardown 诚实抛 M3c 待实现（不假装能跑）', async () => {
+      await expect(svc.provision('p1', 'model X{}')).rejects.toThrow('M3c');
+      await expect(svc.health('p1', {} as any)).rejects.toThrow('M3c');
+      await expect(svc.teardown('p1', {} as any)).rejects.toThrow('M3c');
     });
   });
 });
