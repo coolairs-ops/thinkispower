@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, ConflictException, Logger, Optional } from '@nestjs/common';
 import { Subject, ReplaySubject, Observable } from 'rxjs';
 import { PrismaService } from '../../database/prisma.service';
+import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
+import { buildDataContract, checkContractConformance } from '../app-runtime/app-contract';
 import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { QualityGateService } from '../../services/quality-gate.service';
 import { DeepseekService } from '../../services/deepseek.service';
@@ -23,6 +25,7 @@ export class DeliveryIterationService {
     private sensorService: SensorService,
     private optimizer: IterativeOptimizerService,
     private htmlExtractor: HtmlModuleExtractorService,
+    @Optional() private schema?: SchemaMigrationService,
   ) {}
 
   /** 启动自动迭代优化（IterativeOptimizer 包装） */
@@ -216,7 +219,7 @@ export class DeliveryIterationService {
       for (let round = 1; round <= MAX_ROUNDS; round++) {
         const project = await this.prisma.project.findUnique({
           where: { id: projectId },
-          select: { demoHtml: true, planSummary: true, description: true, structuredRequirement: true },
+          select: { demoHtml: true, planSummary: true, description: true, structuredRequirement: true, dataModel: true },
         });
         if (!project) { emit({ type: 'error', message: '项目不存在' }); break; }
 
@@ -298,6 +301,23 @@ export class DeliveryIterationService {
           totalChecks,
           stopIteration: fused.stopIteration,
         });
+
+        // 前端契约桥（ADR-0003 缺口/ADR-0007 候选）：前端 appData 用了数据模型里没有的资源
+        // → 加一条确定性修复建议，进既有 recommendations→autoFix 回路，让迭代朝数据契约收敛。
+        if (this.schema && project.dataModel && project.demoHtml) {
+          try {
+            const contract = buildDataContract(this.schema.parseAndValidate(project.dataModel));
+            const conf = checkContractConformance(project.demoHtml, contract);
+            if (!conf.ok) {
+              fused.recommendations.unshift(
+                `数据契约不一致：前端用了不存在的资源「${conf.unknownResources.join('、')}」。` +
+                  `appData 资源名只能取：${contract.resources.map((r) => r.name).join('、')}。把越界的 appData 调用改成契约内资源。`,
+              );
+            }
+          } catch (e) {
+            this.logger.warn(`契约校验跳过: ${e instanceof Error ? e.message : e}`);
+          }
+        }
 
         // ── FIX ──
         let fixSucceeded = false;
