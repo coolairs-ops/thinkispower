@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
 import DesignSuggestions from './design-suggestions';
+import FollowUpQuestions from './follow-up-questions';
 import NextStepCard from '@/components/next-step-card';
 import WarningCard from '@/components/warning-card';
 
@@ -125,6 +126,7 @@ export default function PlanPage() {
 
   <div className="px-6 pt-4 space-y-3">
     <WarningCard projectId={projectId} refreshKey={refreshKey} />
+    <FollowUpQuestions projectId={projectId} />
     <NextStepCard projectId={projectId} />
   </div>
 
