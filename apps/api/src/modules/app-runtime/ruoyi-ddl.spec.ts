@@ -56,6 +56,32 @@ describe('ruoyi-ddl · toMysqlCreateTable（M3c）', () => {
     expect(sql).toContain("`tenant_id` varchar(20) default '000000'");
   });
 
+  it('写入翻译：Prisma 默认值 → MySQL 列默认（路B模型→若依）', () => {
+    const model: ParsedModel = {
+      name: 'Customer', table: 'customer',
+      fields: [
+        field({ name: 'id', isId: true, defaultSql: 'gen_random_uuid()::text' }), // cuid 主键
+        field({ name: 'level', defaultSql: "'C'" }),
+        field({ name: 'qty', prismaType: 'Int', defaultSql: '0' }),
+        field({ name: 'done', prismaType: 'Boolean', defaultSql: 'false' }),
+        field({ name: 'createdAt', prismaType: 'DateTime', defaultSql: 'now()' }),
+      ],
+    };
+    const sql = toMysqlCreateTable(model);
+    expect(sql).toContain('`id` varchar(255) not null default (UUID())'); // String 主键由 DB 生成、保持非空
+    // 有默认的非主键列设为可空（若依 BO 不 @NotNull，DB 默认补）
+    expect(sql).toContain("`level` varchar(255) null default 'C'");
+    expect(sql).toContain('`qty` int null default 0');
+    expect(sql).toContain('`done` tinyint(1) null default 0');
+    expect(sql).toContain('`createdAt` datetime null default CURRENT_TIMESTAMP');
+  });
+
+  it('整型自增主键不带 default（自增与默认互斥）', () => {
+    const sql = toMysqlCreateTable({ name: 'T', table: 't', fields: [field({ name: 'id', prismaType: 'BigInt', isId: true, defaultSql: 'gen_random_uuid()::text' })] });
+    expect(sql).toContain('`id` bigint not null auto_increment');
+    expect(sql).not.toContain('UUID()');
+  });
+
   it('实体已含同名基础列 → 不重复添加', () => {
     const sql = toMysqlCreateTable({
       name: 'Store',
