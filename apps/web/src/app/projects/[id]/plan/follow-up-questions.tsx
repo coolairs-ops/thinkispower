@@ -84,7 +84,8 @@ export default function FollowUpQuestions({
       const r: any = await api.post(`/api/projects/${projectId}/requirement/followup`, { relations, acceptGaps, businessRules });
       const relCount = (r?.relations || []).length;
       const ruleCount = (r?.businessRules || []).length;
-      setDone(`✓ 已保存：确认 ${relCount} 条实体关系、${ruleCount} 条业务规则、采纳 ${acceptGaps.length} 项需求`);
+      const specMsg = r?.specRegenerated ? '，产品规格已自动更新' : r?.specStale ? '，规格已确认、解冻后重生成可见' : '';
+      setDone(`✓ 已保存：确认 ${relCount} 条实体关系、${ruleCount} 条业务规则、采纳 ${acceptGaps.length} 项需求${specMsg}`);
       onDone?.();
     } catch {
       setDone('保存失败，可重试');

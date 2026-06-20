@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RequirementCompletionService } from './requirement-completion.service';
 import { RelationCompletionService } from './relation-completion.service';
 import { BusinessRuleCompletionService } from './business-rule-completion.service';
+import { SpecificationService } from './specification.service';
 
 /**
  * 追加问答合批（relationship-completion-design.md §7 + 问答窗口时机建议）。
@@ -31,6 +32,7 @@ export class FollowUpQuestionService {
     private req: RequirementCompletionService,
     private rel: RelationCompletionService,
     private biz: BusinessRuleCompletionService,
+    private spec: SpecificationService,
   ) {}
 
   /** 合批取追加问答：D 的 ask 缺口 + 关系 ask + 业务规则 ask → 统一问题列表。无 ask 项 → 空（前端不弹窗）。 */
@@ -102,13 +104,25 @@ export class FollowUpQuestionService {
       acceptGaps?: string[];
       businessRules?: Record<string, string>;
     },
-  ): Promise<{ relations: unknown; requirement: unknown; businessRules: unknown }> {
+  ): Promise<{ relations: unknown; requirement: unknown; businessRules: unknown; specRegenerated: boolean; specStale: boolean }> {
     const rel = await this.rel.apply(userId, projectId, body.relations ?? {});
     const req = await this.req.apply(userId, projectId, body.acceptGaps ?? []);
     const biz = await this.biz.apply(userId, projectId, body.businessRules ?? {});
+
+    // 回写后让正式规格随动：未冻结自动重生成（业务规则/关系/页面立刻反映）；
+    // 已冻结(generateDraft 会抛)→ 不偷改已确认规格，回 specStale 信号让前端提示"解冻后重确认"。
+    let specRegenerated = false;
+    let specStale = false;
+    try {
+      await this.spec.generateDraft(userId, projectId);
+      specRegenerated = true;
+    } catch {
+      specStale = true;
+    }
+
     this.logger.log(
-      `追加问答提交 ${projectId}: 关系 ${rel.relations.length} / 采纳缺口 ${(body.acceptGaps ?? []).length} / 业务规则 ${biz.rules.length}`,
+      `追加问答提交 ${projectId}: 关系 ${rel.relations.length} / 采纳缺口 ${(body.acceptGaps ?? []).length} / 业务规则 ${biz.rules.length} / 规格${specRegenerated ? '已重生成' : specStale ? '待解冻重确认' : '未动'}`,
     );
-    return { relations: rel.relations, requirement: req, businessRules: biz.rules };
+    return { relations: rel.relations, requirement: req, businessRules: biz.rules, specRegenerated, specStale };
   }
 }

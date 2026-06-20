@@ -4,13 +4,15 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
   let req: { get: jest.Mock; apply: jest.Mock };
   let rel: { get: jest.Mock; apply: jest.Mock };
   let biz: { get: jest.Mock; apply: jest.Mock };
+  let spec: { generateDraft: jest.Mock };
   let svc: FollowUpQuestionService;
 
   beforeEach(() => {
     req = { get: jest.fn().mockResolvedValue({ gaps: [] }), apply: jest.fn().mockResolvedValue({}) };
     rel = { get: jest.fn().mockResolvedValue({ candidates: [] }), apply: jest.fn().mockResolvedValue({ relations: [] }) };
     biz = { get: jest.fn().mockResolvedValue({ candidates: [] }), apply: jest.fn().mockResolvedValue({ rules: [] }) };
-    svc = new FollowUpQuestionService(req as never, rel as never, biz as never);
+    spec = { generateDraft: jest.fn().mockResolvedValue({}) };
+    svc = new FollowUpQuestionService(req as never, rel as never, biz as never, spec as never);
   });
 
   describe('getQuestions', () => {
@@ -60,6 +62,20 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
     it('submit 把 businessRules 答案路由业务规则 apply', async () => {
       await svc.submit('u1', 'p1', { businessRules: { 金额精度: '保留2位' } });
       expect(biz.apply).toHaveBeenCalledWith('u1', 'p1', { 金额精度: '保留2位' });
+    });
+
+    it('submit 后自动重生成规格（未冻结）→ specRegenerated', async () => {
+      const r = await svc.submit('u1', 'p1', {});
+      expect(spec.generateDraft).toHaveBeenCalledWith('u1', 'p1');
+      expect(r.specRegenerated).toBe(true);
+      expect(r.specStale).toBe(false);
+    });
+
+    it('规格已冻结(generateDraft 抛)→ 不偷改，specStale', async () => {
+      spec.generateDraft.mockRejectedValue(new Error('规格已确认，如需修改请先解冻'));
+      const r = await svc.submit('u1', 'p1', {});
+      expect(r.specRegenerated).toBe(false);
+      expect(r.specStale).toBe(true);
     });
 
     it('无 ask 项 → 空列表（前端据此不弹窗）', async () => {
