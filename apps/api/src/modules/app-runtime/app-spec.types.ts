@@ -32,7 +32,9 @@ export interface AppRelation {
   parent: string;
   child: string;
   cardinality: string; // '1-N' | '1-1' | 'N-N' | 'none'
-  fkField?: string; // child 上的外键，如 storeId
+  fkField?: string; // child 上的外键，如 storeId；树时为自外键 parentId
+  tree?: boolean; // 自关联/树（parent===child）→ 若依 tree 模板
+  joinTable?: string; // N—N 中间表名 → 合成中间表实体
   required?: boolean;
   onDelete?: string; // cascade | setNull | restrict
 }
