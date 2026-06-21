@@ -83,6 +83,7 @@ export interface SourceInput {
   doc_number?: string;
   issued_date?: string | null;
   uploaded_by?: string;
+  storage_ref?: string; // 原件在 MinIO 的存储 key
 }
 
 /** 证据链条目：从 Fact 顺链回指 Evidence(原文) → Source(原件)。 */

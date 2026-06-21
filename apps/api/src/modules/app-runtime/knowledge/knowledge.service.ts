@@ -24,9 +24,9 @@ export class KnowledgeService {
    * 吸纳一份原件：提取候选 → 机器校验门 → 落 Evidence + Fact（candidate/rejected）+ 缺失显式。
    * @param needFactNames 评分需要的 Fact 名清单；未被提取到的标 status=missing（绝不静默补0）。
    */
-  ingest(input: SourceInput, extractor: FactExtractor, needFactNames: string[] = []): KnowledgeBase {
+  ingest(input: SourceInput, extractor: FactExtractor, needFactNames: string[] = [], seq = 1): KnowledgeBase {
     const source: Source = {
-      source_id: 'SRC-1',
+      source_id: `SRC-${seq}`,
       title: input.title,
       doc_type: input.doc_type,
       issuer: input.issuer,
@@ -34,6 +34,7 @@ export class KnowledgeService {
       issued_date: input.issued_date ?? null,
       uploaded_by: input.uploaded_by,
       content_hash: sha256(input.text), // 原件指纹
+      storage_ref: input.storage_ref,
       status: 'active',
     };
     const norm = stripWs(input.text);
@@ -45,7 +46,7 @@ export class KnowledgeService {
       // 步骤2：机器校验门——回原件核对 quote 是否真存在（去空白容差），对不上作废
       const verified = !!c.quote && norm.includes(stripWs(c.quote));
       const ev: Evidence = {
-        evidence_id: `EV-${i + 1}`,
+        evidence_id: `EV-${seq}-${i + 1}`,
         source_id: source.source_id,
         quote: c.quote,
         locator: c.locator,
@@ -53,7 +54,7 @@ export class KnowledgeService {
       };
       evidences.push(ev);
       facts.push({
-        fact_id: `FACT-${i + 1}`,
+        fact_id: `FACT-${seq}-${i + 1}`,
         name: c.name,
         value: c.value,
         evidence_refs: [ev.evidence_id],
@@ -63,10 +64,10 @@ export class KnowledgeService {
     });
 
     // 步骤4：缺失显式——评分需要但没提取到的，标 missing（绝不静默补0/给默认值）
-    let mi = facts.length;
+    let mi = 0;
     for (const need of needFactNames) {
       if (!facts.some((f) => f.name === need && f.status !== 'rejected')) {
-        facts.push({ fact_id: `FACT-${++mi}`, name: need, value: null, evidence_refs: [], extraction_method: 'ai_extracted', status: 'missing' });
+        facts.push({ fact_id: `FACT-${seq}-m${++mi}`, name: need, value: null, evidence_refs: [], extraction_method: 'ai_extracted', status: 'missing' });
       }
     }
 

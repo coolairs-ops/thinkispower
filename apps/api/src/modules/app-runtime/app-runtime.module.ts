@@ -18,6 +18,9 @@ import { RuleEvalController } from './rule-engine/rule-eval.controller';
 import { RulePackController } from './rule-engine/rule-pack.controller';
 import { RuleTemplateController } from './rule-engine/rule-template.controller';
 import { KnowledgeService } from './knowledge/knowledge.service';
+import { KnowledgeSourceService } from './knowledge/knowledge-source.service';
+import { LlmFactExtractor } from './knowledge/llm-fact-extractor';
+import { KnowledgeController } from './knowledge/knowledge.controller';
 import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
 
 /**
@@ -28,7 +31,7 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
  */
 @Module({
   imports: [BullModule.registerQueue({ name: RUOYI_PROVISION_QUEUE })],
-  controllers: [AppRuntimeController, RuoyiProvisionController, RuleEvalController, RulePackController, RuleTemplateController],
+  controllers: [AppRuntimeController, RuoyiProvisionController, RuleEvalController, RulePackController, RuleTemplateController, KnowledgeController],
   providers: [
     SchemaMigrationService,
     CrudRuntime,
@@ -43,7 +46,9 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     RuleEngineService,
     RuleEvaluationService,
     KnowledgeService,
+    KnowledgeSourceService,
+    LlmFactExtractor,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService],
 })
 export class AppRuntimeModule {}
