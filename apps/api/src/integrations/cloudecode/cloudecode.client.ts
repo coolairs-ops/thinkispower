@@ -1,10 +1,12 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { BACKEND_RUNTIME, BackendRuntime } from '../../modules/app-runtime/backend-runtime.interface';
+import { SchemaMigrationService } from '../../modules/app-runtime/schema-migration.service';
+import { buildDataContract, normalizeContractForRuntime, contractPromptBlock } from '../../modules/app-runtime/app-contract';
 
 /** 所有代码生成 prompt 的公共前缀 — 强制要求文件路径标记 */
 const FILE_PATH_REQUIREMENT = `【重要】每个文件必须用 \`\`\`文件路径 格式标记（不要用语言名）。正确格式：\`\`\`backend/src/user/user.service.ts\n内容\n\`\`\`。错误格式：\`\`\`typescript （会被丢弃）。\n`;
@@ -117,6 +119,7 @@ export class CloudecodeClient {
     private demoSnapshotService: DemoSnapshotService,
     private htmlExtractor: HtmlModuleExtractorService,
     @Inject(BACKEND_RUNTIME) private backend: BackendRuntime,
+    @Optional() private schema?: SchemaMigrationService,
   ) {}
 
   async executeTask(taskId: string): Promise<{
@@ -284,7 +287,7 @@ export class CloudecodeClient {
     summary?: string;
     rawError?: string;
   }> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true, structuredRequirement: true } });
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true, structuredRequirement: true, backendRuntime: true } });
     const designNotes = adoptedDesignNotes(project?.structuredRequirement);
     const labels = this.itemNames(planSummary?.pages);
     // 页数上限可配（柱三·分段生成放开 6 页硬上限）。硬顶 30 防失控；超限的页由 E 覆盖批判显式报出。
@@ -320,6 +323,19 @@ export class CloudecodeClient {
       }
     }
 
+    // 2a. 数据契约（ADR-0007 应用契约先行）：从刚产的数据模型导出资源+字段，按 backendRuntime 方言归一
+    //     （若依→字段名小写）后直注每页生成 prompt → 前端从第一次生成就用对的资源名/字段，而非生成后再纠。
+    let contractNotes = '';
+    if (this.schema && dataModel) {
+      try {
+        const kind = (project?.backendRuntime as { kind?: string } | null)?.kind;
+        const contract = normalizeContractForRuntime(buildDataContract(this.schema.parseAndValidate(dataModel)), kind);
+        contractNotes = contractPromptBlock(contract);
+      } catch (e) {
+        this.logger.warn(`契约注入跳过: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     // 2. 确定性外壳
     const shell = buildDemoShell({ appName, tailwindCdn: tailwindCdnUrl(), daisyuiCss: daisyuiCssUrl(), pages });
 
@@ -328,7 +344,7 @@ export class CloudecodeClient {
     const pageHtmls: Record<string, string> = {};
     await this.mapLimit(pages, concurrency, async (p, i) => {
       try {
-        const content = await this.generatePageContent(appName, p.brief, dataModel, i === 0, designNotes);
+        const content = await this.generatePageContent(appName, p.brief, dataModel, i === 0, designNotes, contractNotes);
         pageHtmls[p.key] = content || `<div class="alert">「${p.label}」内容暂未生成</div>`;
       } catch (e) {
         this.logger.warn(`分段生成页「${p.label}」失败: ${e instanceof Error ? e.message : e}`);
@@ -351,12 +367,13 @@ export class CloudecodeClient {
    * 生成单个页面的功能界面 HTML（一次 LLM 调用，各享完整预算）。
    * 供分段生成与自治建造回路（ADR-0005 的 generate 步）共用。
    */
-  async generatePageContent(appName: string, brief: string, dataModel: string | null, isFirst = false, designNotes = ''): Promise<string> {
+  async generatePageContent(appName: string, brief: string, dataModel: string | null, isFirst = false, designNotes = '', contractNotes = ''): Promise<string> {
     const designBlock = designNotes ? `\n## 设计约束（用户已采纳，务必遵循）\n${designNotes}` : '';
+    const contractBlock = contractNotes ? `\n${contractNotes}` : '';
     const resp = await this.deepseek.chatWithRetry(
       [
         { role: 'system', content: buildDemoPagePrompt(isFirst) },
-        { role: 'user', content: `## 应用\n${appName}\n## 本页\n${brief}\n## 数据模型\n${dataModel || '（无，本页用静态内容即可）'}${designBlock}\n\n只输出本页的**功能界面** HTML（列表/表单/按钮，不是介绍页）。` },
+        { role: 'user', content: `## 应用\n${appName}\n## 本页\n${brief}\n## 数据模型\n${dataModel || '（无，本页用静态内容即可）'}${designBlock}${contractBlock}\n\n只输出本页的**功能界面** HTML（列表/表单/按钮，不是介绍页）。` },
       ],
       { temperature: 0.3, maxTokens: 8192, timeoutMs: 180_000 },
     );

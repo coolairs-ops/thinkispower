@@ -1,4 +1,4 @@
-import { buildDataContract, contractPromptBlock, extractAppDataResources, checkContractConformance } from './app-contract';
+import { buildDataContract, contractPromptBlock, extractAppDataResources, checkContractConformance, ruoyiFieldName, normalizeContractForRuntime } from './app-contract';
 import { ParsedModel, ModelField } from './data-model.types';
 
 const f = (name: string): ModelField => ({ name, prismaType: 'String', optional: false, isId: false, isUnique: false });
@@ -42,5 +42,24 @@ describe('app-contract（前端契约桥）', () => {
     expect(checkContractConformance(good, c)).toEqual({ ok: true, unknownResources: [] });
     const bad = `appData.list('customer'); appData.list('order'); appData.get('invoice',1)`;
     expect(checkContractConformance(bad, c)).toEqual({ ok: false, unknownResources: ['order', 'invoice'] });
+  });
+
+  it('ruoyiFieldName：无下划线驼峰整体小写；带下划线保持原样', () => {
+    expect(ruoyiFieldName('userId')).toBe('userid');
+    expect(ruoyiFieldName('contactInfo')).toBe('contactinfo');
+    expect(ruoyiFieldName('createdAt')).toBe('createdat');
+    expect(ruoyiFieldName('name')).toBe('name');
+    expect(ruoyiFieldName('create_by')).toBe('create_by'); // 带下划线不动
+  });
+
+  it('normalizeContractForRuntime：若依→字段名小写；非若依→原样', () => {
+    const c = buildDataContract(entities);
+    expect(normalizeContractForRuntime(c, 'ruoyi').resources).toEqual([
+      { name: 'customer', fields: ['id', 'name', 'level'] },
+      { name: 'project', fields: ['id', 'amount', 'customerid'] }, // customerId → customerid
+    ]);
+    // 路B / 未配 → 驼峰原样（appData 客户端按 Prisma 字段名读写）
+    expect(normalizeContractForRuntime(c, undefined)).toBe(c);
+    expect(normalizeContractForRuntime(c, 'crud').resources[1].fields).toEqual(['id', 'amount', 'customerId']);
   });
 });

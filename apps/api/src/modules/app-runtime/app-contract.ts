@@ -25,6 +25,25 @@ export function buildDataContract(entities: ParsedModel[]): DataContract {
   };
 }
 
+/**
+ * 单个字段名 → 目标底座方言。若依 codegen 的 `toCamelCase` 对**无下划线**驼峰列名先整体 `toLowerCase()`，
+ * 故路B 的 `userId/createdAt` 在若依实体/JSON 成 `userid/createdat`；带下划线的列名保持原样（若依会驼峰化）。
+ * 路B 自身保持驼峰（appData 客户端按 Prisma 字段名读写）。
+ */
+export function ruoyiFieldName(name: string): string {
+  return name.includes('_') ? name : name.toLowerCase();
+}
+
+/**
+ * 按目标底座方言归一契约**字段名**（ADR-0007 D3）：若依 → 小写化，其它（路B 等）→ 原样。
+ * 资源名 = 表名，两边一致（比较时都小写），不动。直注生成 prompt（④）前必须先归一，否则用 Prisma
+ * 驼峰名注入会把前端带偏（前端按 `userId` 写、若依字段是 `userid`、不绑定 → @NotNull 报错）。
+ */
+export function normalizeContractForRuntime(contract: DataContract, backendKind?: string): DataContract {
+  if (backendKind !== 'ruoyi') return contract;
+  return { resources: contract.resources.map((r) => ({ name: r.name, fields: r.fields.map(ruoyiFieldName) })) };
+}
+
 /** 契约 → 注入生成/迭代 prompt 的硬约束文本块。 */
 export function contractPromptBlock(contract: DataContract): string {
   if (!contract.resources.length) return '';
