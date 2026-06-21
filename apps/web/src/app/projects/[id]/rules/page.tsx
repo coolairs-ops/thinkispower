@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
+import { parseWeightedSum, serializeWeightedSum, parseConditions, serializeConditions } from '@/lib/expr-blocks';
 
 // ── 类型（与后端 rule-pack.types 对齐，前端只用到的子集）──
 interface Rule { id: string; label?: string; when: string; then: { conclusion_type: string; value: string }[]; priority?: number; evidence_ref?: string[] }
@@ -109,6 +110,42 @@ export default function RulesConfigPage() {
   const setFormulaExpr = (i: number, expression: string) =>
     setPack((p) => ({ ...p, formulas: p.formulas.map((f, j) => (j === i ? { ...f, expression } : f)) }));
 
+  // 可选积木：可引用的指标/公式（下拉用）
+  const refs = [
+    ...pack.metrics.map((m: any) => ({ id: m.id, label: m.label || m.id })),
+    ...pack.formulas.map((f) => ({ id: f.id, label: f.label || f.id })),
+  ];
+  // 公式权重积木：改一项权重/指标 → 重新序列化回 expression
+  const patchWeightTerm = (fi: number, ti: number, patch: Partial<{ ref: string; weight: number }>) => {
+    const ws = parseWeightedSum(pack.formulas[fi].expression);
+    setFormulaExpr(fi, serializeWeightedSum(ws.terms.map((t, j) => (j === ti ? { ...t, ...patch } : t))));
+  };
+  const addWeightTerm = (fi: number) => {
+    const ws = parseWeightedSum(pack.formulas[fi].expression);
+    setFormulaExpr(fi, serializeWeightedSum([...ws.terms, { ref: refs[0]?.id || 'M_x', weight: 1 }]));
+  };
+  const delWeightTerm = (fi: number, ti: number) => {
+    const ws = parseWeightedSum(pack.formulas[fi].expression);
+    setFormulaExpr(fi, serializeWeightedSum(ws.terms.filter((_, j) => j !== ti)));
+  };
+  // 规则条件积木：改一条条件/连接词 → 重新序列化回 when
+  const patchCond = (ri: number, ci: number, patch: Partial<{ left: string; op: string; right: string }>) => {
+    const c = parseConditions(pack.rules[ri].when);
+    setRuleWhen(ri, serializeConditions(c.join, c.conds.map((x, j) => (j === ci ? { ...x, ...patch } : x))));
+  };
+  const setCondJoin = (ri: number, join: 'AND' | 'OR') => {
+    const c = parseConditions(pack.rules[ri].when);
+    setRuleWhen(ri, serializeConditions(join, c.conds));
+  };
+  const addCond = (ri: number) => {
+    const c = parseConditions(pack.rules[ri].when);
+    setRuleWhen(ri, serializeConditions(c.join, [...c.conds, { left: refs[0]?.id || 'F_x', op: '>=', right: '0' }]));
+  };
+  const delCond = (ri: number, ci: number) => {
+    const c = parseConditions(pack.rules[ri].when);
+    setRuleWhen(ri, serializeConditions(c.join, c.conds.filter((_, j) => j !== ci)));
+  };
+
   const save = () => {
     const toSave = { ...pack, meta: { ...pack.meta, project_id: projectId } };
     api.put(`/api/projects/${projectId}/rule-pack`, { rulePack: toSave })
@@ -167,28 +204,73 @@ export default function RulesConfigPage() {
               <p className="text-xs text-gray-400 mt-2">试试把某条的「严重缺陷」从 0 改成 1 —— 右侧分级会立刻跳变。</p>
             </section>
 
-            {/* 公式 */}
+            {/* 公式（权重积木：选指标 + 调权重；解析不了则回退文本） */}
             <section className="bg-white rounded-xl border border-gray-200 p-4">
               <h2 className="font-semibold text-gray-800 mb-2">评分公式</h2>
-              {pack.formulas.map((f, i) => (
-                <div key={f.id} className="mb-2">
-                  <label className="text-xs text-gray-500">{f.label || f.id}</label>
-                  <input value={f.expression} onChange={(e) => setFormulaExpr(i, e.target.value)} className="w-full border rounded px-2 py-1 text-sm font-mono" />
-                </div>
-              ))}
+              {pack.formulas.map((f, i) => {
+                const ws = parseWeightedSum(f.expression);
+                return (
+                  <div key={f.id} className="mb-3">
+                    <label className="text-xs text-gray-500">{f.label || f.id} = 各项加权和</label>
+                    {ws.ok ? (
+                      <div className="mt-1 space-y-1">
+                        {ws.terms.map((t, ti) => (
+                          <div key={ti} className="flex items-center gap-2">
+                            <select value={t.ref} onChange={(e) => patchWeightTerm(i, ti, { ref: e.target.value })} className="border rounded px-1 py-1 text-sm flex-1">
+                              {refs.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                            </select>
+                            <span className="text-gray-400 text-sm">× 权重</span>
+                            <input type="number" value={t.weight} onChange={(e) => patchWeightTerm(i, ti, { weight: Number(e.target.value) })} className="border rounded px-1 py-1 text-sm w-20" />
+                            <button onClick={() => delWeightTerm(i, ti)} className="text-gray-300 hover:text-red-500">✕</button>
+                          </div>
+                        ))}
+                        <button onClick={() => addWeightTerm(i)} className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200">+ 加一项</button>
+                      </div>
+                    ) : (
+                      <input value={f.expression} onChange={(e) => setFormulaExpr(i, e.target.value)} className="w-full border rounded px-2 py-1 text-sm font-mono" />
+                    )}
+                  </div>
+                );
+              })}
             </section>
 
             {/* 规则 */}
             <section className="bg-white rounded-xl border border-gray-200 p-4">
               <h2 className="font-semibold text-gray-800 mb-2">分级规则（裁决：{pack.conflict_policy.strategy === 'most_severe' ? '取最严' : pack.conflict_policy.strategy}）</h2>
-              {pack.rules.map((r, i) => (
-                <div key={r.id} className="flex items-center gap-2 mb-2">
-                  <span className={`text-xs px-2 py-0.5 rounded font-bold ${GRADE_STYLE[r.then[0]?.value] || 'bg-gray-200'}`}>{r.then[0]?.value}</span>
-                  <span className="text-xs text-gray-400 w-12">当</span>
-                  <input value={r.when} onChange={(e) => setRuleWhen(i, e.target.value)} className="flex-1 border rounded px-2 py-1 text-sm font-mono" />
-                </div>
-              ))}
-              <p className="text-xs text-gray-400 mt-1">条件用受限表达式（指标/公式 + 比较 + AND/OR），不会注入。可视化搭积木表单为下一步。</p>
+              {pack.rules.map((r, i) => {
+                const c = parseConditions(r.when);
+                return (
+                  <div key={r.id} className="flex items-start gap-2 mb-3">
+                    <span className={`mt-1 text-xs px-2 py-0.5 rounded font-bold ${GRADE_STYLE[r.then[0]?.value] || 'bg-gray-200'}`}>{r.then[0]?.value}</span>
+                    <span className="mt-1.5 text-xs text-gray-400">当</span>
+                    {c.ok ? (
+                      <div className="flex-1 space-y-1">
+                        {c.conds.map((cond, ci) => (
+                          <div key={ci} className="flex items-center gap-1">
+                            {ci > 0 && (
+                              <select value={c.join} onChange={(e) => setCondJoin(i, e.target.value as 'AND' | 'OR')} className="border rounded px-1 py-1 text-xs">
+                                <option value="AND">且</option><option value="OR">或</option>
+                              </select>
+                            )}
+                            <select value={cond.left} onChange={(e) => patchCond(i, ci, { left: e.target.value })} className="border rounded px-1 py-1 text-sm flex-1">
+                              {refs.map((rf) => <option key={rf.id} value={rf.id}>{rf.label}</option>)}
+                            </select>
+                            <select value={cond.op} onChange={(e) => patchCond(i, ci, { op: e.target.value })} className="border rounded px-1 py-1 text-sm">
+                              {['>=', '>', '<=', '<', '=', '!='].map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                            <input value={cond.right} onChange={(e) => patchCond(i, ci, { right: e.target.value })} className="border rounded px-1 py-1 text-sm w-20" />
+                            <button onClick={() => delCond(i, ci)} className="text-gray-300 hover:text-red-500">✕</button>
+                          </div>
+                        ))}
+                        <button onClick={() => addCond(i)} className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200">+ 加条件</button>
+                      </div>
+                    ) : (
+                      <input value={r.when} onChange={(e) => setRuleWhen(i, e.target.value)} className="flex-1 border rounded px-2 py-1 text-sm font-mono" />
+                    )}
+                  </div>
+                );
+              })}
+              <p className="text-xs text-gray-400 mt-1">从指标/公式里选、配比较和阈值搭出条件；复杂条件（含括号/混合且或）自动回退为表达式编辑，不会注入。</p>
             </section>
           </div>
 
