@@ -13,6 +13,8 @@ import { RuoyiProvisionController } from './ruoyi-provision.controller';
 import { AppSpecAssemblerService } from './app-spec-assembler.service';
 import { RuoyiAppDataService } from './ruoyi-appdata.service';
 import { RuleEngineService } from './rule-engine/rule-engine.service';
+import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
+import { RuleEvalController } from './rule-engine/rule-eval.controller';
 import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
 
 /**
@@ -23,7 +25,7 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
  */
 @Module({
   imports: [BullModule.registerQueue({ name: RUOYI_PROVISION_QUEUE })],
-  controllers: [AppRuntimeController, RuoyiProvisionController],
+  controllers: [AppRuntimeController, RuoyiProvisionController, RuleEvalController],
   providers: [
     SchemaMigrationService,
     CrudRuntime,
@@ -36,7 +38,8 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     AppSpecAssemblerService,
     RuoyiAppDataService,
     RuleEngineService,
+    RuleEvaluationService,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService],
 })
 export class AppRuntimeModule {}
