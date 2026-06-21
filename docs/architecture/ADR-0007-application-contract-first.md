@@ -60,6 +60,6 @@
 1. [x] `app-contract.ts`：`buildDataContract / contractPromptBlock / extractAppDataResources / checkContractConformance`（纯函数，已落，commit 321d337）。
 2. [x] 接进自迭代回路：契约不一致 → 修复建议 → autoFix 收敛（`delivery-iteration.service.ts`，已落）。
 3. [x] 实证契约真实性：② 若依全 API 写实测 live 通过（2026-06-21，4 资源最小创建全 200）。
-4. [x] **④（分段生成路径）**：`contractPromptBlock` 直注前端生成 prompt，直注前按 `backendRuntime` 做**字段名归一**（若依 → 小写化，`normalizeContractForRuntime`），已落分段生成每页（commit 615158f）。**剩**：建造回路（`RealBuildStepRunner`）/ 迭代 autoFix 的先验注入（后验契约门已覆盖迭代）。
+4. [x] **④ 全路径先验注入**：`contractPromptBlock` 直注，直注前按 `backendRuntime` 做**字段名归一**（若依 → 小写化，`normalizeContractForRuntime`）。三条生成/重生成路径全覆盖：分段生成每页（615158f）、建造回路 `RealBuildStepRunner`、迭代 `autoFix`（fixSingleModule + autoFixWholeHtml）（faed46e）。`CloudecodeClient.buildContractNotes` 为公共接法。
 5. [ ] 字段级一致性校验（现仅资源名级）；契约标注"创建可省字段"（有 DB 默认者）。
 6. [ ] 契约随 `backendRuntime` 选方言；纳入应用描述符随产品交付。
