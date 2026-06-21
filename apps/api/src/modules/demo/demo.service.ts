@@ -51,7 +51,7 @@ export class DemoService {
   async getDemo(userId: string, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, themeConfig: true, shotLayouts: true, backendRuntime: true, updatedAt: true },
+      select: { id: true, name: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, themeConfig: true, shotLayouts: true, backendRuntime: true, updatedAt: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     if (project.userId !== userId) throw new ForbiddenException('无权访问');
@@ -77,7 +77,7 @@ export class DemoService {
     const themeConfig = this.theme.normalize(project.themeConfig as never);
     let html = ready.includes(status) && project.demoHtml ? this.theme.applyTheme(project.demoHtml, themeConfig) : null;
     // 项目后端是若依时，预览也用若依真数据（serve 时换 appData 实现，demoHtml 不变）
-    html = (await this.ruoyiAppData.transform(html, project.backendRuntime)) ?? html;
+    html = (await this.ruoyiAppData.transform(html, project.backendRuntime, project.name)) ?? html;
     return { status, publicStatusLabel, progress, demoUrl: project.demoUrl, html, themeConfig, shotLayouts: (project.shotLayouts as unknown) ?? null };
   }
 

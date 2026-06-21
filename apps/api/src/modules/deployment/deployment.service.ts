@@ -127,8 +127,8 @@ export class DeploymentService {
     const html = deployment?.html || null;
     if (!html || !this.ruoyiAppData?.enabled) return html;
     // 若项目后端是若依，serve 时把烘焙的路B appData 换成若依版（+服务端 token），令前端显示若依真数据
-    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
-    return (await this.ruoyiAppData.transform(html, project?.backendRuntime)) ?? html;
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true, name: true } });
+    return (await this.ruoyiAppData.transform(html, project?.backendRuntime, project?.name)) ?? html;
   }
 
   async getHistory(projectId: string) {
