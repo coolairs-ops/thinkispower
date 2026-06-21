@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
 import DesignSuggestions from './design-suggestions';
 import FollowUpQuestions from './follow-up-questions';
+import RuleEngineEntry from './rule-engine-entry';
 import NextStepCard from '@/components/next-step-card';
 import WarningCard from '@/components/warning-card';
 
@@ -171,6 +172,9 @@ export default function PlanPage() {
  产品规格 →
  </Link>
  </div>
+
+ {/* 规则定义子环节（形态A）：这系统要不要风险评分/分级 */}
+ <RuleEngineEntry projectId={projectId} />
 
  {/* Tab bar */}
  <div className="flex gap-0 mb-6 border-b border-gray-200">
