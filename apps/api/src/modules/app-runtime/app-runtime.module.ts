@@ -12,6 +12,7 @@ import { RuoyiProvisionProcessor } from './ruoyi-provision.processor';
 import { RuoyiProvisionController } from './ruoyi-provision.controller';
 import { AppSpecAssemblerService } from './app-spec-assembler.service';
 import { RuoyiAppDataService } from './ruoyi-appdata.service';
+import { RuleEngineService } from './rule-engine/rule-engine.service';
 import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
 
 /**
@@ -34,7 +35,8 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     RuoyiProvisionProcessor,
     AppSpecAssemblerService,
     RuoyiAppDataService,
+    RuleEngineService,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService],
 })
 export class AppRuntimeModule {}

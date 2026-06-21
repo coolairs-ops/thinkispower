@@ -1,0 +1,214 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://think-is-power.local/schemas/rulepack-v1.3.json",
+  "title": "通用规则包 RulePack Schema",
+  "version": "1.3",
+  "description": "通用规则引擎的规则包标准结构。经六个行业(药监/贷款/医疗/电网/金融/安全生产)验证收敛后封版。配置界面据此生成录入表单与校验；执行引擎据此解析执行；守护据此体检。",
+  "type": "object",
+  "required": ["meta", "data_bindings", "metrics", "formulas", "rules", "conflict_policy", "evidence_policy"],
+  "additionalProperties": false,
+
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["name", "version", "project_id", "enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "规则包名称" },
+        "version": { "type": "string", "description": "版本号，每次改规则递增，配合守护做留痕/回滚" },
+        "project_id": { "type": "string", "description": "绑定的项目ID。开关绑在项目上，不是全局" },
+        "industry_tag": { "type": "string", "description": "行业标签(药监/信贷/核保等)，仅用于分类检索与加载行业模板" },
+        "enabled": { "type": "boolean", "description": "规则引擎开关。false=该项目根本不生成任何规则产物，保持纯CRUD" }
+      }
+    },
+
+    "data_bindings": {
+      "type": "array",
+      "description": "第一层：引用平台已生成的Prisma实体/字段，不重新定义数据结构",
+      "items": {
+        "type": "object",
+        "required": ["entity", "fields"],
+        "additionalProperties": false,
+        "properties": {
+          "entity": { "type": "string", "description": "平台已生成的实体名" },
+          "fields": { "type": "array", "items": { "type": "string" }, "description": "该实体被规则引用的字段" }
+        }
+      }
+    },
+
+    "metrics": {
+      "type": "array",
+      "description": "第二层：指标定义",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "source_type"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^M_", "description": "唯一标识，约定M_前缀，供公式/规则引用" },
+          "label": { "type": "string", "description": "人类可读名" },
+          "source_type": {
+            "type": "string",
+            "enum": ["computed", "manual", "external"],
+            "description": "补丁4。computed=对数据聚合算出；manual=指定角色人工录入打分；external=从外部系统取值(预留)"
+          },
+          "metric_family": {
+            "type": "string",
+            "enum": ["aggregate", "temporal"],
+            "default": "aggregate",
+            "description": "补丁5。aggregate=把一组值塌缩成一个数；temporal=看时序值的变化趋势"
+          },
+          "aggregation": {
+            "type": "string",
+            "enum": ["count", "sum", "avg", "ratio", "min", "max", "latest", "earliest", "last_n"],
+            "description": "当metric_family=aggregate时使用的聚合原语(封闭白名单)"
+          },
+          "temporal_op": {
+            "type": "string",
+            "enum": ["trend", "slope", "yoy", "mom", "diff"],
+            "description": "当metric_family=temporal时使用。v1只实做trend(升/降/平)；slope/yoy/mom/diff为v2能力"
+          },
+          "source": { "type": "string", "description": "作用的 实体.字段，如 检查记录.缺陷数" },
+          "filter": { "type": "string", "description": "可选过滤条件，含时间窗，如 时间在近3个月 AND 类型=飞检" },
+          "manual_spec": {
+            "type": "object",
+            "description": "当source_type=manual时必填",
+            "required": ["input_role", "scoring_standard"],
+            "additionalProperties": false,
+            "properties": {
+              "input_role": { "type": "string", "description": "有权录入的角色" },
+              "scoring_standard": { "type": "string", "description": "录入标准，可挂上传文档引用" },
+              "value_range": { "type": "string", "description": "取值范围，如 1-5" }
+            }
+          },
+          "evidence_ref": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "该指标回指的证据来源ID(贯穿线要求)"
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "source_type": { "const": "manual" } } },
+            "then": { "required": ["manual_spec"] }
+          },
+          {
+            "if": { "properties": { "metric_family": { "const": "aggregate" }, "source_type": { "const": "computed" } } },
+            "then": { "required": ["aggregation"] }
+          },
+          {
+            "if": { "properties": { "metric_family": { "const": "temporal" } } },
+            "then": { "required": ["temporal_op"] }
+          }
+        ]
+      }
+    },
+
+    "formulas": {
+      "type": "array",
+      "description": "第三层：公式/评分",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "expression"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^F_", "description": "唯一标识，约定F_前缀" },
+          "label": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["weighted_sum", "normalize", "product", "piecewise"],
+            "description": "weighted_sum=加权和；normalize=归一化；product=乘积；piecewise=分段映射。二维矩阵用product+piecewise组合表达；不规则矩阵的matrix_lookup为v2可选原语"
+          },
+          "expression": {
+            "type": "string",
+            "description": "受限表达式：只能引用已定义的metric/formula id，只能用 + - * / 和白名单函数(加权/归一化/分段)。禁止任意脚本，配错最多算错数、不会崩不会注入"
+          },
+          "output_kind": { "type": "string", "enum": ["number"], "default": "number" }
+        }
+      }
+    },
+
+    "rules": {
+      "type": "array",
+      "description": "第四层：触发规则",
+      "items": {
+        "type": "object",
+        "required": ["id", "when", "then"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^R", "description": "唯一标识，约定R前缀，如 R-LEVEL-D-001" },
+          "label": { "type": "string" },
+          "when": { "type": "string", "description": "条件表达式：引用metric/formula，用比较符 + AND/OR 组合" },
+          "then": {
+            "type": "array",
+            "description": "补丁1。结论支持多类型，一条规则可同时给多个结论",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["conclusion_type", "value"],
+              "additionalProperties": false,
+              "properties": {
+                "conclusion_type": {
+                  "type": "string",
+                  "enum": ["grade", "decision", "assign"],
+                  "description": "grade=分级贴标签；decision=决策(通过/拒绝);assign=赋值(算出具体值,如额度)"
+                },
+                "value": { "type": "string", "description": "结论内容，assign类型可为表达式" }
+              }
+            }
+          },
+          "priority": { "type": "integer", "default": 50, "description": "优先级数值，越大越先裁决" },
+          "is_veto": { "type": "boolean", "default": false, "description": "补丁3。是否一票否决，命中即定、先于打分" },
+          "effective_from": { "type": ["string", "null"], "format": "date", "description": "补丁6。生效日期，as-of计算用。空=一直有效" },
+          "effective_to": { "type": ["string", "null"], "format": "date", "description": "补丁6。失效日期。空=无失效" },
+          "evidence_ref": { "type": "array", "items": { "type": "string" }, "description": "触发依据证据ID列表" }
+        }
+      }
+    },
+
+    "conflict_policy": {
+      "type": "object",
+      "description": "补丁2。多条规则同时命中时的裁决策略，一等公民，各行业默认取向不同",
+      "required": ["strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["most_severe", "veto_first", "by_priority", "weighted"],
+          "description": "most_severe=取最严(药监);veto_first=一票否决优先(贷款/医疗/安全生产);by_priority=按优先级;weighted=加权综合"
+        }
+      }
+    },
+
+    "evidence_policy": {
+      "type": "object",
+      "description": "贯穿线：证据与人工确认。引擎强制、非行业可配。各行业此段一致",
+      "required": ["require_evidence_ref", "default_status", "no_auto_conclude_when_incomplete"],
+      "additionalProperties": false,
+      "properties": {
+        "require_evidence_ref": { "type": "boolean", "const": true, "description": "每个结论必须回指证据，否则不可成立" },
+        "default_status": { "type": "string", "const": "待人工确认", "description": "所有结论默认待确认，人确认后才生效" },
+        "completeness_metric": { "type": "boolean", "default": true, "description": "计算证据完整度=已绑定/应绑定" },
+        "no_auto_conclude_when_incomplete": { "type": "boolean", "const": true, "description": "关键证据缺失的事项标待核实，绝不自动下结论" }
+      }
+    },
+
+    "as_of": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "补丁6。执行时点参数。默认空=当前时点用当前规则；指定历史日期=回溯选当时有效规则(任意历史时点回溯重算为v2能力)"
+    }
+  },
+
+  "_engine_execution_order": [
+    "1. 加载RulePack(若meta.enabled=false，本项目无规则产物，纯CRUD)",
+    "2. 按data_bindings取该对象真实数据",
+    "3. 算metrics(含证据回指)",
+    "4. 算formulas",
+    "5. 评rules，得出所有命中结论",
+    "6. 按conflict_policy裁决最终结论",
+    "7. 套evidence_policy：绑证据、算完整度、缺证据标待核实、整体置待人工确认",
+    "8. 输出 结论+证据链+待确认状态"
+  ],
+
+  "_v1_scope_note": "第一版工程范围：aggregate族全做；temporal只做trend(升降平)，slope/yoy/mom/diff留v2；as_of只做当前时点+记录所用规则版本，任意历史时点回溯重算留v2；formula的matrix_lookup留v2。schema已留好全部位置，v2扩展不需改地基。"
+}
