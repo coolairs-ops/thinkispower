@@ -21,6 +21,8 @@ import { KnowledgeService } from './knowledge/knowledge.service';
 import { KnowledgeSourceService } from './knowledge/knowledge-source.service';
 import { LlmFactExtractor } from './knowledge/llm-fact-extractor';
 import { KnowledgeController } from './knowledge/knowledge.controller';
+import { TemplateAppService } from './ui-templates/template-app.service';
+import { TemplateAppController } from './ui-templates/template-app.controller';
 import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
 
 /**
@@ -31,7 +33,7 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
  */
 @Module({
   imports: [BullModule.registerQueue({ name: RUOYI_PROVISION_QUEUE })],
-  controllers: [AppRuntimeController, RuoyiProvisionController, RuleEvalController, RulePackController, RuleTemplateController, KnowledgeController],
+  controllers: [AppRuntimeController, RuoyiProvisionController, RuleEvalController, RulePackController, RuleTemplateController, KnowledgeController, TemplateAppController],
   providers: [
     SchemaMigrationService,
     CrudRuntime,
@@ -48,6 +50,7 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     KnowledgeService,
     KnowledgeSourceService,
     LlmFactExtractor,
+    TemplateAppService,
   ],
   exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService],
 })
