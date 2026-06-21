@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
+import TemplateGenerator from './template-generator';
 
 interface StepLog {
   step: string;
@@ -213,6 +214,8 @@ export default function TestDeployPage() {
             )}
           </div>
         </div>
+
+        <TemplateGenerator projectId={projectId} />
 
         {message && (
           <div className={`mb-4 p-3 rounded-lg text-sm ${message.includes('失败') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
