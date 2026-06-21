@@ -149,6 +149,57 @@ export class RuoyiClient {
     return { created, skipped };
   }
 
+  // ─── 终端用户数据代理（适配器②·服务端版：按**本人 token** 调 /system/<resource>，data_scope 据此生效）───
+  // 路B appData 契约 ←→ 若依 REST 的转译统一收在这里（原在浏览器注入器里，现搬服务端，浏览器不见若依 token）。
+
+  /** list：page/pageSize/filters → pageNum/pageSize/查询参；返回若依 {rows,total}。 */
+  async dataList(
+    cfg: RuoyiClientConfig,
+    token: string,
+    resource: string,
+    q: { page?: number; pageSize?: number; filters?: Record<string, unknown> },
+  ): Promise<{ rows: any[]; total: number }> {
+    const qs = new URLSearchParams();
+    qs.set('pageNum', String(q.page ?? 1));
+    qs.set('pageSize', String(q.pageSize ?? 10));
+    for (const [k, v] of Object.entries(q.filters ?? {})) if (v != null && v !== '') qs.set(k, String(v));
+    const data = await this.get(cfg, `/system/${resource}/list?${qs.toString()}`, token);
+    this.ensureOk(data, `list ${resource}`);
+    return { rows: data?.rows ?? [], total: data?.total ?? 0 };
+  }
+
+  async dataGet(cfg: RuoyiClientConfig, token: string, resource: string, id: string): Promise<any> {
+    const data = await this.get(cfg, `/system/${resource}/${encodeURIComponent(id)}`, token);
+    this.ensureOk(data, `get ${resource}`);
+    return data?.data;
+  }
+
+  async dataCreate(cfg: RuoyiClientConfig, token: string, resource: string, body: Record<string, unknown>): Promise<any> {
+    const data = await this.post(cfg, `/system/${resource}`, body, token);
+    this.ensureOk(data, `create ${resource}`);
+    return data?.data;
+  }
+
+  /** update：若依 PUT 把 id 放 body。 */
+  async dataUpdate(cfg: RuoyiClientConfig, token: string, resource: string, body: Record<string, unknown>): Promise<any> {
+    const data = await this.put(cfg, `/system/${resource}`, body, token);
+    this.ensureOk(data, `update ${resource}`);
+    return data?.data;
+  }
+
+  async dataRemove(cfg: RuoyiClientConfig, token: string, resource: string, id: string): Promise<void> {
+    const data = await this.del(cfg, `/system/${resource}/${encodeURIComponent(id)}`, token);
+    this.ensureOk(data, `remove ${resource}`);
+  }
+
+  /** 若依以 HTTP 200 外壳 + body.code 表状态（鉴权失败是 200+code:401）；非 200 抛错，401 单独标。 */
+  private ensureOk(data: any, what: string): void {
+    const code = data?.code;
+    if (code === 200) return;
+    if (code === 401) throw new Error(`若依鉴权失败(${what})：${data?.msg ?? '需登录/clientid'}`);
+    throw new Error(`若依${what}失败：${JSON.stringify(data).slice(0, 200)}`);
+  }
+
   // ─── HTTP ───
   private headers(token?: string, cfg?: RuoyiClientConfig): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -168,6 +219,20 @@ export class RuoyiClient {
 
   private async get(cfg: RuoyiClientConfig, path: string, token?: string): Promise<any> {
     const res = await fetch(`${cfg.baseUrl}${path}`, { method: 'GET', headers: this.headers(token, cfg) });
+    return res.json();
+  }
+
+  private async put(cfg: RuoyiClientConfig, path: string, body?: unknown, token?: string): Promise<any> {
+    const res = await fetch(`${cfg.baseUrl}${path}`, {
+      method: 'PUT',
+      headers: this.headers(token, cfg),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return res.json();
+  }
+
+  private async del(cfg: RuoyiClientConfig, path: string, token?: string): Promise<any> {
+    const res = await fetch(`${cfg.baseUrl}${path}`, { method: 'DELETE', headers: this.headers(token, cfg) });
     return res.json();
   }
 }

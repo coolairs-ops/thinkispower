@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Query, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Query, Body, Headers, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../../database/prisma.service';
 import { CrudDataService } from './crud-data.service';
+import { RuoyiDataProxyService } from './ruoyi-data-proxy.service';
 import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
 import { KnowledgeSourceService } from './knowledge/knowledge-source.service';
 import { QaService } from './qa/qa.service';
@@ -7,17 +9,43 @@ import { QaService } from './qa/qa.service';
 /**
  * 已部署应用的数据接口（ADR-0001 / 路 B，REST 约定见 app-runtime-rest-contract.md）。
  *
- * v1 公开、无 per-app 鉴权——按 projectId 隔离到各自 `proj_<id>` schema。
- * （per-app 鉴权按 ADR 延后；此控制器不挂 JwtAuthGuard 即为公开。）
+ * v1 公开、无 per-app 鉴权——路 B 按 projectId 隔离到各自 `proj_<id>` schema。
+ * 若依底座（backendRuntime.kind='ruoyi' 且 ready）：同一条 /api/app 路由**分流到 RuoyiDataProxyService**，
+ *   按终端用户登录态（x-app-session 头）代持本人若依 token 转发，data_scope 真按人生效（A 架构）。
  */
 @Controller('api/app')
 export class AppRuntimeController {
   constructor(
+    private prisma: PrismaService,
     private crud: CrudDataService,
+    private ruoyiProxy: RuoyiDataProxyService,
     private ruleEval: RuleEvaluationService,
     private knowledgeSource: KnowledgeSourceService,
     private qa: QaService,
   ) {}
+
+  /** 该项目是否以若依为后端且已就绪（决定 /api/app CRUD 走代理还是路B）。未配若依则快速否决，不打 DB。 */
+  private async isRuoyi(projectId: string): Promise<boolean> {
+    if (!this.ruoyiProxy.enabled) return false;
+    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+    const be = p?.backendRuntime as { kind?: string; status?: string } | null;
+    return be?.kind === 'ruoyi' && be?.status === 'ready';
+  }
+
+  /** 终端用户登录（仅若依后端需要）：换本人 token，回 session（浏览器不见若依 token）。 */
+  @Post(':projectId/_login')
+  async login(@Param('projectId') projectId: string, @Body() body: { username?: string; password?: string }) {
+    if (!(await this.isRuoyi(projectId))) throw new BadRequestException('该应用无需登录（非若依后端）');
+    if (!body?.username || !body?.password) throw new BadRequestException('需要 username/password');
+    return this.ruoyiProxy.login(body.username, body.password);
+  }
+
+  /** 终端用户登出：作废服务端 session。 */
+  @Post(':projectId/_logout')
+  logout(@Headers('x-app-session') session?: string) {
+    if (session) this.ruoyiProxy.logout(session);
+    return { ok: true };
+  }
 
   /** 形态B/活数据：知识库（原件/证据/事实 + 证据链）。字面段，声明在通用 CRUD 之前避免被 :resource 吃掉。 */
   @Get(':projectId/_knowledge')
@@ -43,56 +71,72 @@ export class AppRuntimeController {
   }
 
   @Get(':projectId/:resource')
-  list(
+  async list(
     @Param('projectId') projectId: string,
     @Param('resource') resource: string,
     @Query() query: Record<string, string>,
+    @Headers('x-app-session') session?: string,
   ) {
     const { page, pageSize, sort, ...filters } = query;
-    return this.crud.list(projectId, resource, {
-      page: page ? Number(page) : undefined,
-      pageSize: pageSize ? Number(pageSize) : undefined,
-      sort,
-      filters,
-    });
+    const opts = { page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined, sort, filters };
+    if (await this.isRuoyi(projectId)) return this.ruoyiProxy.list(resource, session, opts);
+    return this.crud.list(projectId, resource, opts);
   }
 
   @Get(':projectId/:resource/:id')
-  get(@Param('projectId') projectId: string, @Param('resource') resource: string, @Param('id') id: string) {
+  async get(
+    @Param('projectId') projectId: string,
+    @Param('resource') resource: string,
+    @Param('id') id: string,
+    @Headers('x-app-session') session?: string,
+  ) {
+    if (await this.isRuoyi(projectId)) return this.ruoyiProxy.get(resource, session, id);
     return this.crud.get(projectId, resource, id);
   }
 
   @Post(':projectId/:resource')
-  create(
+  async create(
     @Param('projectId') projectId: string,
     @Param('resource') resource: string,
     @Body() body: Record<string, unknown>,
+    @Headers('x-app-session') session?: string,
   ) {
+    if (await this.isRuoyi(projectId)) return this.ruoyiProxy.create(resource, session, body);
     return this.crud.create(projectId, resource, body);
   }
 
   @Put(':projectId/:resource/:id')
-  put(
+  async put(
     @Param('projectId') projectId: string,
     @Param('resource') resource: string,
     @Param('id') id: string,
     @Body() body: Record<string, unknown>,
+    @Headers('x-app-session') session?: string,
   ) {
+    if (await this.isRuoyi(projectId)) return this.ruoyiProxy.update(resource, session, id, body);
     return this.crud.update(projectId, resource, id, body);
   }
 
   @Patch(':projectId/:resource/:id')
-  patch(
+  async patch(
     @Param('projectId') projectId: string,
     @Param('resource') resource: string,
     @Param('id') id: string,
     @Body() body: Record<string, unknown>,
+    @Headers('x-app-session') session?: string,
   ) {
+    if (await this.isRuoyi(projectId)) return this.ruoyiProxy.update(resource, session, id, body);
     return this.crud.update(projectId, resource, id, body);
   }
 
   @Delete(':projectId/:resource/:id')
-  remove(@Param('projectId') projectId: string, @Param('resource') resource: string, @Param('id') id: string) {
+  async remove(
+    @Param('projectId') projectId: string,
+    @Param('resource') resource: string,
+    @Param('id') id: string,
+    @Headers('x-app-session') session?: string,
+  ) {
+    if (await this.isRuoyi(projectId)) return this.ruoyiProxy.remove(resource, session, id);
     return this.crud.remove(projectId, resource, id);
   }
 }
