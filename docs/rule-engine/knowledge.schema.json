@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://think-is-power.local/schemas/knowledge-v1.json",
+  "title": "可溯源知识库 Knowledge Schema",
+  "version": "1.0",
+  "description": "为规则引擎提供'每个评分数据都可溯源到真实材料'的知识库结构。三层:Source原件→Evidence证据片段→Fact结构化值。配合 extraction(提取流程)把 evidence_policy 从结论级下沉到数据级。与 rulepack.schema.json 配套使用。",
+  "type": "object",
+  "required": ["sources", "evidences", "facts"],
+  "additionalProperties": false,
+
+  "properties": {
+
+    "sources": {
+      "type": "array",
+      "description": "第一层 原始材料层:客户上传的真实材料原件。只读、留哈希、永不物理删除。",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "title", "content_hash", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "source_id": { "type": "string", "pattern": "^SRC-", "description": "原件唯一ID" },
+          "title": { "type": "string", "description": "材料标题，如 2025年第3次飞行检查报告" },
+          "doc_type": { "type": "string", "description": "材料类型，如 飞检报告/抽检通报/告诫信" },
+          "issuer": { "type": "string", "description": "出具单位" },
+          "doc_number": { "type": "string", "description": "文号" },
+          "issued_date": { "type": ["string", "null"], "format": "date" },
+          "uploaded_by": { "type": "string", "description": "上传人" },
+          "content_hash": { "type": "string", "description": "原件内容哈希(指纹)。任何引用须能据此验证原件未被篡改" },
+          "storage_ref": { "type": "string", "description": "原件存储位置引用" },
+          "status": {
+            "type": "string",
+            "enum": ["active", "superseded", "revoked"],
+            "description": "active有效/superseded被新版替代/revoked作废。监管材料只标失效，绝不物理删除"
+          }
+        }
+      }
+    },
+
+    "evidences": {
+      "type": "array",
+      "description": "第二层 证据片段层:把原件中'被用到的某一处'变成可引用的最小单位。这是 rulepack 里 evidence_ref 真正指向的东西。",
+      "items": {
+        "type": "object",
+        "required": ["evidence_id", "source_id", "quote", "locator"],
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": { "type": "string", "pattern": "^EV-", "description": "证据片段唯一ID。rulepack 的 evidence_ref 引用它" },
+          "source_id": { "type": "string", "pattern": "^SRC-", "description": "指回第一层原件" },
+          "quote": { "type": "string", "description": "原文片段(从原件中摘出的具体文字)" },
+          "locator": {
+            "type": "object",
+            "description": "在原件中的精确位置，供人工核对时一键翻到",
+            "additionalProperties": false,
+            "properties": {
+              "page": { "type": "integer" },
+              "paragraph": { "type": "integer" },
+              "bbox": { "type": "string", "description": "扫描件可选:坐标框" },
+              "char_range": { "type": "string", "description": "文本可选:字符区间" }
+            }
+          },
+          "summary": { "type": "string", "description": "该片段内容摘要" },
+          "verified_in_source": {
+            "type": "boolean",
+            "description": "校验门结果:此 quote 是否经机器核对、确实存在于 source 原件中。false 者不得被 fact 采纳"
+          }
+        }
+      }
+    },
+
+    "facts": {
+      "type": "array",
+      "description": "第三层 结构化数据层:从证据片段提取出的、能进评分的值。每个 Fact 必须挂证据。rulepack 的 metric 从这里取数。",
+      "items": {
+        "type": "object",
+        "required": ["fact_id", "name", "value", "evidence_refs", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "fact_id": { "type": "string", "pattern": "^FACT-", "description": "结构化值唯一ID" },
+          "name": { "type": "string", "description": "事实名，对应 metric 要用的字段，如 检查缺陷数/是否有监管警示" },
+          "value": { "description": "提取出的值(数值/布尔/枚举/文本)" },
+          "evidence_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^EV-" },
+            "description": "支撑此 Fact 的证据片段ID(至少一条)。这是溯源链的关节:Fact→Evidence→Source"
+          },
+          "extraction_method": {
+            "type": "string",
+            "enum": ["ai_extracted", "manual_entered"],
+            "description": "ai_extracted=AI提取的候选；manual_entered=人工直接录入(对应规则引擎 metric 的 source_type=manual)"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["candidate", "confirmed", "rejected", "missing"],
+            "description": "candidate=AI提取+过校验门的候选(待人工确认)；confirmed=人工确认采纳(才可进评分)；rejected=人工否决；missing=该维度需要但材料中无支撑(显式缺失，绝不静默补零)"
+          },
+          "confirmed_by": { "type": ["string", "null"], "description": "确认人(status=confirmed 时必有)" },
+          "confirmed_at": { "type": ["string", "null"], "format": "date-time" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "confirmed" } } },
+            "then": {
+              "required": ["confirmed_by"],
+              "properties": { "confirmed_by": { "type": "string", "minLength": 1 } }
+            }
+          }
+        ]
+      }
+    }
+  },
+
+  "_extraction_pipeline": {
+    "描述": "从材料到可用Fact的四步提取流程。核心原则:AI只能找候选并指向原文，机器卡掉指不出原文的，人确认采纳，没确认/找不到的都不许进评分。AI在链中无任何一处能单独把数字送进结果。",
+    "步骤": [
+      "1. AI提取(强制附原文+位置):AI从source提取fact候选，必须同时给出quote和locator。给不出出处的候选直接作废。",
+      "2. 校验门(机器自动):回到source原件核对quote是否真的存在(字符串/模糊匹配)。对不上的 evidence.verified_in_source=false，作废。此门防AI编造出处。",
+      "3. 人工确认:过门的候选 fact.status=candidate，由有权角色看原文后逐条确认→confirmed 才可进评分。复用 evidence_policy 的'待人工确认'。",
+      "4. 缺失显式:评分维度需要但找不到支撑材料的，fact.status=missing 显式标出，绝不静默补0或给默认值。复用 evidence_policy 的'缺证据标待核实、绝不自动下结论'。"
+    ],
+    "严格度可调档_重要": "全程逐条人工确认是默认(适合药监等强溯源场景)，但人力成本是本质成本。允许按场景调档:批量确认/抽样确认/高可信度自动采纳。把'溯源严格度'做成可配置档位，不一刀切。"
+  },
+
+  "_link_to_rulepack": {
+    "描述": "本知识库如何接回 rulepack.schema.json，把 evidence_policy 从结论级下沉到数据级。",
+    "连接点": [
+      "metric.source(computed类):不再假设数据已在字段里，而是绑定到 confirmed 状态的 facts.name 取数。只有 status=confirmed 的 Fact 可被 metric 聚合。",
+      "metric(source_type=manual):对应 fact.extraction_method=manual_entered，同样要挂 evidence_refs。",
+      "rulepack 的 evidence_ref:正式指向本库 evidences[].evidence_id。原本是空ID，现在落地为'能在原件翻到的真实原文'。",
+      "evidence_policy 升级:原来'每个结论回指证据'，现在下沉为'每个参与计算的Fact也回指证据'。结论的可信，由数据的可信支撑。",
+      "守护接入:source.content_hash 变化(原件被篡改)、某confirmed Fact 的支撑 evidence 被作废(支撑消失)→ 守护体检报警。"
+    ],
+    "完整溯源链": "维度得分 → metric值 → confirmed Fact → evidence_refs(原文片段) → source(哈希校验未篡改的原件)。任一数字顺链可落到原件具体一句话；落不到的数字不该存在。"
+  }
+}
