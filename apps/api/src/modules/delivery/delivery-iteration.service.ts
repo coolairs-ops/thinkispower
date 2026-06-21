@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, ConflictException, L
 import { Subject, ReplaySubject, Observable } from 'rxjs';
 import { PrismaService } from '../../database/prisma.service';
 import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
-import { buildDataContract, checkContractConformance } from '../app-runtime/app-contract';
+import { buildDataContract, checkContractConformance, normalizeContractForRuntime, contractPromptBlock } from '../app-runtime/app-contract';
 import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { QualityGateService } from '../../services/quality-gate.service';
 import { DeepseekService } from '../../services/deepseek.service';
@@ -470,10 +470,10 @@ export class DeliveryIterationService {
     const usefulRecs = recommendations.filter(r => !r.includes('整体质量'));
     if (usefulRecs.length === 0) return null;
 
-    // 读取当前 Demo HTML
+    // 读取当前 Demo HTML（+ 数据模型/后端类型，供契约先行注入）
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { demoHtml: true },
+      select: { demoHtml: true, dataModel: true, backendRuntime: true },
     });
     const currentHtml = project?.demoHtml || '';
     if (!currentHtml || currentHtml.length < 200) {
@@ -481,16 +481,20 @@ export class DeliveryIterationService {
       return null;
     }
 
+    // 契约先行（ADR-0007）：每次修复 prompt 都带数据契约约束，预防修别的问题时引入新的越界 appData 调用
+    //（后验门只在越界后才纠；先验让每轮修复都朝契约收敛）。按 backendRuntime 方言归一。无 schema/模型 → 空串。
+    const contractBlock = this.buildContractBlock(project?.dataModel, (project?.backendRuntime as { kind?: string } | null)?.kind);
+
     // 多模块 SPA：把建议映射到具体模块，逐个在精简上下文里定向修复，突破整块截断/输出上限。
     // 无模块锚点（旧 demo）或建议无法定位到任何模块时，回退到原有整块逻辑，保证不回归。
     const modules = this.htmlExtractor.listModules(currentHtml);
     if (modules.length === 0) {
-      return this.autoFixWholeHtml(currentHtml, usefulRecs.slice(0, 5));
+      return this.autoFixWholeHtml(currentHtml, usefulRecs.slice(0, 5), contractBlock);
     }
 
     const recsByModule = this.mapRecommendationsToModules(usefulRecs, modules);
     if (recsByModule.size === 0) {
-      return this.autoFixWholeHtml(currentHtml, usefulRecs.slice(0, 5));
+      return this.autoFixWholeHtml(currentHtml, usefulRecs.slice(0, 5), contractBlock);
     }
 
     const MAX_FIX_MODULES = 4; // 单轮内限制串行 LLM 调用数，控制时延
@@ -499,7 +503,7 @@ export class DeliveryIterationService {
     let fixedCount = 0;
     for (const key of keysToFix) {
       try {
-        const fixed = await this.fixSingleModule(workingHtml, key, recsByModule.get(key)!);
+        const fixed = await this.fixSingleModule(workingHtml, key, recsByModule.get(key)!, contractBlock);
         // mergeModuleContent 仅替换目标模块的 render 内容，全局 script/head/data-theme 不动
         if (fixed && fixed !== workingHtml) {
           workingHtml = fixed;
@@ -532,8 +536,20 @@ export class DeliveryIterationService {
     return byModule;
   }
 
+  /** 数据模型 → 按底座方言归一的契约 prompt 块（先验注入用）。无 schema/模型/解析失败 → 空串。 */
+  private buildContractBlock(dataModel: string | null | undefined, backendKind?: string): string {
+    if (!this.schema || !dataModel) return '';
+    try {
+      const contract = normalizeContractForRuntime(buildDataContract(this.schema.parseAndValidate(dataModel)), backendKind);
+      return contractPromptBlock(contract);
+    } catch (e) {
+      this.logger.warn(`契约块构建跳过: ${e instanceof Error ? e.message : e}`);
+      return '';
+    }
+  }
+
   /** 定向修复单个模块：精简上下文 → 只改该模块 → 合并回完整 HTML */
-  private async fixSingleModule(html: string, moduleKey: string, recs: string[]): Promise<string | null> {
+  private async fixSingleModule(html: string, moduleKey: string, recs: string[], contractBlock = ''): Promise<string | null> {
     const condensed = this.htmlExtractor.buildCondensedHtml(html, moduleKey);
 
     const fixPrompt = `请修复以下 Demo HTML 中「data-module-key="${moduleKey}"」这一个模块的问题，输出完整 HTML。
@@ -545,7 +561,7 @@ ${condensed}
 
 针对该模块的修复建议：
 ${recs.join('\n')}
-
+${contractBlock ? `\n${contractBlock}\n` : ''}
 要求：
 1. 只修改 data-module-key="${moduleKey}" 模块 render() 返回的内容
 2. 不要改动全局 <script>（navigate/状态/pages 结构）、<head>、样式与 daisyUI data-theme
@@ -569,7 +585,7 @@ ${recs.join('\n')}
   }
 
   /** 整块修复（旧逻辑回退）：无模块锚点或建议无法定位时使用 */
-  private async autoFixWholeHtml(currentHtml: string, topRecs: string[]): Promise<string | null> {
+  private async autoFixWholeHtml(currentHtml: string, topRecs: string[], contractBlock = ''): Promise<string | null> {
     if (topRecs.length === 0) return null;
 
     // 截断过长的HTML（保留头尾关键部分）
@@ -587,7 +603,7 @@ ${htmlSnippet}
 
 修复建议：
 ${topRecs.join('\n')}
-
+${contractBlock ? `\n${contractBlock}\n` : ''}
 要求：
 1. 保持原有结构和功能不变
 2. 只修改有问题的部分

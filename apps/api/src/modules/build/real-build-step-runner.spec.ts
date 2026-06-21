@@ -2,7 +2,7 @@ import { RealBuildStepRunner } from './real-build-step-runner';
 
 describe('RealBuildStepRunner（真实 generate + 测试门）', () => {
   let prisma: any;
-  let cloudecode: { generatePageContent: jest.Mock };
+  let cloudecode: { generatePageContent: jest.Mock; buildContractNotes: jest.Mock };
   let runner: RealBuildStepRunner;
 
   const mod = { id: 'm1', name: '门店列表', spec: '门店列表 — 增删改查' };
@@ -13,7 +13,7 @@ describe('RealBuildStepRunner（真实 generate + 测试门）', () => {
       project: { findUnique: jest.fn().mockResolvedValue({ name: '门店巡检', dataModel: 'model Store{ id String @id }', structuredRequirement: null }) },
       buildModule: { findUnique: jest.fn() },
     };
-    cloudecode = { generatePageContent: jest.fn() };
+    cloudecode = { generatePageContent: jest.fn(), buildContractNotes: jest.fn().mockReturnValue('') };
     runner = new RealBuildStepRunner(prisma, cloudecode as never);
   });
 
@@ -24,7 +24,19 @@ describe('RealBuildStepRunner（真实 generate + 测试门）', () => {
       expect(r.ok).toBe(true);
       expect((r.result as any).html).toBe(richHtml);
       expect((r.result as any).len).toBe(richHtml.length);
-      expect(cloudecode.generatePageContent).toHaveBeenCalledWith('门店巡检', '门店列表 — 增删改查', 'model Store{ id String @id }', false, '');
+      expect(cloudecode.generatePageContent).toHaveBeenCalledWith('门店巡检', '门店列表 — 增删改查', 'model Store{ id String @id }', false, '', '');
+    });
+
+    it('契约先行：从数据模型+backendRuntime 构契约并传给生成（ADR-0007）', async () => {
+      prisma.project.findUnique.mockResolvedValue({
+        name: '门店巡检', dataModel: 'model Store{ id String @id }', structuredRequirement: null,
+        backendRuntime: { kind: 'ruoyi' },
+      });
+      cloudecode.buildContractNotes.mockReturnValue('# 数据契约\n- store：id');
+      cloudecode.generatePageContent.mockResolvedValue(richHtml);
+      await runner.generate('p1', mod);
+      expect(cloudecode.buildContractNotes).toHaveBeenCalledWith('model Store{ id String @id }', 'ruoyi');
+      expect(cloudecode.generatePageContent.mock.calls[0][5]).toBe('# 数据契约\n- store：id'); // 第6参=契约块
     });
 
     it('把已采纳设计建议作为设计约束传给生成', async () => {

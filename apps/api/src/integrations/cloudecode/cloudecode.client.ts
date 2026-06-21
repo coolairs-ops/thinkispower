@@ -325,16 +325,7 @@ export class CloudecodeClient {
 
     // 2a. 数据契约（ADR-0007 应用契约先行）：从刚产的数据模型导出资源+字段，按 backendRuntime 方言归一
     //     （若依→字段名小写）后直注每页生成 prompt → 前端从第一次生成就用对的资源名/字段，而非生成后再纠。
-    let contractNotes = '';
-    if (this.schema && dataModel) {
-      try {
-        const kind = (project?.backendRuntime as { kind?: string } | null)?.kind;
-        const contract = normalizeContractForRuntime(buildDataContract(this.schema.parseAndValidate(dataModel)), kind);
-        contractNotes = contractPromptBlock(contract);
-      } catch (e) {
-        this.logger.warn(`契约注入跳过: ${e instanceof Error ? e.message : e}`);
-      }
-    }
+    const contractNotes = this.buildContractNotes(dataModel, (project?.backendRuntime as { kind?: string } | null)?.kind);
 
     // 2. 确定性外壳
     const shell = buildDemoShell({ appName, tailwindCdn: tailwindCdnUrl(), daisyuiCss: daisyuiCssUrl(), pages });
@@ -361,6 +352,22 @@ export class CloudecodeClient {
     });
     this.logger.log(`分段生成完成 for project ${projectId}: ${pages.length} 页 / ${finalHtml.length} bytes`);
     return { success: true, summary: `分段生成 ${pages.length} 页` };
+  }
+
+  /**
+   * 数据模型 → 按底座方言归一的契约 prompt 块（ADR-0007 先验注入用）。
+   * 无 schema（未注入）/无 dataModel/解析失败 → 空串（降级，不阻断生成）。
+   * 供分段生成 + 建造回路（RealBuildStepRunner）共用，统一"契约先行"接法。
+   */
+  buildContractNotes(dataModel: string | null | undefined, backendKind?: string): string {
+    if (!this.schema || !dataModel) return '';
+    try {
+      const contract = normalizeContractForRuntime(buildDataContract(this.schema.parseAndValidate(dataModel)), backendKind);
+      return contractPromptBlock(contract);
+    } catch (e) {
+      this.logger.warn(`契约注入跳过: ${e instanceof Error ? e.message : e}`);
+      return '';
+    }
   }
 
   /**

@@ -23,15 +23,18 @@ export class RealBuildStepRunner implements BuildStepRunner {
   async generate(projectId: string, module: BuildModuleRef): Promise<{ ok: boolean; summary?: string; result?: unknown }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { name: true, dataModel: true, structuredRequirement: true },
+      select: { name: true, dataModel: true, structuredRequirement: true, backendRuntime: true },
     });
     const appName = (project?.name || '应用').slice(0, 20);
     const brief = module.spec || module.name;
     const designNotes = adoptedDesignNotes(project?.structuredRequirement);
+    // 契约先行（ADR-0007）：建造回路重生成模块时也注入数据契约，按 backendRuntime 方言归一，
+    // 让每次重建都朝契约收敛、不靠后验门事后纠（与分段生成同一接法）。
+    const contractNotes = this.cloudecode.buildContractNotes(project?.dataModel, (project?.backendRuntime as { kind?: string } | null)?.kind);
 
     let html = '';
     try {
-      html = await this.cloudecode.generatePageContent(appName, brief, project?.dataModel ?? null, false, designNotes);
+      html = await this.cloudecode.generatePageContent(appName, brief, project?.dataModel ?? null, false, designNotes, contractNotes);
     } catch (e) {
       return { ok: false, summary: `生成调用失败: ${e instanceof Error ? e.message : e}` };
     }
