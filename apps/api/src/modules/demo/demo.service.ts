@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
@@ -44,6 +45,7 @@ export class DemoService {
     private minio: MinioService,
     private replicate: ScreenshotReplicateService,
     private ruoyiAppData: RuoyiAppDataService,
+    private config: ConfigService,
   ) {}
 
   async getDemo(userId: string, projectId: string) {
@@ -155,7 +157,11 @@ export class DemoService {
       // 看图复刻路径（私有化两段式）
       await this.generateFromShots(projectId, shots);
     } else {
-      const result = await this.cloudecode.generateDemoHtmlDirect(projectId, p?.planSummary);
+      // 默认走内置模板出页（政企风、稳定不跑偏）；DEMO_ENGINE=deepseek 可退回 AI 即兴。
+      const engine = this.config.get<string>('DEMO_ENGINE', 'template');
+      const result = engine === 'deepseek'
+        ? await this.cloudecode.generateDemoHtmlDirect(projectId, p?.planSummary)
+        : await this.cloudecode.generateDemoFromTemplate(projectId, p?.planSummary);
       if (!result.success) throw new Error(result.rawError || '预览生成失败');
     }
     await this.markProgress(projectId, { phase: 'done', percent: 100, message: '预览已生成' });

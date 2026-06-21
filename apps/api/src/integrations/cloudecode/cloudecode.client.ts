@@ -7,6 +7,7 @@ import { HtmlModuleExtractorService } from '../../services/html-module-extractor
 import { BACKEND_RUNTIME, BackendRuntime } from '../../modules/app-runtime/backend-runtime.interface';
 import { SchemaMigrationService } from '../../modules/app-runtime/schema-migration.service';
 import { buildDataContract, normalizeContractForRuntime, contractPromptBlock } from '../../modules/app-runtime/app-contract';
+import { TemplateAppService } from '../../modules/app-runtime/ui-templates/template-app.service';
 
 /** 所有代码生成 prompt 的公共前缀 — 强制要求文件路径标记 */
 const FILE_PATH_REQUIREMENT = `【重要】每个文件必须用 \`\`\`文件路径 格式标记（不要用语言名）。正确格式：\`\`\`backend/src/user/user.service.ts\n内容\n\`\`\`。错误格式：\`\`\`typescript （会被丢弃）。\n`;
@@ -121,6 +122,7 @@ export class CloudecodeClient {
     private htmlExtractor: HtmlModuleExtractorService,
     @Inject(BACKEND_RUNTIME) private backend: BackendRuntime,
     @Optional() private schema?: SchemaMigrationService,
+    @Optional() private templateApp?: TemplateAppService,
   ) {}
 
   async executeTask(taskId: string): Promise<{
@@ -277,6 +279,57 @@ export class CloudecodeClient {
 
     this.logger.log(`Demo HTML direct generated for project ${projectId}: ${finalHtml.length} bytes`);
     return { success: true, summary: 'Demo HTML generated' };
+  }
+
+  /**
+   * 模板出页（默认生成路径，替代 DeepSeek 即兴出 HTML）：
+   * 小调用出数据模型 → 置备后端 → 套内置模板填数据出 demoHtml。长相由模板钉死、稳定不跑偏。
+   * 模板服务不可用 / 数据模型没出来 → 优雅退回 DeepSeek 直生成（不阻断交付）。
+   */
+  async generateDemoFromTemplate(projectId: string, planSummary: any): Promise<{ success: boolean; summary?: string; rawError?: string }> {
+    if (!this.templateApp) return this.generateDemoHtmlDirect(projectId, planSummary);
+    const pageLabels = this.itemNames(planSummary?.pages);
+    const labels = pageLabels.length ? pageLabels : ['总览', '列表'];
+    const features = this.itemNames(planSummary?.features);
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true } });
+    const appName = (project?.name || planSummary?.positioning || '应用').slice(0, 20);
+
+    const dataModel = await this.genDataModel(appName, labels, features);
+    if (!dataModel) {
+      this.logger.warn(`模板路径：数据模型未生成，退回 DeepSeek 直生成 for ${projectId}`);
+      return this.generateDemoHtmlDirect(projectId, planSummary);
+    }
+    try {
+      await this.prisma.project.update({ where: { id: projectId }, data: { dataModel } });
+      await this.backend.provision(projectId, dataModel);
+    } catch (e) {
+      this.logger.warn(`模板路径置备后端失败（降级为无数据后端）: ${e instanceof Error ? e.message : e}`);
+    }
+    try {
+      const r = await this.templateApp.buildAndStore(projectId);
+      this.logger.log(`模板出页完成 for ${projectId}: 主题=${r.theme} 资源=${r.resource}`);
+      return { success: true, summary: '模板出页' };
+    } catch (e) {
+      this.logger.warn(`模板渲染失败，退回 DeepSeek: ${e instanceof Error ? e.message : e}`);
+      return this.generateDemoHtmlDirect(projectId, planSummary);
+    }
+  }
+
+  /** 仅出数据模型（小调用，复用 DEMO_DATAMODEL_PROMPT）。失败返 null。 */
+  private async genDataModel(appName: string, pageLabels: string[], features: string[]): Promise<string | null> {
+    try {
+      const resp = await this.deepseek.chatWithRetry(
+        [
+          { role: 'system', content: DEMO_DATAMODEL_PROMPT },
+          { role: 'user', content: `## 项目\n${appName}\n## 页面\n${pageLabels.join('、')}\n## 功能\n${features.join('、') || '无'}` },
+        ],
+        { temperature: 0.2, maxTokens: 4096 },
+      );
+      return this.extractDataModel(resp || '').dataModel;
+    } catch (e) {
+      this.logger.warn(`数据模型生成失败: ${e instanceof Error ? e.message : e}`);
+      return null;
+    }
   }
 
   /**

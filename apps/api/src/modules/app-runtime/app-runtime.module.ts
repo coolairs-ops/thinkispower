@@ -52,6 +52,6 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     LlmFactExtractor,
     TemplateAppService,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService, TemplateAppService],
 })
 export class AppRuntimeModule {}

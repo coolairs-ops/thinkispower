@@ -6,6 +6,7 @@ import { DeepseekService } from '../../services/deepseek.service';
 import { DemoSnapshotService } from '../../modules/demo-snapshot/demo-snapshot.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { BACKEND_RUNTIME } from '../../modules/app-runtime/backend-runtime.interface';
+import { TemplateAppService } from '../../modules/app-runtime/ui-templates/template-app.service';
 import * as vm from 'vm';
 
 describe('CloudecodeClient', () => {
@@ -69,6 +70,7 @@ describe('CloudecodeClient', () => {
     health: jest.fn(),
     teardown: jest.fn(),
   };
+  const mockTemplateApp = { buildAndStore: jest.fn().mockResolvedValue({ theme: 'gov-blue', resource: 'company', columns: 2 }) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -82,6 +84,7 @@ describe('CloudecodeClient', () => {
         DemoSnapshotService,
         HtmlModuleExtractorService,
         { provide: BACKEND_RUNTIME, useValue: mockBackend },
+        { provide: TemplateAppService, useValue: mockTemplateApp },
       ],
     }).compile();
 
@@ -514,6 +517,21 @@ describe('CloudecodeClient', () => {
       L['w:message']({ data: { type: 'adjust-element', group: 'color', value: '#123456' } });
 
       expect(bare.style.color).toBe('#123456');
+    });
+  });
+
+  describe('generateDemoFromTemplate（模板默认出页，替代 DeepSeek）', () => {
+    it('小调用出数据模型 → 置备 → 套模板 buildAndStore（不走 DeepSeek 大 HTML 调用）', async () => {
+      (prisma as any).project.findUnique.mockResolvedValue({ name: '风险监管平台' });
+      (prisma as any).project.update.mockResolvedValue({});
+      (deepseek.chatWithRetry as jest.Mock).mockResolvedValue('```prisma\nmodel Company { id String @id\n name String\n}\n```');
+
+      const r = await client.generateDemoFromTemplate('p1', { pages: ['总览'], features: ['查询'] });
+
+      expect(r.success).toBe(true);
+      expect(deepseek.chatWithRetry).toHaveBeenCalled(); // 仅小调用出数据模型
+      expect(mockBackend.provision).toHaveBeenCalledWith('p1', expect.stringContaining('model Company'));
+      expect(mockTemplateApp.buildAndStore).toHaveBeenCalledWith('p1'); // 套模板出页
     });
   });
 });

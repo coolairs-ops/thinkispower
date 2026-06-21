@@ -12,6 +12,7 @@ import { ThemeService } from './theme.service';
 import { ScreenshotReplicateService } from './screenshot-replicate.service';
 import { MinioService } from '../../integrations/minio/minio.service';
 import { RuoyiAppDataService } from '../app-runtime/ruoyi-appdata.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('DemoService', () => {
   let service: DemoService;
@@ -77,6 +78,7 @@ describe('DemoService', () => {
         { provide: MinioService, useValue: { downloadFile: jest.fn() } },
         { provide: ScreenshotReplicateService, useValue: { replicate: jest.fn() } },
         { provide: RuoyiAppDataService, useValue: { enabled: false, transform: jest.fn(async (h: string) => h) } },
+        { provide: ConfigService, useValue: { get: (k: string, d?: unknown) => (k === 'DEMO_ENGINE' ? 'deepseek' : d) } },
       ],
     }).compile();
 
