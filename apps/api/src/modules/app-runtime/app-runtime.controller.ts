@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Patch, Delete, Param, Query, Body } from '@nestjs/common';
 import { CrudDataService } from './crud-data.service';
+import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
 
 /**
  * 已部署应用的数据接口（ADR-0001 / 路 B，REST 约定见 app-runtime-rest-contract.md）。
@@ -9,7 +10,20 @@ import { CrudDataService } from './crud-data.service';
  */
 @Controller('api/app')
 export class AppRuntimeController {
-  constructor(private crud: CrudDataService) {}
+  constructor(
+    private crud: CrudDataService,
+    private ruleEval: RuleEvaluationService,
+  ) {}
+
+  /**
+   * 形态B 运行态：生成的应用对一个对象跑规则评分（每查一个对象→读规则包+真实数据→八步→结论+证据链）。
+   * 4 段路径（_evaluate 字面段），与 2 段 list / 3 段 get 不撞。未配规则包/未启用 → 引擎返 ruleEngineEnabled:false。
+   * 前端经注入的 appData.evaluate(resource,id) 调它。
+   */
+  @Get(':projectId/_evaluate/:resource/:id')
+  evaluate(@Param('projectId') projectId: string, @Param('resource') resource: string, @Param('id') id: string) {
+    return this.ruleEval.evaluateObject(projectId, resource, id);
+  }
 
   @Get(':projectId/:resource')
   list(

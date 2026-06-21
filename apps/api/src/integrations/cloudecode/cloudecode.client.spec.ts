@@ -361,6 +361,21 @@ describe('CloudecodeClient', () => {
       expect(calls[1].method).toBe('POST');
       expect(JSON.parse(calls[1].body as string)).toEqual({ title: '买菜' });
     });
+
+    it('形态B：appData.evaluate 调 _evaluate 路由；启用返结果、未启用返 null', async () => {
+      const html = client.injectAppDataClient('<html><head></head><body></body></html>', 'proj-1');
+      const iife = html.match(/\(function\(\)\{[\s\S]*\}\)\(\);/)![0];
+      let lastUrl = '';
+      const mk = (payload: any) => {
+        const ctx: any = { window: {}, encodeURIComponent, fetch: (url: string) => { lastUrl = url; return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); } };
+        vm.createContext(ctx); vm.runInContext(iife, ctx); return (ctx.window as any).appData;
+      };
+      const on = await mk({ ruleEngineEnabled: true, finalConclusions: [{ value: 'D' }] }).evaluate('company', 'c1');
+      expect(lastUrl).toBe('/api/app/proj-1/_evaluate/company/c1');
+      expect(on.finalConclusions[0].value).toBe('D');
+      const off = await mk({ ruleEngineEnabled: false }).evaluate('company', 'c1');
+      expect(off).toBeNull(); // 未启用规则引擎 → 前端不显示评分区
+    });
   });
 
   describe('generateDemoStaged (分段生成：外壳 + 每页一次调用)', () => {
