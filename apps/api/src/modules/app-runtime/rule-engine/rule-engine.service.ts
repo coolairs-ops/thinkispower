@@ -65,6 +65,17 @@ export class RuleEngineService {
     // 步骤6：按 conflict_policy 裁决
     const finalConclusions = this.resolveConflicts(hits, pack.conflict_policy.strategy);
 
+    // ② 数据级闭环：每个结论的证据 = 规则自带静态 ∪ 其条件(透传所引用公式)依赖的指标所携带的证据。
+    // 让"结论 → 支撑数据 → 证据"在引擎输出里真闭环（Fact 来源时即真 evidence_id，可顺链回原件）。
+    const metricEv = new Map(metrics.map((m) => [m.id, m.evidenceRefs]));
+    const formulaExpr = new Map(pack.formulas.map((f) => [f.id, f.expression]));
+    for (const c of finalConclusions) {
+      const rule = pack.rules.find((r) => r.id === c.ruleId);
+      if (!rule) continue;
+      const dyn = this.evidenceForExpr(rule.when, metricEv, formulaExpr, new Set());
+      c.evidenceRefs = [...new Set([...c.evidenceRefs, ...dyn])];
+    }
+
     // 步骤7：套 evidence_policy（绑证据、算完整度、缺证据标待核实、整体待人工确认）
     const requiringMetrics = metrics; // 每个指标都应回指证据（policy.require_evidence_ref=true）
     const completeCount = requiringMetrics.filter((m) => m.evidenceComplete).length;
@@ -85,36 +96,57 @@ export class RuleEngineService {
   // ─── 步骤3：指标 ───
 
   private computeMetric(m: Metric, ctx: RuleDataContext, now: string): MetricResult {
-    const evidenceRefs = m.evidence_ref ?? [];
-    const base = { id: m.id, label: m.label, evidenceRefs, evidenceComplete: evidenceRefs.length > 0 };
+    const staticRefs = m.evidence_ref ?? [];
 
     if (m.source_type === 'manual') {
       const v = ctx.manualInputs?.[m.id];
-      return { ...base, value: v ?? null, note: v == null ? '人工录入值缺失（待录入）' : undefined, evidenceComplete: base.evidenceComplete && v != null };
+      return { id: m.id, label: m.label, value: v ?? null, evidenceRefs: staticRefs, note: v == null ? '人工录入值缺失（待录入）' : undefined, evidenceComplete: staticRefs.length > 0 && v != null };
     }
     if (m.source_type === 'external') {
-      return { ...base, value: null, note: 'external 外部取值为 v2 预留能力', evidenceComplete: false };
+      return { id: m.id, label: m.label, value: null, evidenceRefs: staticRefs, note: 'external 外部取值为 v2 预留能力', evidenceComplete: false };
     }
     // computed
     const family = m.metric_family ?? 'aggregate';
     const [entity, field] = (m.source ?? '').split('.');
     const rows = (entity && ctx.related[entity]) || [];
-    if (!entity) return { ...base, value: null, note: 'source 未指定', evidenceComplete: false };
+    if (!entity) return { id: m.id, label: m.label, value: null, evidenceRefs: staticRefs, note: 'source 未指定', evidenceComplete: false };
+
+    const filtered = this.filtered(rows, m.filter, now);
+    // ② 数据级闭环：贡献行若携带 evidence（来自 confirmed Fact）→ 收为动态证据，与静态合并。
+    // 非 Fact 来源（CRUD 实体行无 evidence 字段）则退化为纯静态，行为不变（向后兼容）。
+    const evidenceRefs = [...new Set([...staticRefs, ...this.rowEvidences(filtered)])];
 
     if (family === 'temporal') {
       if (m.temporal_op && m.temporal_op !== 'trend') {
-        return { ...base, value: null, note: `temporal.${m.temporal_op} 为 v2 能力（v1 只实做 trend）` };
+        return { id: m.id, label: m.label, value: null, evidenceRefs, note: `temporal.${m.temporal_op} 为 v2 能力（v1 只实做 trend）`, evidenceComplete: false };
       }
-      const series = this.filtered(rows, m.filter, now).map((r) => this.numField(r, field)).filter((x): x is number => x != null);
-      return { ...base, value: this.trend(series) };
+      const series = filtered.map((r) => this.numField(r, field)).filter((x): x is number => x != null);
+      return { id: m.id, label: m.label, value: this.trend(series), evidenceRefs, evidenceComplete: evidenceRefs.length > 0 };
     }
 
     // aggregate
-    const filtered = this.filtered(rows, m.filter, now);
-    const allRows = rows;
-    const value = this.aggregate(m, filtered, allRows, field);
+    const value = this.aggregate(m, filtered, rows, field);
     const missing = value == null;
-    return { ...base, value, note: missing ? `聚合 ${m.aggregation} 无可用数据` : undefined, evidenceComplete: base.evidenceComplete && !missing };
+    return { id: m.id, label: m.label, value, evidenceRefs, note: missing ? `聚合 ${m.aggregation} 无可用数据` : undefined, evidenceComplete: evidenceRefs.length > 0 && !missing };
+  }
+
+  /** 收集行携带的证据 id（confirmed Fact → RuleDataContext 时每行带 evidence）。用于数据级证据闭环。 */
+  private rowEvidences(rows: Array<Record<string, unknown>>): string[] {
+    const out: string[] = [];
+    for (const r of rows) { const e = r['evidence']; if (typeof e === 'string' && e) out.push(e); }
+    return out;
+  }
+
+  /** 某表达式（透传它引用的公式）依赖的指标所携带的全部证据。用于把结论接回支撑数据的证据。 */
+  private evidenceForExpr(expr: string, metricEv: Map<string, string[]>, formulaExpr: Map<string, string>, seen: Set<string>): string[] {
+    const refs: string[] = [];
+    for (const mid of tokensIn(expr, [...metricEv.keys()])) refs.push(...(metricEv.get(mid) ?? []));
+    for (const fid of tokensIn(expr, [...formulaExpr.keys()])) {
+      if (seen.has(fid)) continue;
+      seen.add(fid);
+      refs.push(...this.evidenceForExpr(formulaExpr.get(fid) ?? '', metricEv, formulaExpr, seen));
+    }
+    return [...new Set(refs)];
   }
 
   /** 行过滤：对每行按 filter 受限布尔表达式求值；filter 可用 monthsAgo/daysAgo（相对 now）。 */
@@ -200,6 +232,23 @@ export class RuleEngineService {
     const maxPriority = Math.max(...hits.map((h) => h.priority));
     return hits.filter((h) => h.priority === maxPriority);
   }
+}
+
+/** 表达式里以"独立标识符"形式出现的 id（前后非标识符字符，含中文/下划线/数字），避免 M_飞检 误命中 M_飞检次数。 */
+function tokensIn(expr: string, ids: string[]): string[] {
+  const isIdent = (ch: string) => !!ch && /[A-Za-z0-9_一-龥]/.test(ch);
+  return ids.filter((id) => {
+    let from = 0;
+    let idx = expr.indexOf(id, from);
+    while (idx !== -1) {
+      const before = idx > 0 ? expr[idx - 1] : '';
+      const after = idx + id.length < expr.length ? expr[idx + id.length] : '';
+      if (!isIdent(before) && !isIdent(after)) return true;
+      from = idx + 1;
+      idx = expr.indexOf(id, from);
+    }
+    return false;
+  });
 }
 
 /** now(YYYY-MM-DD) 偏移若干天/月，返回 ISO 日期串。供 filter 的 monthsAgo/daysAgo。 */
