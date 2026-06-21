@@ -2,6 +2,9 @@ import { getTheme, themeCssVars, THEMES, listThemes } from './theme-tokens';
 import { renderShell, esc } from './app-shell.template';
 import { renderDashboard } from './dashboard.template';
 import { renderApp, defaultFrontNav } from './app-template';
+import { renderKnowledge } from './knowledge.template';
+import { renderQa } from './qa.template';
+import { renderAdminApp, defaultAdminNav } from './admin-template';
 
 describe('内置模板渲染（套模板填数据，替代 DeepSeek 即兴）', () => {
   it('主题 token：6 套齐全，CSS vars 含主色，未知 id 回退政务蓝', () => {
@@ -58,5 +61,35 @@ describe('内置模板渲染（套模板填数据，替代 DeepSeek 即兴）', 
     expect(html).toContain('智能问答');
     expect(html).not.toContain('对象列表');
     expect(html).not.toContain('评分画像');
+  });
+
+  it('前台多模块 SPA：工作台/知识库/问答三段 + 导航切换脚本', () => {
+    const html = renderApp({ appName: 'X', dashboard: { title: '工作台', primaryResource: 'item', kpis: [], columns: [{ key: 'name', label: '名称' }] } });
+    expect(html).toContain('data-page="dashboard"');
+    expect(html).toContain('data-page="knowledge"');
+    expect(html).toContain('data-page="qa"');
+    expect(html).toContain("s.getAttribute('data-page')"); // 客户端切 section
+    expect(html).toContain('可溯源知识库'); // 知识库页型内容
+    expect(html).toContain('智能问答'); // 问答页型内容
+  });
+
+  it('页型：知识库带证据链概念，问答带聊天结构', () => {
+    expect(renderKnowledge()).toContain('证据链完整度');
+    expect(renderKnowledge()).toContain('var(--t-warning-bg)'); // 原文引用用语义色
+    expect(renderQa()).toContain('var(--t-info-bg)'); // 用户气泡
+    expect(renderQa()).toContain('ti-send');
+  });
+
+  it('后台：管理侧栏预置 + 业务列表（appData），删掉了监控/代码生成', () => {
+    const nav = defaultAdminNav();
+    const labels = nav.map((n) => n.label);
+    expect(labels).toEqual(['业务数据', '规则配置', '知识库管理', '用户管理', '角色权限', '组织部门', '操作审计', '系统设置']);
+    expect(labels).not.toContain('系统监控');
+    expect(labels).not.toContain('代码生成');
+    const html = renderAdminApp({ appName: '监管平台', themeId: 'gov-blue', resource: 'company', resourceLabel: '企业', columns: [{ key: 'name', label: '名称' }, { key: 'level', label: '分级', badge: true }] });
+    expect(html).toContain('管理后台');
+    expect(html).toContain('角色权限');
+    expect(html).toContain('id="adm-rows"');
+    expect(html).toContain('window.appData.list'); // 业务列表实时取数
   });
 });

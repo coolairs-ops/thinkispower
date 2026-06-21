@@ -1,5 +1,7 @@
 import { renderShell, NavItem } from './app-shell.template';
 import { renderDashboard, DashboardConfig } from './dashboard.template';
+import { renderKnowledge } from './knowledge.template';
+import { renderQa } from './qa.template';
 
 /**
  * 应用模板装配器（"套模板填数据"的入口，替代 DeepSeek 即兴出 HTML）。
@@ -26,13 +28,27 @@ export function defaultFrontNav(active = 'dashboard'): NavItem[] {
   ];
 }
 
+/** 前台多模块 SPA：工作台/知识库/智能问答 三段，侧栏点击客户端切换（display 切换，单文件 SPA）。 */
 export function renderApp(cfg: AppTemplateConfig): string {
+  const sections: [string, string][] = [
+    ['dashboard', renderDashboard(cfg.dashboard)],
+    ['knowledge', renderKnowledge()],
+    ['qa', renderQa()],
+  ];
+  const content = sections
+    .map(([k, h]) => `<section data-page="${k}"${k === 'dashboard' ? '' : ' style="display:none"'}>${h}</section>`)
+    .join('') + navSwitchScript();
   return renderShell({
     appName: cfg.appName,
     org: cfg.org,
     themeId: cfg.themeId,
     user: cfg.user,
     nav: cfg.nav ?? defaultFrontNav('dashboard'),
-    contentHtml: renderDashboard(cfg.dashboard),
+    contentHtml: content,
   });
+}
+
+/** 侧栏导航 → 切 section（href="#key" 对应 section[data-page=key]）。 */
+function navSwitchScript(): string {
+  return `<script>(function(){var ns=document.querySelectorAll('.nav a');ns.forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();var k=(a.getAttribute('href')||'').replace('#','');document.querySelectorAll('section[data-page]').forEach(function(s){s.style.display=s.getAttribute('data-page')===k?'block':'none';});ns.forEach(function(x){x.classList.remove('active');});a.classList.add('active');});});})();</script>`;
 }
