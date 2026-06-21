@@ -18,9 +18,10 @@ import { CloudecodeModule } from '../../integrations/cloudecode/cloudecode.modul
 import { SensorModule } from '../sensor/sensor.module';
 import { SharedCoreModule } from '../../shared/shared-core.module';
 import { IterativeOptimizerService } from '../../services/iterative-optimizer.service';
+import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 
 @Module({
-  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule, BullModule.registerQueue({ name: DELIVERY_QUEUE })],
+  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule, AppRuntimeModule, BullModule.registerQueue({ name: DELIVERY_QUEUE })],
   controllers: [DeliveryController],
   providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService],
   exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService],

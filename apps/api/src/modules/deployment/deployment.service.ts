@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { IDeploymentProvider, DEPLOYMENT_PROVIDERS, DeploymentResult } from './interfaces/deployment-provider.interface';
 import { BACKEND_RUNTIME, BackendRuntime } from '../app-runtime/backend-runtime.interface';
+import { RuoyiAppDataService } from '../app-runtime/ruoyi-appdata.service';
 
 @Injectable()
 export class DeploymentService {
@@ -17,6 +18,8 @@ export class DeploymentService {
     @Optional()
     @Inject(BACKEND_RUNTIME)
     private backend?: BackendRuntime,
+    @Optional()
+    private ruoyiAppData?: RuoyiAppDataService,
   ) {}
 
   async deploy(
@@ -121,8 +124,11 @@ export class DeploymentService {
       orderBy: { deployedAt: 'desc' },
       select: { html: true },
     });
-
-    return deployment?.html || null;
+    const html = deployment?.html || null;
+    if (!html || !this.ruoyiAppData?.enabled) return html;
+    // 若项目后端是若依，serve 时把烘焙的路B appData 换成若依版（+服务端 token），令前端显示若依真数据
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+    return (await this.ruoyiAppData.transform(html, project?.backendRuntime)) ?? html;
   }
 
   async getHistory(projectId: string) {

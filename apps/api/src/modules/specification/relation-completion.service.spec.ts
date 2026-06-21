@@ -56,6 +56,26 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
       expect(r.candidates[0].cardinality).toBe('1-N');
     });
 
+    it('树：显式 tree=true 或 parent===child 都判为树，cardinality 归一 1-N', async () => {
+      deepseek.chat.mockResolvedValue(
+        JSON.stringify([
+          { parent: '部门', child: '部门', cardinality: '1-N', tree: true, fkField: 'parentId', disposition: 'autofill' },
+          { parent: '分类', child: '分类', cardinality: 'N-N', fkField: 'parentId', disposition: 'autofill' }, // 无 tree 标记但同实体
+        ]),
+      );
+      const r = await svc.detect('u1', 'p1');
+      expect(r.candidates[0]).toMatchObject({ tree: true, fkField: 'parentId', cardinality: '1-N' });
+      expect(r.candidates[1]).toMatchObject({ parent: '分类', tree: true, cardinality: '1-N' }); // N-N 被树覆盖归 1-N
+    });
+
+    it('N-N：保留 cardinality 与 joinTable', async () => {
+      deepseek.chat.mockResolvedValue(
+        JSON.stringify([{ parent: '学生', child: '课程', cardinality: 'N-N', joinTable: 'student_course', disposition: 'ask' }]),
+      );
+      const r = await svc.detect('u1', 'p1');
+      expect(r.candidates[0]).toMatchObject({ cardinality: 'N-N', joinTable: 'student_course', tree: undefined });
+    });
+
     it('ownership：非属主拒绝', async () => {
       await expect(svc.detect('other', 'p1')).rejects.toThrow(ForbiddenException);
       expect(deepseek.chat).not.toHaveBeenCalled();
@@ -99,6 +119,19 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
       withCandidates([{ parent: '客户', child: '项目', cardinality: '1-N', disposition: 'autofill' }]);
       const r = await svc.apply('u1', 'p1', { '客户->项目': { onDelete: 'bogus' } });
       expect(r.relations[0].onDelete).toBe('restrict');
+    });
+
+    it('树候选 → 回写带 tree=true、自外键', async () => {
+      withCandidates([{ parent: '部门', child: '部门', cardinality: '1-N', tree: true, fkField: 'parentId', disposition: 'autofill' }]);
+      const r = await svc.apply('u1', 'p1');
+      expect(r.relations[0]).toMatchObject({ parent: '部门', child: '部门', tree: true, fkField: 'parentId', cardinality: '1-N' });
+    });
+
+    it('N-N 候选 → 回写保留（不丢弃），带 joinTable', async () => {
+      withCandidates([{ parent: '学生', child: '课程', cardinality: 'N-N', joinTable: 'student_course', disposition: 'autofill' }]);
+      const r = await svc.apply('u1', 'p1');
+      expect(r.relations).toHaveLength(1);
+      expect(r.relations[0]).toMatchObject({ cardinality: 'N-N', joinTable: 'student_course' });
     });
   });
 

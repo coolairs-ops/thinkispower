@@ -3,10 +3,15 @@ import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
 
 /**
- * 实体关系补全（relationship-completion-design.md，Phase 2a：1—N 主子表）。
+ * 实体关系补全（relationship-completion-design.md）。
  * 把"实体关系"接进 A/D/回写流水线：检测候选关系(从已填证据推) → D 分类(autofill/ask) →
  * ask 出选择题(基数/级联) → 回写 structuredRequirement.relations → 喂若依子表 codegen。
  * 复用 requirement-completion 的成法（A/D/apply 同构）。
+ *
+ * 关系类型分阶段（设计 §6）：
+ *   - Phase 2a｜1—N 主子表（已落）：parent 1 — N child，child 带外键。
+ *   - Phase 2c｜自关联/树（本轮）：parent===child，child 带自外键(parentId)，喂若依 tree 模板。
+ *   - Phase 2b｜N—N 多对多（本轮）：互为多，合成中间表实体喂 codegen。
  */
 
 export type Cardinality = '1-N' | '1-1' | 'N-N' | 'none';
@@ -20,22 +25,26 @@ export interface RelationQuestion {
 
 /** 检测出的候选关系（含处置 + ask 选择题）。 */
 export interface RelationCandidate {
-  parent: string; // 一方，如 客户
+  parent: string; // 一方，如 客户；树时 parent===child
   child: string; // 多方，如 项目
   cardinality: Cardinality;
-  fkField?: string; // child 上的外键，如 customerId
+  fkField?: string; // child 上的外键，如 customerId；树时为自外键 parentId
+  tree?: boolean; // 自关联/树（部门树、分类树）：parent===child
+  joinTable?: string; // N—N 中间表名（如 student_course）
   evidence?: string;
   source?: string; // field | page | design | flow | llm
   disposition: 'autofill' | 'ask';
   questions?: RelationQuestion[]; // 仅 ask
 }
 
-/** 回写后的确定关系（喂若依子表 codegen）。 */
+/** 回写后的确定关系（喂若依子表/树/中间表 codegen）。 */
 export interface Relation {
   parent: string;
   child: string;
   cardinality: Cardinality;
   fkField?: string;
+  tree?: boolean;
+  joinTable?: string;
   required: boolean;
   onDelete: OnDelete;
   source?: string;
@@ -112,6 +121,8 @@ export class RelationCompletionService {
         child: c.child,
         cardinality,
         fkField: c.fkField,
+        tree: c.tree || undefined,
+        joinTable: c.joinTable,
         required: ans.required ?? true,
         onDelete,
         source: c.source,
@@ -150,8 +161,9 @@ export class RelationCompletionService {
 
   private buildPrompt(ctx: { entities: string[]; pages: string[]; features: string[]; designSuggestions: string[] }): string {
     return `# 角色
-你是资深B端需求分析师。从下面客户已填的实体/页面/功能/设计里，**找出实体之间可能的「一对多」关系**
-（如 客户 1—N 项目：一个客户有多个项目）。**只找有证据的**，不穷举所有实体对、不凭空发明。
+你是资深B端需求分析师。从下面客户已填的实体/页面/功能/设计里，**找出实体之间可能的关系**。
+覆盖三类：① 一对多(1-N，如 客户有多个项目) ② 多对多(N-N，如 学生选多门课、一门课多个学生) ③ 自关联/树(同一实体自己嵌套自己，如 部门有上级部门、商品分类有父分类)。
+**只找有证据的**，不穷举所有实体对、不凭空发明。
 
 # 输入
 - 实体：${ctx.entities.join('、') || '（无）'}
@@ -160,21 +172,27 @@ export class RelationCompletionService {
 - 设计：${ctx.designSuggestions.slice(0, 8).join('；') || '（无）'}
 
 # 任务（每条候选）
-1. 定 parent(一方) / child(多方)，推测 child 上的外键字段名(如 customerId)。
+1. 定 parent / child 与 cardinality：
+   - 1-N：parent(一方)/child(多方)，推测 child 外键字段名(如 customerId)。
+   - N-N：互为多，给 cardinality="N-N" 并取一个中间表名 joinTable(英文小写下划线，如 student_course)。
+   - 树：自己嵌套自己 → parent 与 child 填同一实体、tree=true、cardinality="1-N"、fkField 取自外键名(如 parentId)。
 2. 给 evidence(来自哪个页面/字段/设计) + source(field|page|design|flow|llm)。
 3. 判 disposition：
-   - "autofill"：证据强、基数明显（如页面明写"客户详情含关联项目列表"）→ 默认 1-N，无需问。
-   - "ask"：基数模糊 / 是否必属 / 级联行为不明 → 出给非技术用户的选择题。
-4. ask 时给两道选择题：基数(能否一对多) + 级联(删 parent 时 child 怎么办)。
+   - "autofill"：证据强、关系明显（如页面明写"客户详情含关联项目列表"、"部门含上级部门"）→ 默认无需问。
+   - "ask"：基数模糊 / 是否多对多 / 是否必属 / 级联行为不明 → 出给非技术用户的选择题。
+4. ask 时给两道选择题：基数(能一对多/多对多/没关系) + 级联(删 parent 时 child 怎么办)。
+   - 树的级联题问"删除上级时，下级怎么办"。
 
 # 约束
-- 宁少而准。只 1—N（多对多/树不在本轮）。问题用非技术、口语化的话。
+- 宁少而准。问题用非技术、口语化的话。
+- 树：parent 与 child 必须是同一个实体名，且 tree=true。
 
 # 输出（严格JSON数组，无任何额外文字/markdown围栏）
 [{"parent":"客户","child":"项目","cardinality":"1-N","fkField":"customerId","evidence":"客户详情页含关联项目列表","source":"page","disposition":"autofill"},
-{"parent":"客户","child":"工单","cardinality":"1-N","fkField":"customerId","evidence":"功能提到客户工单","source":"feature","disposition":"ask","questions":[
-  {"key":"cardinality","question":"一个【客户】可以有多个【工单】吗？","options":[{"label":"能,多个","value":"1-N"},{"label":"不能,一对一","value":"1-1"},{"label":"它俩没关系","value":"none"}]},
-  {"key":"onDelete","question":"删除【客户】时，名下工单怎么办？","options":[{"label":"一起删掉","value":"cascade"},{"label":"保留但解除关联","value":"setNull"},{"label":"不许删有工单的客户","value":"restrict"}]}
+{"parent":"部门","child":"部门","cardinality":"1-N","tree":true,"fkField":"parentId","evidence":"部门含上级部门","source":"field","disposition":"autofill"},
+{"parent":"学生","child":"课程","cardinality":"N-N","joinTable":"student_course","evidence":"功能含学生选课、一门课多个学生","source":"feature","disposition":"ask","questions":[
+  {"key":"cardinality","question":"一个【学生】能选多门【课程】、同一门【课程】也能被多个【学生】选吗？","options":[{"label":"能,多对多","value":"N-N"},{"label":"一个学生只对一门课","value":"1-N"},{"label":"它俩没关系","value":"none"}]},
+  {"key":"onDelete","question":"删除【学生】时，他的选课记录怎么办？","options":[{"label":"一起删掉","value":"cascade"},{"label":"保留但解除关联","value":"setNull"},{"label":"不许删有选课的学生","value":"restrict"}]}
 ]}]`;
   }
 
@@ -188,16 +206,23 @@ export class RelationCompletionService {
       return arr
         .filter((c): c is RelationCandidate => !!c && typeof (c as RelationCandidate).parent === 'string' && typeof (c as RelationCandidate).child === 'string')
         .slice(0, 20)
-        .map((c) => ({
-          parent: c.parent,
-          child: c.child,
-          cardinality: CARDINALITIES.includes(c.cardinality) ? c.cardinality : '1-N',
-          fkField: c.fkField,
-          evidence: c.evidence,
-          source: c.source,
-          disposition: c.disposition === 'ask' ? 'ask' : 'autofill',
-          questions: c.disposition === 'ask' && Array.isArray(c.questions) ? c.questions : undefined,
-        }));
+        .map((c) => {
+          // 树：模型给了 tree=true，或 parent===child（同实体自嵌套即树）。
+          const tree = c.tree === true || c.parent === c.child;
+          return {
+            parent: c.parent,
+            child: c.child,
+            // 树强制 1-N（一个上级有多个下级）；其余按白名单，非法降级 1-N。
+            cardinality: tree ? ('1-N' as Cardinality) : CARDINALITIES.includes(c.cardinality) ? c.cardinality : '1-N',
+            fkField: c.fkField,
+            tree: tree || undefined,
+            joinTable: typeof c.joinTable === 'string' ? c.joinTable : undefined,
+            evidence: c.evidence,
+            source: c.source,
+            disposition: (c.disposition === 'ask' ? 'ask' : 'autofill') as 'autofill' | 'ask',
+            questions: c.disposition === 'ask' && Array.isArray(c.questions) ? c.questions : undefined,
+          };
+        });
     } catch {
       return [];
     }

@@ -11,6 +11,7 @@ import { DEMO_QUEUE } from './demo.queue';
 import { ThemeService } from './theme.service';
 import { ScreenshotReplicateService } from './screenshot-replicate.service';
 import { MinioService } from '../../integrations/minio/minio.service';
+import { RuoyiAppDataService } from '../app-runtime/ruoyi-appdata.service';
 
 describe('DemoService', () => {
   let service: DemoService;
@@ -75,6 +76,7 @@ describe('DemoService', () => {
         ThemeService,
         { provide: MinioService, useValue: { downloadFile: jest.fn() } },
         { provide: ScreenshotReplicateService, useValue: { replicate: jest.fn() } },
+        { provide: RuoyiAppDataService, useValue: { enabled: false, transform: jest.fn(async (h: string) => h) } },
       ],
     }).compile();
 

@@ -10,9 +10,10 @@ import { CloudecodeModule } from '../../integrations/cloudecode/cloudecode.modul
 import { LlmModule } from '../../integrations/llm/llm.module';
 import { ScreenshotReplicateService } from './screenshot-replicate.service';
 import { SharedCoreModule } from '../../shared/shared-core.module';
+import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 
 @Module({
-  imports: [SharedCoreModule, DemoSnapshotModule, CloudecodeModule, LlmModule, BullModule.registerQueue({ name: DEMO_QUEUE })],
+  imports: [SharedCoreModule, DemoSnapshotModule, CloudecodeModule, LlmModule, AppRuntimeModule, BullModule.registerQueue({ name: DEMO_QUEUE })],
   controllers: [DemoController],
   providers: [DemoService, DemoProcessor, ThemeService, ScreenshotReplicateService],
   exports: [DemoService, ThemeService, ScreenshotReplicateService],

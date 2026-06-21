@@ -100,9 +100,9 @@
 
 ## 6. 关系类型分阶段（诚实的难度）
 
-- **Phase 2a｜1—N 主子表**：若依子表 codegen 直接支持，最常见（覆盖绝大多数台账/CRM），**先做**。
-- **Phase 2b｜N—N 多对多**：要中间表，若依 codegen 更绕，识别+建表后做。
-- **Phase 2c｜自关联/树**（部门树、分类树）：若依有树表模板，要先识别"这是棵树"，单独处理。
+- **Phase 2a｜1—N 主子表**（✅ 已落）：若依子表 codegen 直接支持，最常见（覆盖绝大多数台账/CRM）。
+- **Phase 2c｜自关联/树**（✅ 已落，部门树、分类树）：`parent===child`（或显式 `tree:true`）即判树 → 同实体补可空自外键(parentId) → 若依**原生 tree 模板**（`tplCategory:'tree'` + treeCode=pk / treeParentCode=自外键 / treeName=显示名列）。树优先于 sub 判定，避免自嵌套被误判成主子表。
+- **Phase 2b｜N—N 多对多**（✅ 已落，识别+合成中间表）：检测互为多 → `cardinality:'N-N'`+`joinTable` → `synthesizeJoinEntities` 合成中间表实体（自增主键 + 两端 BigInt 外键），DDL/gen_table 自动产出、两端表保持 crud、双向可查。**跨表 master-detail UI 联动**（若依 codegen "更绕"那块）随 M3c-remaining（Velocity 坑已停）后续做。
 
 ---
 
@@ -128,9 +128,9 @@
 
 ## 9. 落地优先级（MVP）
 
-1. **检测 + 1—N + 选择题 + 回写**（Phase 2a）：扫候选→出基数/级联题→答→回写 relations。最小闭环、覆盖最广。
+1. **检测 + 1—N + 选择题 + 回写**（Phase 2a）✅：扫候选→出基数/级联题→答→回写 relations。最小闭环、覆盖最广。
 2. 接若依子表 codegen（消费 relations）——与 ADR-0003 M3c-remaining 合流。
-3. N—N / 树（Phase 2b/2c）随真实需求拉动。
-4. 主动入口 + 追加问答窗口 UI。
+3. N—N / 树（Phase 2b/2c）✅ 检测+回写+codegen 输入全打通（中间表/树模板）；live 验证随 M3c-remaining。
+4. 主动入口 + 追加问答窗口 UI（✅ 追加问答合批窗口已落，树/N-N 的 ask 题复用同一窗口零改动）。
 
 > Phase 1（扁平实体 CRUD 真出若依）**不等本设计**；本设计是把"能出"升级为"出得对（带关系）"。
