@@ -45,4 +45,14 @@ describe('TemplateAppService（模板出页接进 serve 链）', () => {
     const { svc } = build(null);
     await expect(svc.buildAndStore('p1')).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('renderAdmin：按需渲染后台控制台（管理侧栏 + 业务列表 + appData，不存库）', async () => {
+    const { svc, prisma } = build('model Company { id String @id }');
+    const html = await svc.renderAdmin('p1');
+    expect(html).toContain('管理后台');
+    expect(html).toContain('角色权限'); // 管理侧栏
+    expect(html).toContain('id="adm-rows"'); // 业务列表
+    expect(html).toContain('/api/app/p1/'); // appData 注入
+    expect(prisma.project.update).not.toHaveBeenCalled(); // 不存库
+  });
 });

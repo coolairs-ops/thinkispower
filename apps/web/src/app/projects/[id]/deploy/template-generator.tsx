@@ -36,6 +36,18 @@ export default function TemplateGenerator({ projectId }: { projectId: string }) 
     }
   };
 
+  const openAdmin = async () => {
+    setError(null);
+    try {
+      const r = await api.get(`/api/projects/${projectId}/demo/admin`);
+      if (!r?.html) throw new Error('后台未生成');
+      const url = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
+      window.open(url, '_blank');
+    } catch (e: any) {
+      setError(e?.message || '打开后台失败');
+    }
+  };
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -63,6 +75,7 @@ export default function TemplateGenerator({ projectId }: { projectId: string }) 
           {busy ? '生成中…' : '用模板生成预览'}
         </button>
         {done && <a href={`/projects/${projectId}/demo`} className="text-sm text-indigo-600">✓ 已生成,去预览看 →</a>}
+        <button onClick={openAdmin} className="px-3 py-2 rounded-lg text-sm border border-gray-300 text-gray-700 hover:bg-gray-50">查看管理后台</button>
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
     </div>

@@ -29,6 +29,13 @@ export class TemplateAppController {
     return this.svc.buildAndStore(projectId, body?.themeId);
   }
 
+  /** 后台管理控制台预览（按需渲染，返 html；前端 blob 打开）。 */
+  @Get('admin')
+  async admin(@Req() req: any, @Param('projectId') projectId: string) {
+    await this.requireOwner(req.user.id, projectId);
+    return { html: await this.svc.renderAdmin(projectId) };
+  }
+
   private async requireOwner(userId: string, projectId: string) {
     const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
     if (!p) throw new NotFoundException('项目不存在');

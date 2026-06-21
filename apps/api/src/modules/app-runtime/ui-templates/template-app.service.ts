@@ -2,8 +2,10 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { PrismaService } from '../../../database/prisma.service';
 import { SchemaMigrationService } from '../schema-migration.service';
 import { renderApp } from './app-template';
+import { renderAdminApp } from './admin-template';
 import { injectAppData } from './appdata-inject';
 import { getTheme } from './theme-tokens';
+import { ParsedModel } from '../data-model.types';
 
 const BADGE_RE = /level|grade|等级|分级|风险|评级/i;
 const SKIP_COLS = new Set(['createdat', 'updatedat', 'created_at', 'updated_at']);
@@ -32,10 +34,7 @@ export class TemplateAppService {
     if (!entities.length) throw new BadRequestException('数据模型未解析出实体');
 
     const primary = entities[0];
-    const columns = primary.fields
-      .filter((f) => !f.isId && !SKIP_COLS.has(f.name.toLowerCase()))
-      .slice(0, 4)
-      .map((f) => ({ key: f.name, label: f.name, badge: BADGE_RE.test(f.name) }));
+    const columns = this.deriveColumns(primary);
 
     const tc = (project.themeConfig ?? {}) as Record<string, unknown>;
     const theme = getTheme(themeId || (tc.templateTheme as string)).id;
@@ -61,5 +60,32 @@ export class TemplateAppService {
     });
     this.logger.log(`模板出页 ${projectId}: 主题=${theme} 资源=${primary.table} 列=${columns.length} → ${html.length} bytes`);
     return { theme, resource: primary.table, columns: columns.length };
+  }
+
+  /** 后台管理控制台（按需渲染，不存库）：数据模型 → 套后台外壳(管理侧栏+业务列表) → 注入 appData。 */
+  async renderAdmin(projectId: string): Promise<string> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true, dataModel: true, themeConfig: true } });
+    if (!project) throw new NotFoundException('项目不存在');
+    if (!project.dataModel) throw new BadRequestException('项目还没有数据模型');
+    const entities = this.schema.parseAndValidate(project.dataModel);
+    if (!entities.length) throw new BadRequestException('数据模型未解析出实体');
+    const primary = entities[0];
+    const tc = (project.themeConfig ?? {}) as Record<string, unknown>;
+    const html = renderAdminApp({
+      appName: project.name || '应用',
+      themeId: getTheme(tc.templateTheme as string).id,
+      resource: primary.table,
+      resourceLabel: primary.name,
+      columns: this.deriveColumns(primary),
+    });
+    return injectAppData(html, projectId);
+  }
+
+  /** 从实体推导前 4 列（剔主键/审计列；分级类字段标徽章）。前台/后台共用。 */
+  private deriveColumns(primary: ParsedModel) {
+    return primary.fields
+      .filter((f) => !f.isId && !SKIP_COLS.has(f.name.toLowerCase()))
+      .slice(0, 4)
+      .map((f) => ({ key: f.name, label: f.name, badge: BADGE_RE.test(f.name) }));
   }
 }
