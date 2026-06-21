@@ -15,6 +15,12 @@
 export type BackendRuntimeKind = 'crud' | 'generated' | 'ruoyi';
 
 /**
+ * 若依 provision 的断点续跑相位（= 最后完成的步骤）。持久在 `descriptor.phase`。
+ * 失败重跑据此跳过已完成步——尤其探活超时落在 'deployed' 时，重跑只等就绪、不重编译（编译/冷启是最贵的）。
+ */
+export type ProvisionPhase = 'none' | 'ddl' | 'deployed' | 'ready' | 'seeded';
+
+/**
  * 单个项目应用的后端运行时描述符——持久在 `Project.backendRuntime`。
  * 它是"前端/传感器/部署"枚举后端能力的唯一真相源。
  */
@@ -27,6 +33,8 @@ export interface BackendRuntimeDescriptor {
   status: 'provisioning' | 'ready' | 'error';
   provisionedAt?: string;
   error?: string;
+  /** provision 断点续跑相位（仅置备中/失败时有意义；ready 终态可省）。失败重跑据此续。 */
+  phase?: ProvisionPhase;
 }
 
 export interface ProvisionResult {

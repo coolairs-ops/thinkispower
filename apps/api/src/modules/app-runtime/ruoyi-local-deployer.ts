@@ -30,9 +30,9 @@ export interface RuoyiDeployConfig {
   compileCmd: string;
   /** 重启实例的 shell 命令（私有化档：docker restart ruoyi-server） */
   restartCmd: string;
-  /** 重启后探活的 URL（探到端口可连即认为起来了）。设了才等——保证"部署完成=真能服务"。 */
+  /** 重启后探活的 URL（收到非 5xx 响应才认为起来了）。设了才等——保证"部署完成=真能服务"。 */
   readyUrl?: string;
-  /** 探活超时（ms，默认 15min，覆盖 exploded 慢启动）。 */
+  /** 探活超时（ms，默认 30min，覆盖 exploded 冷启 11~22min[历史到 37min]）。 */
   readyTimeoutMs?: number;
 }
 
@@ -44,7 +44,12 @@ export class RuoyiLocalDeployer {
     private readonly cfg: RuoyiDeployConfig,
   ) {}
 
-  async deployTables(ruoyiCfg: RuoyiClientConfig, tables: string[]): Promise<void> {
+  /**
+   * 部署源码并重启，**不等就绪**：每表 importTable+下载→写工程→一次编译→重启。
+   * 探活拆出（waitReady），让 provisionApp 在"编译重启完成"与"探活就绪"间打断点——
+   * 探活超时重跑只需再 waitReady，不必重编译（编译/冷启是最贵的一段）。
+   */
+  async deploySources(ruoyiCfg: RuoyiClientConfig, tables: string[]): Promise<void> {
     if (!tables.length) return;
     let written = 0;
     for (const table of tables) {
@@ -54,27 +59,50 @@ export class RuoyiLocalDeployer {
     this.logger.log(`部署：${tables.length} 表 / ${written} 个后端文件落盘 → 编译 ${this.cfg.module}`);
     await this.run(this.cfg.compileCmd, '编译');
     await this.run(this.cfg.restartCmd, '重启');
+  }
+
+  /** 部署源码→重启→探活就绪（便捷整合，脚本/单测用）。provisionApp 用拆开的 deploySources+waitReady 以支持断点续跑。 */
+  async deployTables(ruoyiCfg: RuoyiClientConfig, tables: string[]): Promise<void> {
+    if (!tables.length) return;
+    await this.deploySources(ruoyiCfg, tables);
     await this.waitReady();
     this.logger.log(`部署完成：${tables.join(',')} 已编译并重启生效`);
   }
 
-  /** 重启后探活：轮询 readyUrl 直到端口可连（exploded 启动慢，最长 readyTimeoutMs）。未配 readyUrl 则不等。 */
-  private async waitReady(): Promise<void> {
+  /**
+   * 重启后探活：轮询 readyUrl 直到实例**真在服务**（exploded 冷启慢，最长 readyTimeoutMs）。未配 readyUrl 则不等。
+   * 判据是"收到非 5xx 响应"，不是"连上就算"——boot 期 Tomcat/反代会先回 502/503 错误页，
+   * 把那当就绪会让后续 seedRoles 在实例没起来时 login 失败（曾因探活早于冷启致整条 provision 中断）。
+   */
+  async waitReady(): Promise<void> {
     const url = this.cfg.readyUrl;
     if (!url) return;
-    const deadline = Date.now() + (this.cfg.readyTimeoutMs ?? 15 * 60 * 1000);
+    const timeoutMs = this.cfg.readyTimeoutMs ?? 30 * 60 * 1000;
+    const start = Date.now();
+    const deadline = start + timeoutMs;
     let attempt = 0;
+    let lastLog = start;
     while (Date.now() < deadline) {
+      attempt++;
       try {
-        await fetch(url, { method: 'GET' });
-        this.logger.log(`实例已就绪（探活 ${url}，第 ${attempt + 1} 次）`);
-        return;
+        const res = await fetch(url, { method: 'GET' });
+        if (res.status < 500) {
+          const secs = Math.round((Date.now() - start) / 1000);
+          this.logger.log(`实例已就绪（探活 ${url} HTTP ${res.status}，第 ${attempt} 次 / ${secs}s）`);
+          return;
+        }
+        // 5xx：boot 期错误页，未就绪——继续等
       } catch {
-        attempt++;
-        await new Promise((r) => setTimeout(r, 10_000));
+        // 连接被拒：实例还没起——继续等
       }
+      const now = Date.now();
+      if (now - lastLog >= 60_000) {
+        this.logger.log(`等待实例就绪…已 ${Math.round((now - start) / 1000)}s（探活 ${attempt} 次，上限 ${Math.round(timeoutMs / 1000)}s）`);
+        lastLog = now;
+      }
+      await new Promise((r) => setTimeout(r, 10_000));
     }
-    throw new Error(`重启后探活超时：${url} 在 ${(this.cfg.readyTimeoutMs ?? 900000) / 1000}s 内未就绪`);
+    throw new Error(`重启后探活超时：${url} 在 ${Math.round(timeoutMs / 1000)}s 内未返回非 5xx 响应（探活 ${attempt} 次）`);
   }
 
   /** 解压 zip，把 main/java、main/resources 下文件写进模块源码。返回写入文件数。 */

@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { BackendRuntime, BackendRuntimeDescriptor, BackendHealth, ProvisionResult } from './backend-runtime.interface';
+import { Injectable, Logger } from '@nestjs/common';
+import { BackendRuntime, BackendRuntimeDescriptor, BackendHealth, ProvisionResult, ProvisionPhase } from './backend-runtime.interface';
 import { AppSpec } from './app-spec.types';
 import { RuoyiGenTable, toRuoyiGenTable } from './ruoyi-mapping';
 import { toMysqlCreateTable } from './ruoyi-ddl';
@@ -18,8 +18,26 @@ import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
 export interface RuoyiProvisionInfra {
   /** 在若依 MySQL 执行建表 DDL（幂等）。RuoyiMysqlDdlDriver 实现。 */
   applyDdl(statements: string[]): Promise<void>;
-  /** 把这些表的 codegen 源码部署进若依实例并生效（importTable+下载→写工程→编译→重启）。RuoyiLocalDeployer 实现。 */
-  deployTables(cfg: RuoyiClientConfig, tables: string[]): Promise<void>;
+  /** 部署 codegen 源码并重启（importTable+下载→写工程→编译→重启，**不等就绪**）。RuoyiLocalDeployer.deploySources。 */
+  deploySources(cfg: RuoyiClientConfig, tables: string[]): Promise<void>;
+  /** 探活：轮询直到实例真就绪（收到非 5xx）。RuoyiLocalDeployer.waitReady。 */
+  waitReady(): Promise<void>;
+}
+
+/**
+ * 断点续跑端口：load 读上次完成相位，save 记录当前完成相位。默认 no-op（脚本/单测无需持久）。
+ * 生产由 RuoyiProvisionService 用 prisma 落到 project.backendRuntime.phase——失败重跑跳过已完成步。
+ */
+export interface ProvisionCheckpoint {
+  load(): Promise<ProvisionPhase>;
+  save(phase: ProvisionPhase): Promise<void>;
+}
+
+const NOOP_CHECKPOINT: ProvisionCheckpoint = { load: async () => 'none', save: async () => undefined };
+const PHASE_ORDER: ProvisionPhase[] = ['none', 'ddl', 'deployed', 'ready', 'seeded'];
+/** 已完成相位 current 是否达到/越过 target（达到则该步可跳过）。 */
+function phaseReached(current: ProvisionPhase, target: ProvisionPhase): boolean {
+  return PHASE_ORDER.indexOf(current) >= PHASE_ORDER.indexOf(target);
 }
 
 /**
@@ -35,6 +53,7 @@ export interface RuoyiProvisionInfra {
 @Injectable()
 export class RuoyiRuntime implements BackendRuntime {
   readonly kind = 'ruoyi' as const;
+  private readonly logger = new Logger(RuoyiRuntime.name);
 
   constructor(private readonly client: RuoyiClient) {}
 
@@ -73,35 +92,55 @@ export class RuoyiRuntime implements BackendRuntime {
   }
 
   /**
-   * 串完整链置备一个若依 App（M3c-remaining 实测流程的代码化，私有化档全自动）：
-   *   ① 建表（含若依基础列 + 关系外键/中间表）② 部署（importTable+下载源码→写工程→编译→重启）
-   *   ③ seed 角色 + 数据权限（运行时配，零重编译）④ 返回 descriptor。
-   * 幂等：建表 `if not exists`、importTable 可重入、seedRoles 跳过已存在。
+   * 串完整链置备一个若依 App（M3c-remaining 实测流程的代码化，私有化档全自动），**支持断点续跑**：
+   *   ① 建表 ② 部署源码+编译+重启 ②' 探活就绪 ③ seed 角色 ④ 返回 descriptor。
+   * 每步完成记一个相位（checkpoint.save）；重跑从 checkpoint.load 的相位续，跳过已完成步——
+   * 关键收益：探活超时落在 'deployed'，重跑只补 ②'+③，**不重编译**（编译/冷启 11~22min 最贵）。
+   * 幂等：建表 `if not exists`、seedRoles 跳过已存在；不传 checkpoint 时退化为一次性全跑（脚本/单测）。
    */
   async provisionApp(
     projectId: string,
     spec: AppSpec,
     cfg: RuoyiClientConfig,
     infra: RuoyiProvisionInfra,
+    checkpoint: ProvisionCheckpoint = NOOP_CHECKPOINT,
   ): Promise<ProvisionResult> {
     const entities = this.withRelations(spec);
+    const tables = entities.map((e) => e.table);
+    const from = await checkpoint.load();
+    if (from !== 'none') this.logger.log(`provision 续跑 project=${projectId}：从相位 '${from}' 继续，跳过已完成步`);
+
     // ① 建表（含若依基础列 + 关系外键/中间表）
-    await infra.applyDdl(entities.map((e) => toMysqlCreateTable(e)));
-    // ② 部署：importTable+下载 codegen 源码→写工程→单模块编译→重启（一次性，含全部表）
-    await infra.deployTables(cfg, entities.map((e) => e.table));
+    if (!phaseReached(from, 'ddl')) {
+      await infra.applyDdl(entities.map((e) => toMysqlCreateTable(e)));
+      await checkpoint.save('ddl');
+    }
+    // ② 部署源码→单模块编译→重启（一次性，含全部表；最贵，断点续跑的关键不重做点）
+    if (!phaseReached(from, 'deployed')) {
+      await infra.deploySources(cfg, tables);
+      await checkpoint.save('deployed');
+    }
+    // ②' 探活就绪（与部署分相位：探活超时重跑只等就绪、不重编译）
+    if (!phaseReached(from, 'ready')) {
+      await infra.waitReady();
+      await checkpoint.save('ready');
+    }
     // ③ RBAC 运行时配：角色 + data_scope（'1'全部/'5'仅本人）
-    if (spec.roles?.length) {
-      await this.client.seedRoles(
-        cfg,
-        spec.roles.map((r, i) => ({ roleName: r.name, roleKey: roleKey(r.name, i), dataScope: r.dataScope })),
-      );
+    if (!phaseReached(from, 'seeded')) {
+      if (spec.roles?.length) {
+        await this.client.seedRoles(
+          cfg,
+          spec.roles.map((r, i) => ({ roleName: r.name, roleKey: roleKey(r.name, i), dataScope: r.dataScope })),
+        );
+      }
+      await checkpoint.save('seeded');
     }
     // ④ descriptor（schemaName 复用租户号；resources = 暴露的表）
     return {
       descriptor: {
         kind: 'ruoyi',
         schemaName: cfg.tenantId,
-        resources: entities.map((e) => e.table),
+        resources: tables,
         status: 'ready',
         provisionedAt: new Date().toISOString(),
       },

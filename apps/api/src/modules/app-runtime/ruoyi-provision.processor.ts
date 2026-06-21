@@ -28,8 +28,13 @@ export class RuoyiProvisionProcessor extends WorkerHost {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.error(`若依 provision 失败 project=${projectId}: ${msg}`);
+      // 读改写合并：保留 phase/resources，仅置 error——让重 POST 能从断点续（不重编译）
+      const cur = await this.prisma.project
+        .findUnique({ where: { id: projectId }, select: { backendRuntime: true } })
+        .catch(() => null);
+      const br = (cur?.backendRuntime as Record<string, unknown> | null) ?? {};
       await this.prisma.project
-        .update({ where: { id: projectId }, data: { backendRuntime: { kind: 'ruoyi', status: 'error', error: msg.slice(0, 300) } as never } })
+        .update({ where: { id: projectId }, data: { backendRuntime: { ...br, kind: 'ruoyi', status: 'error', error: msg.slice(0, 300) } as never } })
         .catch(() => undefined);
       throw e;
     }
