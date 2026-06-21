@@ -12,7 +12,7 @@ export interface DashboardConfig {
   /** 主列表资源名（appData.list 拉取） */
   primaryResource: string;
   kpis: KpiSlot[];
-  columns: { key: string; label: string }[];
+  columns: { key: string; label: string; badge?: boolean }[];
 }
 
 /**
@@ -31,6 +31,7 @@ export function renderDashboard(cfg: DashboardConfig): string {
   const cfgJson = JSON.stringify({
     primaryResource: cfg.primaryResource,
     columns: cfg.columns.map((c) => c.key),
+    badges: cfg.columns.map((c) => !!c.badge),
     kpis: cfg.kpis.map((k) => k.resource ?? null),
   }).replace(/</g, '\\u003c');
 
@@ -38,9 +39,10 @@ export function renderDashboard(cfg: DashboardConfig): string {
 <div class="grid" style="grid-template-columns:repeat(${Math.max(1, cfg.kpis.length)},1fr);margin-bottom:16px">${kpiHtml}</div>
 <div class="card"><table><thead><tr>${thead}</tr></thead><tbody id="dash-rows"><tr><td colspan="${cfg.columns.length}" class="muted">加载中…</td></tr></tbody></table></div>
 <script>(function(){var C=${cfgJson};
-function cell(v){return '<td>'+(v==null?'':String(v).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}))+'</td>';}
+function txt(v){return v==null?'':String(v).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+function cell(v,isBadge){if(isBadge&&v!=null){var m={'D':'b-d','C':'b-c','B':'b-b','A':'b-a'};var cls=m[String(v)]||'';return '<td>'+(cls?'<span class="badge '+cls+'">'+txt(v)+'</span>':txt(v))+'</td>';}return '<td>'+txt(v)+'</td>';}
 if(!window.appData){return;}
 C.kpis.forEach(function(res,i){if(!res)return;window.appData.list(res,{pageSize:1}).then(function(r){var e=document.getElementById('kpi-'+i);if(e)e.textContent=(r&&r.total!=null?r.total:0);}).catch(function(){});});
-window.appData.list(C.primaryResource,{pageSize:50}).then(function(r){var rows=(r&&r.items)||[];var tb=document.getElementById('dash-rows');if(!tb)return;if(!rows.length){tb.innerHTML='<tr><td colspan="'+C.columns.length+'" class="muted">暂无数据</td></tr>';return;}tb.innerHTML=rows.map(function(row){return '<tr>'+C.columns.map(function(k){return cell(row[k]);}).join('')+'</tr>';}).join('');}).catch(function(){var tb=document.getElementById('dash-rows');if(tb)tb.innerHTML='<tr><td colspan="'+C.columns.length+'" class="muted">数据加载失败</td></tr>';});
+window.appData.list(C.primaryResource,{pageSize:50}).then(function(r){var rows=(r&&r.items)||[];var tb=document.getElementById('dash-rows');if(!tb)return;if(!rows.length){tb.innerHTML='<tr><td colspan="'+C.columns.length+'" class="muted">暂无数据</td></tr>';return;}tb.innerHTML=rows.map(function(row){return '<tr>'+C.columns.map(function(k,idx){return cell(row[k],C.badges[idx]);}).join('')+'</tr>';}).join('');}).catch(function(){var tb=document.getElementById('dash-rows');if(tb)tb.innerHTML='<tr><td colspan="'+C.columns.length+'" class="muted">数据加载失败</td></tr>';});
 })();</script>`;
 }
