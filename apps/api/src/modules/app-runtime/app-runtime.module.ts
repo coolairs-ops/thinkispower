@@ -17,6 +17,7 @@ import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
 import { RuleEvalController } from './rule-engine/rule-eval.controller';
 import { RulePackController } from './rule-engine/rule-pack.controller';
 import { RuleTemplateController } from './rule-engine/rule-template.controller';
+import { KnowledgeService } from './knowledge/knowledge.service';
 import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
 
 /**
@@ -41,7 +42,8 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     RuoyiAppDataService,
     RuleEngineService,
     RuleEvaluationService,
+    KnowledgeService,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService],
 })
 export class AppRuntimeModule {}
