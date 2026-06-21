@@ -12,6 +12,7 @@ import { RuoyiProvisionProcessor } from './ruoyi-provision.processor';
 import { RuoyiProvisionController } from './ruoyi-provision.controller';
 import { AppSpecAssemblerService } from './app-spec-assembler.service';
 import { RuoyiAppDataService } from './ruoyi-appdata.service';
+import { RuoyiDataProxyService } from './ruoyi-data-proxy.service';
 import { RuleEngineService } from './rule-engine/rule-engine.service';
 import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
 import { RuleEvalController } from './rule-engine/rule-eval.controller';
@@ -46,6 +47,7 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     RuoyiProvisionProcessor,
     AppSpecAssemblerService,
     RuoyiAppDataService,
+    RuoyiDataProxyService,
     RuleEngineService,
     RuleEvaluationService,
     KnowledgeService,

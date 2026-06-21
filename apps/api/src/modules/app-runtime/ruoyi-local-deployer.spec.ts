@@ -92,4 +92,69 @@ describe('RuoyiLocalDeployer（私有化档部署驱动）', () => {
     const client = { importAndDownload: jest.fn(async () => empty.toBuffer()) };
     await expect(new RuoyiLocalDeployer(client as never, cfg).deployTables(ruoyiCfg, ['demo_store'])).rejects.toThrow('无 main/java');
   });
+
+  it('deploySources：编译+重启但不探活（断点续跑边界）', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch');
+    const client = { importAndDownload: jest.fn(async () => genZip()) };
+    const d = new RuoyiLocalDeployer(client as never, { ...cfg, readyUrl: 'http://ruoyi:8080' });
+    await d.deploySources(ruoyiCfg, ['demo_store']);
+    const cmds = mockExec.mock.calls.map((c) => c[0]);
+    expect(cmds).toEqual([cfg.compileCmd, cfg.restartCmd]); // 编译+重启
+    expect(fetchSpy).not.toHaveBeenCalled(); // 不探活——waitReady 由 provisionApp 单独调
+    fetchSpy.mockRestore();
+  });
+
+  describe('waitReady（探活硬化）', () => {
+    const readyCfg: RuoyiDeployConfig = { ...cfg, readyUrl: 'http://ruoyi:8080', readyTimeoutMs: 30_000 };
+    let fetchSpy: jest.SpyInstance | undefined;
+
+    afterEach(() => {
+      jest.useRealTimers();
+      fetchSpy?.mockRestore();
+      fetchSpy = undefined;
+    });
+
+    it('收到非 5xx 即就绪，立即返回（不再等端口）', async () => {
+      fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ status: 200 } as Response);
+      const client = { importAndDownload: jest.fn(async () => genZip()) };
+      await new RuoyiLocalDeployer(client as never, readyCfg).deployTables(ruoyiCfg, ['demo_store']);
+      expect(fetchSpy).toHaveBeenCalledTimes(1); // 首探即就绪
+    });
+
+    it('boot 期 5xx 不算就绪，等到非 5xx 才返回', async () => {
+      jest.useFakeTimers();
+      const statuses = [503, 502, 200];
+      let i = 0;
+      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async () => ({ status: statuses[Math.min(i++, statuses.length - 1)] }) as Response);
+      const client = { importAndDownload: jest.fn(async () => genZip()) };
+      const p = new RuoyiLocalDeployer(client as never, readyCfg).deployTables(ruoyiCfg, ['demo_store']);
+      await jest.advanceTimersByTimeAsync(25_000); // 两次 503/502 + 各 10s 退避 + 第三次 200
+      await p;
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it('连接被拒（fetch 抛）也继续等，不误判就绪', async () => {
+      jest.useFakeTimers();
+      let i = 0;
+      fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async () => {
+        if (i++ === 0) throw new Error('ECONNREFUSED');
+        return { status: 404 } as Response; // 404=DispatcherServlet 在响应=已就绪
+      });
+      const client = { importAndDownload: jest.fn(async () => genZip()) };
+      const p = new RuoyiLocalDeployer(client as never, readyCfg).deployTables(ruoyiCfg, ['demo_store']);
+      await jest.advanceTimersByTimeAsync(15_000);
+      await p;
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('始终 5xx → 超时抛错（带次数上下文）', async () => {
+      jest.useFakeTimers();
+      fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ status: 503 } as Response);
+      const client = { importAndDownload: jest.fn(async () => genZip()) };
+      const p = new RuoyiLocalDeployer(client as never, readyCfg).deployTables(ruoyiCfg, ['demo_store']);
+      const assertion = expect(p).rejects.toThrow('探活超时');
+      await jest.advanceTimersByTimeAsync(35_000);
+      await assertion;
+    });
+  });
 });

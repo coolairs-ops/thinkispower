@@ -1,9 +1,9 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { AppSpec } from './app-spec.types';
-import { ProvisionResult } from './backend-runtime.interface';
+import { ProvisionResult, ProvisionPhase } from './backend-runtime.interface';
 import { RuoyiClient } from './ruoyi-client.service';
-import { RuoyiRuntime, RuoyiProvisionInfra } from './ruoyi-runtime.service';
+import { RuoyiRuntime, RuoyiProvisionInfra, ProvisionCheckpoint } from './ruoyi-runtime.service';
 import { RuoyiMysqlDdlDriver } from './ruoyi-mysql-ddl.driver';
 import { RuoyiLocalDeployer } from './ruoyi-local-deployer';
 import { loadRuoyiInstanceConfig, RuoyiInstanceConfig } from './ruoyi-provision.config';
@@ -38,17 +38,38 @@ export class RuoyiProvisionService {
     if (!this.cfg.enabled) {
       throw new BadRequestException('未接入若依实例（缺 RUOYI_BASE_URL/RUOYI_SRC_ROOT）');
     }
+    const deployer = new RuoyiLocalDeployer(this.client, this.cfg.deploy);
     const infra: RuoyiProvisionInfra = {
       applyDdl: (stmts) => new RuoyiMysqlDdlDriver(this.cfg.mysql).applyDdl(stmts),
-      deployTables: (rcfg, tables) => new RuoyiLocalDeployer(this.client, this.cfg.deploy).deployTables(rcfg, tables),
+      deploySources: (rcfg, tables) => deployer.deploySources(rcfg, tables),
+      waitReady: () => deployer.waitReady(),
     };
+    const checkpoint = this.makeCheckpoint(projectId);
     this.logger.log(`若依 provision 开始 project=${projectId} 实体=${spec.entities.length} 角色=${spec.roles?.length ?? 0}`);
-    const result = await this.runtime.provisionApp(projectId, spec, this.cfg.client, infra);
+    const result = await this.runtime.provisionApp(projectId, spec, this.cfg.client, infra, checkpoint);
     await this.prisma.project.update({
       where: { id: projectId },
-      data: { backendRuntime: result.descriptor as never },
+      data: { backendRuntime: result.descriptor as never }, // 终态 descriptor 不带 phase（清空续跑标记）
     });
     this.logger.log(`若依 provision 完成 project=${projectId} 资源=[${result.descriptor.resources.join(',')}]`);
     return result;
+  }
+
+  /**
+   * 断点续跑 checkpoint：相位读写 project.backendRuntime.phase。
+   * save 用读改写合并——只动 phase，保留 status/resources 等（与 controller 的 provisioning / processor 的 error 共存）。
+   */
+  private makeCheckpoint(projectId: string): ProvisionCheckpoint {
+    const read = async () => {
+      const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+      return (p?.backendRuntime as Record<string, unknown> | null) ?? null;
+    };
+    return {
+      load: async () => ((await read())?.phase as ProvisionPhase | undefined) ?? 'none',
+      save: async (phase) => {
+        const br = (await read()) ?? { kind: 'ruoyi', status: 'provisioning' };
+        await this.prisma.project.update({ where: { id: projectId }, data: { backendRuntime: { ...br, phase } as never } });
+      },
+    };
   }
 }

@@ -365,6 +365,41 @@ describe('CloudecodeClient', () => {
       expect(JSON.parse(calls[1].body as string)).toEqual({ title: '买菜' });
     });
 
+    it('注入客户端：login 存 session、后续请求自动带 x-app-session 头（P1b 终端登录）', async () => {
+      const html = client.injectAppDataClient('<html><head></head><body></body></html>', 'proj-1');
+      const iife = html.match(/\(function\(\)\{[\s\S]*\}\)\(\);/)![0];
+      const store: Record<string, string> = {};
+      const calls: { url: string; method: string; headers: Record<string, string>; body?: string }[] = [];
+      const ctx: Record<string, unknown> = {
+        window: {},
+        encodeURIComponent,
+        localStorage: {
+          getItem: (k: string) => (k in store ? store[k] : null),
+          setItem: (k: string, v: string) => { store[k] = v; },
+          removeItem: (k: string) => { delete store[k]; },
+        },
+        fetch: (url: string, opts: { method: string; headers: Record<string, string>; body?: string }) => {
+          calls.push({ url, method: opts.method, headers: opts.headers, body: opts.body });
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ session: 'sess-xyz', data: [], total: 0 }) });
+        },
+      };
+      vm.createContext(ctx);
+      vm.runInContext(iife, ctx);
+      const appData = (ctx.window as any).appData;
+
+      expect(appData.isLoggedIn()).toBe(false);
+      const r = await appData.login('zhangsan', 'pw');
+      expect(r.session).toBe('sess-xyz');
+      expect(calls[0].url).toBe('/api/app/proj-1/_login');
+      expect(JSON.parse(calls[0].body as string)).toEqual({ username: 'zhangsan', password: 'pw' });
+      expect(appData.isLoggedIn()).toBe(true);
+
+      // 后续请求带上本人 session 头（后端据此以本人身份调若依）
+      await appData.list('todo', {});
+      const last = calls[calls.length - 1];
+      expect(last.headers['x-app-session']).toBe('sess-xyz');
+    });
+
     it('形态B：appData.evaluate 调 _evaluate 路由；启用返结果、未启用返 null', async () => {
       const html = client.injectAppDataClient('<html><head></head><body></body></html>', 'proj-1');
       const iife = html.match(/\(function\(\)\{[\s\S]*\}\)\(\);/)![0];

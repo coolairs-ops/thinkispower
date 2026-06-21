@@ -39,6 +39,14 @@ describe('若依全自动 provision E2E（新实体→真 CRUD，零人工）', 
     const spec: AppSpec = { entities: [member], roles: [{ name: '会员管理员', dataScope: '1' }], menus: [] };
 
     const client = new RuoyiClient();
+    const deployer = new RuoyiLocalDeployer(client, {
+      srcRoot, module,
+      compileCmd: process.env.RUOYI_COMPILE_CMD ||
+        `docker run --rm -v "${srcRoot}":/src -v ruoyi-m2:/root/.m2 -w /src maven:3.9-eclipse-temurin-17 mvn -o -q compile -pl ${module}`,
+      restartCmd: process.env.RUOYI_RESTART_CMD || 'docker restart ruoyi-server',
+      readyUrl: baseUrl,
+      readyTimeoutMs: 30 * 60 * 1000,
+    });
     const infra: RuoyiProvisionInfra = {
       applyDdl: (s) => new RuoyiMysqlDdlDriver({
         host: process.env.RUOYI_MYSQL_HOST || '127.0.0.1',
@@ -47,14 +55,8 @@ describe('若依全自动 provision E2E（新实体→真 CRUD，零人工）', 
         password: process.env.RUOYI_MYSQL_PASS || 'root',
         database: process.env.RUOYI_MYSQL_DB || 'ry-vue',
       }).applyDdl(s),
-      deployTables: (rcfg, tables) => new RuoyiLocalDeployer(client, {
-        srcRoot, module,
-        compileCmd: process.env.RUOYI_COMPILE_CMD ||
-          `docker run --rm -v "${srcRoot}":/src -v ruoyi-m2:/root/.m2 -w /src maven:3.9-eclipse-temurin-17 mvn -o -q compile -pl ${module}`,
-        restartCmd: process.env.RUOYI_RESTART_CMD || 'docker restart ruoyi-server',
-        readyUrl: baseUrl,
-        readyTimeoutMs: 16 * 60 * 1000,
-      }).deployTables(rcfg, tables),
+      deploySources: (rcfg, tables) => deployer.deploySources(rcfg, tables),
+      waitReady: () => deployer.waitReady(),
     };
 
     const res = await new RuoyiRuntime(client).provisionApp('e2e-proj', spec, clientCfg, infra);

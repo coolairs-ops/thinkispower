@@ -25,16 +25,18 @@ export class RuoyiProvisionController {
 
   @Post('provision')
   async provision(@Req() req: any, @Param('projectId') projectId: string, @Body() body: AppSpec | undefined) {
-    await this.requireOwner(req.user.id, projectId);
+    const project = await this.requireOwner(req.user.id, projectId);
     if (!this.svc.enabled) throw new BadRequestException('未接入若依实例（缺 RUOYI_BASE_URL/RUOYI_SRC_ROOT）');
     // body 传了 spec 就用；否则从项目 IR 自动组装（嫁接现有项目）
     const spec = body?.entities?.length ? body : await this.assembler.fromProject(req.user.id, projectId);
     if (!spec.entities.length) throw new BadRequestException('项目无可用实体（dataModel 为空）');
     const resources = spec.entities.map((e) => e.table);
+    // 重 POST 续跑：保留上次的断点相位（同一 spec 重试时跳过已完成步，不重编译）
+    const priorPhase = (project.backendRuntime as { phase?: string } | null)?.phase;
     // 立刻把项目标记为"若依置备中"——流程/前端据此显示进度，且 adapter② 此时仍走路B（status≠ready）
     await this.prisma.project.update({
       where: { id: projectId },
-      data: { backendRuntime: { kind: 'ruoyi', status: 'provisioning', resources, schemaName: '', provisionedAt: null } as never },
+      data: { backendRuntime: { kind: 'ruoyi', status: 'provisioning', resources, schemaName: '', provisionedAt: null, ...(priorPhase ? { phase: priorPhase } : {}) } as never },
     });
     const job = await this.queue.add(
       RUOYI_PROVISION_JOB,

@@ -18,14 +18,15 @@ const course: ParsedModel = { name: 'Course', table: 'course', fields: [field('i
 describe('RuoyiRuntime · provisionApp 串完整链', () => {
   const cfg = { baseUrl: 'http://x', clientId: 'c', username: 'admin', password: 'p', tenantId: '000000' };
 
-  it('编排顺序：建表→部署(全表一次)→seed角色，返回 ready descriptor', async () => {
+  it('编排顺序：建表→部署→探活→seed角色，返回 ready descriptor', async () => {
     const order: string[] = [];
     const client = {
       seedRoles: jest.fn(async () => { order.push('seed'); return { created: 1, skipped: 0 }; }),
     };
     const infra = {
       applyDdl: jest.fn(async (s: string[]) => { order.push(`ddl:${s.length}`); }),
-      deployTables: jest.fn(async (_c: unknown, t: string[]) => { order.push(`deploy:${t.join(',')}`); }),
+      deploySources: jest.fn(async (_c: unknown, t: string[]) => { order.push(`deploy:${t.join(',')}`); }),
+      waitReady: jest.fn(async () => { order.push('ready'); }),
     };
     const rt = new RuoyiRuntime(client as never);
     const spec: AppSpec = {
@@ -40,9 +41,9 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
     expect(infra.applyDdl).toHaveBeenCalledWith(expect.arrayContaining([expect.stringContaining('student_course')]));
     expect(infra.applyDdl.mock.calls[0][0]).toHaveLength(3);
     // 部署一次性传全部表（含中间表）
-    expect(infra.deployTables.mock.calls[0][1]).toEqual(['student', 'course', 'student_course']);
-    // 顺序：ddl → deploy → seed
-    expect(order).toEqual(['ddl:3', 'deploy:student,course,student_course', 'seed']);
+    expect(infra.deploySources.mock.calls[0][1]).toEqual(['student', 'course', 'student_course']);
+    // 顺序：ddl → deploy → 探活 → seed
+    expect(order).toEqual(['ddl:3', 'deploy:student,course,student_course', 'ready', 'seed']);
     // 角色映射：中文名取不出 ascii → app_role_N；dataScope 透传
     expect((client.seedRoles as jest.Mock).mock.calls[0][1]).toEqual([
       { roleName: '管理员', roleKey: 'app_role_1', dataScope: '1' },
@@ -53,10 +54,40 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
 
   it('无角色 → 跳过 seed（不报错）', async () => {
     const client = { seedRoles: jest.fn() };
-    const infra = { applyDdl: jest.fn(async () => {}), deployTables: jest.fn(async () => {}) };
+    const infra = { applyDdl: jest.fn(async () => {}), deploySources: jest.fn(async () => {}), waitReady: jest.fn(async () => {}) };
     const rt = new RuoyiRuntime(client as never);
     await rt.provisionApp('p1', { entities: [student], roles: [], menus: [] }, cfg as never, infra as never);
     expect(client.seedRoles).not.toHaveBeenCalled();
+  });
+
+  it('断点续跑：相位=deployed → 跳过建表/部署（不重编译），只补探活+seed，相位推进', async () => {
+    const saved: string[] = [];
+    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })) };
+    const infra = {
+      applyDdl: jest.fn(async () => {}),
+      deploySources: jest.fn(async () => {}),
+      waitReady: jest.fn(async () => {}),
+    };
+    const checkpoint = { load: jest.fn(async () => 'deployed' as const), save: jest.fn(async (p: string) => { saved.push(p); }) };
+    const rt = new RuoyiRuntime(client as never);
+    const spec: AppSpec = { entities: [student], roles: [{ name: '管理员', dataScope: '1' }], menus: [] };
+    await rt.provisionApp('p1', spec, cfg as never, infra as never, checkpoint as never);
+
+    expect(infra.applyDdl).not.toHaveBeenCalled();    // 'ddl' 已越过
+    expect(infra.deploySources).not.toHaveBeenCalled(); // 'deployed' 已越过——不重编译
+    expect(infra.waitReady).toHaveBeenCalledTimes(1);   // 'ready' 待补
+    expect(client.seedRoles).toHaveBeenCalledTimes(1);  // 'seeded' 待补
+    expect(saved).toEqual(['ready', 'seeded']);
+  });
+
+  it('断点续跑：相位=none（首跑）→ 全步执行并逐相位 save', async () => {
+    const saved: string[] = [];
+    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })) };
+    const infra = { applyDdl: jest.fn(async () => {}), deploySources: jest.fn(async () => {}), waitReady: jest.fn(async () => {}) };
+    const checkpoint = { load: jest.fn(async () => 'none' as const), save: jest.fn(async (p: string) => { saved.push(p); }) };
+    const rt = new RuoyiRuntime(client as never);
+    await rt.provisionApp('p1', { entities: [student], roles: [{ name: 'a', dataScope: '1' }], menus: [] }, cfg as never, infra as never, checkpoint as never);
+    expect(saved).toEqual(['ddl', 'deployed', 'ready', 'seeded']);
   });
 });
 

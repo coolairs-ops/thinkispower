@@ -595,8 +595,11 @@ window.addEventListener('message', function(e) {
     const js = `<script>/* appData: 已部署应用数据接口客户端 (ADR-0001) */
 (function(){
   var BASE='/api/app/${safeId}/';
+  var SKEY='tip_app_sess_${safeId}';
+  function sess(){try{return (typeof localStorage!=='undefined'&&localStorage.getItem(SKEY))||'';}catch(e){return '';}}
+  function headers(){var h={'Content-Type':'application/json'};var s=sess();if(s)h['x-app-session']=s;return h;}
   function toQuery(o){o=o||{};var p=[];if(o.page)p.push('page='+encodeURIComponent(o.page));if(o.pageSize)p.push('pageSize='+encodeURIComponent(o.pageSize));if(o.sort)p.push('sort='+encodeURIComponent(o.sort));var f=o.filters||{};for(var k in f){if(Object.prototype.hasOwnProperty.call(f,k))p.push(encodeURIComponent(k)+'='+encodeURIComponent(f[k]));}return p.length?('?'+p.join('&')):'';}
-  async function req(method,path,body){var res=await fetch(BASE+path,{method:method,headers:{'Content-Type':'application/json'},body:body!=null?JSON.stringify(body):undefined});var json=await res.json().catch(function(){return {};});if(!res.ok){throw new Error((json&&json.error&&json.error.message)||res.statusText||('HTTP '+res.status));}return json;}
+  async function req(method,path,body){var res=await fetch(BASE+path,{method:method,headers:headers(),body:body!=null?JSON.stringify(body):undefined});var json=await res.json().catch(function(){return {};});if(res.status===401){try{window.dispatchEvent(new CustomEvent('tip:auth-required'));}catch(e){}var er=new Error((json&&json.message)||'需要登录');er.code=401;throw er;}if(!res.ok){throw new Error((json&&json.error&&json.error.message)||res.statusText||('HTTP '+res.status));}return json;}
   window.appData={
     list:function(resource,opts){return req('GET',resource+toQuery(opts)).then(function(r){return {items:r.data||[],total:r.total||0,page:r.page||1,pageSize:r.pageSize||0};}).catch(function(){return {items:[],total:0,page:1,pageSize:0};});},
     get:function(resource,id){return req('GET',resource+'/'+encodeURIComponent(id)).then(function(r){return r.data;});},
@@ -604,7 +607,11 @@ window.addEventListener('message', function(e) {
     update:function(resource,id,data){return req('PATCH',resource+'/'+encodeURIComponent(id),data).then(function(r){return r.data;});},
     remove:function(resource,id){return req('DELETE',resource+'/'+encodeURIComponent(id)).then(function(){return true;});},
     /* 形态B 运行态：对一个对象跑规则评分→{ruleEngineEnabled,finalConclusions,formulas,evidenceChain,status,...}。未启用规则引擎返 null。 */
-    evaluate:function(resource,id){return req('GET','_evaluate/'+encodeURIComponent(resource)+'/'+encodeURIComponent(id)).then(function(r){return r&&r.ruleEngineEnabled?r:null;}).catch(function(){return null;});}
+    evaluate:function(resource,id){return req('GET','_evaluate/'+encodeURIComponent(resource)+'/'+encodeURIComponent(id)).then(function(r){return r&&r.ruleEngineEnabled?r:null;}).catch(function(){return null;});},
+    /* 终端用户鉴权（若依后端需要；路B 公开不调即可）：login 后存 session，之后请求自动带 x-app-session 头 → 后端以本人身份调若依（data_scope 生效）。 */
+    login:function(username,password){return req('POST','_login',{username:username,password:password}).then(function(r){try{localStorage.setItem(SKEY,r.session);}catch(e){}return r;});},
+    logout:function(){return req('POST','_logout').catch(function(){return null;}).then(function(){try{localStorage.removeItem(SKEY);}catch(e){}return true;});},
+    isLoggedIn:function(){return !!sess();}
   };
 })();
 </script>`;
