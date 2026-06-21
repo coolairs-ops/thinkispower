@@ -16,6 +16,7 @@ import { RuleEngineService } from './rule-engine/rule-engine.service';
 import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
 import { RuleEvalController } from './rule-engine/rule-eval.controller';
 import { RulePackController } from './rule-engine/rule-pack.controller';
+import { RuleTemplateController } from './rule-engine/rule-template.controller';
 import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
 
 /**
@@ -26,7 +27,7 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
  */
 @Module({
   imports: [BullModule.registerQueue({ name: RUOYI_PROVISION_QUEUE })],
-  controllers: [AppRuntimeController, RuoyiProvisionController, RuleEvalController, RulePackController],
+  controllers: [AppRuntimeController, RuoyiProvisionController, RuleEvalController, RulePackController, RuleTemplateController],
   providers: [
     SchemaMigrationService,
     CrudRuntime,
