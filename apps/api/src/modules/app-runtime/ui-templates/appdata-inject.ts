@@ -13,7 +13,9 @@ get:function(r,id){return req('GET',r+'/'+encodeURIComponent(id)).then(function(
 create:function(r,d){return req('POST',r,d).then(function(x){return x.data;});},
 update:function(r,id,d){return req('PATCH',r+'/'+encodeURIComponent(id),d).then(function(x){return x.data;});},
 remove:function(r,id){return req('DELETE',r+'/'+encodeURIComponent(id)).then(function(){return true;});},
-evaluate:function(r,id){return req('GET','_evaluate/'+encodeURIComponent(r)+'/'+encodeURIComponent(id)).then(function(x){return x&&x.ruleEngineEnabled?x:null;}).catch(function(){return null;});}
+evaluate:function(r,id){return req('GET','_evaluate/'+encodeURIComponent(r)+'/'+encodeURIComponent(id)).then(function(x){return x&&x.ruleEngineEnabled?x:null;}).catch(function(){return null;});},
+knowledge:function(){return req('GET','_knowledge').catch(function(){return {sources:[],evidences:[],facts:[],trace:[]};});},
+ask:function(q){return req('POST','_qa',{question:q}).then(function(x){return (x&&x.answer)||'';}).catch(function(){return '';});}
 };})();</script>`;
   if (html.includes('</head>')) return html.replace('</head>', js + '</head>');
   return html.replace('<body>', '<body>' + js);

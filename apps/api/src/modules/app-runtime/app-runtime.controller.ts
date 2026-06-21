@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Query, Body, BadRequestException } from '@nestjs/common';
 import { CrudDataService } from './crud-data.service';
 import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
+import { KnowledgeSourceService } from './knowledge/knowledge-source.service';
+import { QaService } from './qa/qa.service';
 
 /**
  * 已部署应用的数据接口（ADR-0001 / 路 B，REST 约定见 app-runtime-rest-contract.md）。
@@ -13,7 +15,22 @@ export class AppRuntimeController {
   constructor(
     private crud: CrudDataService,
     private ruleEval: RuleEvaluationService,
+    private knowledgeSource: KnowledgeSourceService,
+    private qa: QaService,
   ) {}
+
+  /** 形态B/活数据：知识库（原件/证据/事实 + 证据链）。字面段，声明在通用 CRUD 之前避免被 :resource 吃掉。 */
+  @Get(':projectId/_knowledge')
+  knowledge(@Param('projectId') projectId: string) {
+    return this.knowledgeSource.loadWithTrace(projectId);
+  }
+
+  /** 活数据：智能问答（基于本项目数据模型/规则回答）。 */
+  @Post(':projectId/_qa')
+  ask(@Param('projectId') projectId: string, @Body() body: { question?: string }) {
+    if (!body?.question?.trim()) throw new BadRequestException('需要 question');
+    return this.qa.answer(projectId, body.question.trim());
+  }
 
   /**
    * 形态B 运行态：生成的应用对一个对象跑规则评分（每查一个对象→读规则包+真实数据→八步→结论+证据链）。
