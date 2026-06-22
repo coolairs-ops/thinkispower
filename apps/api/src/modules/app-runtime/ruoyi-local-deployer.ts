@@ -5,6 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import AdmZip from 'adm-zip';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
+import { injectDataPermission } from './ruoyi-data-permission';
 
 const execAsync = promisify(exec);
 
@@ -116,7 +117,13 @@ export class RuoyiLocalDeployer {
       const target = this.targetPath(name, moduleSrc);
       if (!target) continue; // vue/、菜单 sql 等：本驱动不落
       await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, e.getData());
+      // Mapper.java 落盘前注入 @DataPermission（坎2：让 data_scope=仅本人 真过滤；codegen 默认不带）
+      let data = e.getData();
+      if (name.endsWith('Mapper.java')) {
+        const patched = injectDataPermission(data.toString('utf8'));
+        data = Buffer.from(patched, 'utf8');
+      }
+      await writeFile(target, data);
       n++;
     }
     if (n === 0) throw new Error(`部署 ${table}：zip 内无 main/java|main/resources 文件（codegen 异常？）`);
