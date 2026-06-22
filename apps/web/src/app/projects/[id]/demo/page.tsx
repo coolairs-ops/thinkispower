@@ -459,7 +459,7 @@ export default function DemoPage() {
               onLoad={() => applyThemeToIframe(themeRef.current)}
               className="h-full w-full rounded-xl border bg-white"
               title="预览"
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts allow-same-origin allow-forms"
             />
             {/* 反馈浮窗 */}
             <button

@@ -110,8 +110,13 @@ export default function PlanPage() {
  };
 
  const handleConfirm = async () => {
+ try {
  await api.put(`/api/projects/${projectId}/plan/confirm`);
  router.push(`/projects/${projectId}/demo`);
+ } catch (e: any) {
+ // 已进入开发/交付阶段(锁定态)等 → 优雅提示，不崩成 Next 未捕获错误浮层
+ alert(e?.message || '确认方案失败，请稍后重试');
+ }
  };
 
  // 进页加载"后端底座"意图（kind=ruoyi 即已指定若依）
