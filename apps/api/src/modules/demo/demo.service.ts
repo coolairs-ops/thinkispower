@@ -130,7 +130,8 @@ export class DemoService {
   private async doGenerate(p: { id: string; status: string; planSummary: any }) {
     // 终态保护：已进入开发/交付的项目不应被打回 demo 生成（与 confirmPlan 一致）
     if (isProjectLocked(p.status)) throw new BadRequestException('项目已进入开发/交付阶段，如需修改请使用迭代功能');
-    const allowed = ['prd_ready', 'plan_ready', 'spec_confirmed', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback', 'demo_failed'];
+    // paused=自迭代中途停（需人工介入），非交付锁定态，允许用户主动重生成预览；developing/completed 仍由 isProjectLocked 挡。
+    const allowed = ['prd_ready', 'plan_ready', 'spec_confirmed', 'demo_generating', 'demo_ready', 'awaiting_demo_feedback', 'demo_failed', 'paused'];
     if (!allowed.includes(p.status)) throw new BadRequestException('当前状态不允许');
     if (!p.planSummary) throw new BadRequestException('方案尚未生成');
 

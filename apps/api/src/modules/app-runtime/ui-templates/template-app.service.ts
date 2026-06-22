@@ -33,7 +33,10 @@ export class TemplateAppService {
     const entities = this.schema.parseAndValidate(project.dataModel);
     if (!entities.length) throw new BadRequestException('数据模型未解析出实体');
 
-    const primary = entities[0];
+    // 主资源选业务实体：跳过通用的 user/auth 类（几乎每个数据模型都有且常排第一，
+    // 否则所有 demo 工作台都成"用户表(email/password/name)"、只有标题变）。全是通用则退回第一个。
+    const GENERIC_TABLES = new Set(['user', 'users', 'account', 'accounts', 'auth', 'role', 'roles', 'permission', 'permissions', 'sysuser']);
+    const primary = entities.find((e) => !GENERIC_TABLES.has(e.table.toLowerCase())) ?? entities[0];
     const columns = this.deriveColumns(primary);
 
     const tc = (project.themeConfig ?? {}) as Record<string, unknown>;

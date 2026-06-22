@@ -46,6 +46,26 @@ describe('TemplateAppService（模板出页接进 serve 链）', () => {
     await expect(svc.buildAndStore('p1')).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('主资源跳过通用 user 实体，选第一个业务实体（修"所有 demo 都成用户表"）', async () => {
+    const store: any = {};
+    const prisma = {
+      project: {
+        findUnique: jest.fn().mockResolvedValue({ name: '短剧剧本生成平台', dataModel: 'x', themeConfig: {} }),
+        update: jest.fn().mockImplementation(({ data }: any) => { Object.assign(store, data); return Promise.resolve({}); }),
+      },
+    };
+    const userFirst = [
+      { name: '用户', table: 'user', fields: [F('id', true), F('email'), F('password'), F('name')] },
+      { name: '剧本', table: 'scene', fields: [F('id', true), F('title'), F('genre')] },
+    ];
+    const schema = { parseAndValidate: jest.fn().mockReturnValue(userFirst) };
+    const svc = new TemplateAppService(prisma as any, schema as any);
+    const r = await svc.buildAndStore('p1', 'gov-blue');
+    expect(r.resource).toBe('scene'); // 跳过 user → 业务实体
+    expect(store.demoHtml).toContain('"primaryResource":"scene"');
+    expect(store.demoHtml).not.toContain('"password"'); // 工作台不再暴露 user 的 password 列
+  });
+
   it('renderAdmin：按需渲染后台控制台（管理侧栏 + 业务列表 + appData，不存库）', async () => {
     const { svc, prisma } = build('model Company { id String @id }');
     const html = await svc.renderAdmin('p1');

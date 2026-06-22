@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as express from 'express';
 import { AppModule } from './app.module';
@@ -9,6 +9,17 @@ import { UserFriendlyExceptionFilter } from './common/filters/user-friendly-exce
 (BigInt.prototype as unknown as { toJSON: () => number }).toJSON = function (this: bigint) {
   return Number(this);
 };
+
+// 全局未捕获异常/Promise 日志钩子：Node 默认会因 unhandledRejection 直接退进程——曾致 API 静默挂掉，
+// 进而前端 SSR 请求 :3002 收到 ECONNREFUSED → "Server Error / Jest worker exceptions"。
+// 这里捕获并打全栈、**不退出（保活）**，让真凶进日志、避免静默中断。
+const processLogger = new Logger('Process');
+process.on('unhandledRejection', (reason) => {
+  processLogger.error(`未捕获的 Promise rejection（已记录、进程保活）: ${reason instanceof Error ? reason.stack : String(reason)}`);
+});
+process.on('uncaughtException', (err) => {
+  processLogger.error(`未捕获异常（已记录、进程保活）: ${err instanceof Error ? err.stack : String(err)}`);
+});
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
