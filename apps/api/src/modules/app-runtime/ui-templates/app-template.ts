@@ -17,6 +17,8 @@ export interface AppTemplateConfig {
   user?: string;
   nav?: NavItem[];
   dashboard: DashboardConfig;
+  /** 业务签名功能段（混合方案 C）：插在工作台之后、知识库之前，反映 planSummary 的真实功能。 */
+  featureSections?: { key: string; label: string; icon: string; html: string }[];
 }
 
 /** 前台默认侧栏（用户敲定：工作台 + 知识库 + 智能问答）。 */
@@ -30,20 +32,29 @@ export function defaultFrontNav(active = 'dashboard'): NavItem[] {
 
 /** 前台多模块 SPA：工作台/知识库/智能问答 三段，侧栏点击客户端切换（display 切换，单文件 SPA）。 */
 export function renderApp(cfg: AppTemplateConfig): string {
+  const feats = cfg.featureSections ?? [];
   const sections: [string, string][] = [
     ['dashboard', renderDashboard(cfg.dashboard)],
+    ...feats.map((f) => [f.key, f.html] as [string, string]),
     ['knowledge', renderKnowledge()],
     ['qa', renderQa()],
   ];
   const content = sections
     .map(([k, h]) => `<section data-page="${k}"${k === 'dashboard' ? '' : ' style="display:none"'}>${h}</section>`)
     .join('') + navSwitchScript();
+  // 导航：工作台 + 各功能段 + 知识库 + 问答（功能段插在工作台后，最贴业务）
+  const nav: NavItem[] = cfg.nav ?? [
+    { key: 'dashboard', label: '工作台', icon: 'layout-dashboard', active: true },
+    ...feats.map((f) => ({ key: f.key, label: f.label, icon: f.icon })),
+    { key: 'knowledge', label: '知识库', icon: 'books' },
+    { key: 'qa', label: '智能问答', icon: 'message-chatbot' },
+  ];
   return renderShell({
     appName: cfg.appName,
     org: cfg.org,
     themeId: cfg.themeId,
     user: cfg.user,
-    nav: cfg.nav ?? defaultFrontNav('dashboard'),
+    nav,
     contentHtml: content,
   });
 }
