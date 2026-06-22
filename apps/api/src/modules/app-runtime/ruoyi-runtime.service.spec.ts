@@ -22,6 +22,7 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
     const order: string[] = [];
     const client = {
       seedRoles: jest.fn(async () => { order.push('seed'); return { created: 1, skipped: 0 }; }),
+      seedMenusAndGrant: jest.fn(async () => { order.push('grant'); return { menusCreated: 5, rolesGranted: 2 }; }),
     };
     const infra = {
       applyDdl: jest.fn(async (s: string[]) => { order.push(`ddl:${s.length}`); }),
@@ -42,8 +43,10 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
     expect(infra.applyDdl.mock.calls[0][0]).toHaveLength(3);
     // 部署一次性传全部表（含中间表）
     expect(infra.deploySources.mock.calls[0][1]).toEqual(['student', 'course', 'student_course']);
-    // 顺序：ddl → deploy → 探活 → seed
-    expect(order).toEqual(['ddl:3', 'deploy:student,course,student_course', 'ready', 'seed']);
+    // 顺序：ddl → deploy → 探活 → seed角色 → 种权限点并绑角色
+    expect(order).toEqual(['ddl:3', 'deploy:student,course,student_course', 'ready', 'seed', 'grant']);
+    // 权限点种子按表名+角色 key 绑（解生成接口 403）
+    expect((client.seedMenusAndGrant as jest.Mock).mock.calls[0]).toEqual([cfg, ['student', 'course', 'student_course'], ['app_role_1', 'app_role_2']]);
     // 角色映射：中文名取不出 ascii → app_role_N；dataScope 透传
     expect((client.seedRoles as jest.Mock).mock.calls[0][1]).toEqual([
       { roleName: '管理员', roleKey: 'app_role_1', dataScope: '1' },
@@ -62,7 +65,7 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
 
   it('断点续跑：相位=deployed → 跳过建表/部署（不重编译），只补探活+seed，相位推进', async () => {
     const saved: string[] = [];
-    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })) };
+    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })), seedMenusAndGrant: jest.fn(async () => ({ menusCreated: 5, rolesGranted: 1 })) };
     const infra = {
       applyDdl: jest.fn(async () => {}),
       deploySources: jest.fn(async () => {}),
@@ -82,7 +85,7 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
 
   it('断点续跑：相位=none（首跑）→ 全步执行并逐相位 save', async () => {
     const saved: string[] = [];
-    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })) };
+    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })), seedMenusAndGrant: jest.fn(async () => ({ menusCreated: 5, rolesGranted: 1 })) };
     const infra = { applyDdl: jest.fn(async () => {}), deploySources: jest.fn(async () => {}), waitReady: jest.fn(async () => {}) };
     const checkpoint = { load: jest.fn(async () => 'none' as const), save: jest.fn(async (p: string) => { saved.push(p); }) };
     const rt = new RuoyiRuntime(client as never);

@@ -86,6 +86,91 @@ describe('RuoyiClient（若依 codegen REST 客户端 · M3b）', () => {
     });
   });
 
+  describe('seedUsers（终端用户 sys_user + 绑角色 · P2）', () => {
+    it('幂等：已存在 userName 跳过；按 roleKey 解析 roleId 绑角色，含 deptId/status', async () => {
+      const posted: any[] = [];
+      global.fetch = jest.fn(async (url: string, opts: any) => {
+        if (url.endsWith('/auth/login')) return jsonRes({ code: 200, data: { access_token: 'tok' } });
+        if (url.includes('/system/role/list')) return jsonRes({ rows: [{ roleId: 1001, roleKey: 'app_role_1' }, { roleId: '2068', roleKey: 'app_role_2' }] });
+        if (url.includes('/system/user/list')) return jsonRes({ rows: [{ userName: 'lijingli' }] }); // 李经理已存在
+        if (url.endsWith('/system/user') && opts.method === 'POST') { posted.push(JSON.parse(opts.body)); return jsonRes({ code: 200 }); }
+        throw new Error('unexpected ' + url);
+      }) as any;
+
+      const r = await client.seedUsers(cfg, [
+        { userName: 'lijingli', password: 'x', roleKey: 'app_role_1' }, // 已存在→跳过
+        { userName: 'zhangsan', password: 'Zhang@123', roleKey: 'app_role_2' }, // 新建（仅本人）
+      ]);
+      expect(r).toEqual({ created: 1, skipped: 1 });
+      expect(posted).toHaveLength(1);
+      expect(posted[0]).toMatchObject({ userName: 'zhangsan', roleIds: ['2068'], deptId: 100, status: '0' });
+    });
+
+    it('roleKey 不存在 → 抛错（不静默建无权限用户）', async () => {
+      global.fetch = jest.fn(async (url: string) => {
+        if (url.endsWith('/auth/login')) return jsonRes({ data: { access_token: 't' } });
+        if (url.includes('/system/role/list')) return jsonRes({ rows: [] });
+        if (url.includes('/system/user/list')) return jsonRes({ rows: [] });
+        throw new Error('x');
+      }) as any;
+      await expect(client.seedUsers(cfg, [{ userName: 'u', password: 'p', roleKey: 'nope' }])).rejects.toThrow('角色不存在');
+    });
+
+    it('createUser 返回非 200 → 抛错', async () => {
+      global.fetch = jest.fn(async (url: string, opts: any) => {
+        if (url.endsWith('/auth/login')) return jsonRes({ data: { access_token: 't' } });
+        if (url.includes('/system/role/list')) return jsonRes({ rows: [{ roleId: 1, roleKey: 'r' }] });
+        if (url.includes('/system/user/list')) return jsonRes({ rows: [] });
+        if (url.endsWith('/system/user') && opts.method === 'POST') return jsonRes({ code: 500, msg: '密码不合规' });
+        throw new Error('x');
+      }) as any;
+      await expect(client.seedUsers(cfg, [{ userName: 'u', password: 'p', roleKey: 'r' }])).rejects.toThrow('createUser 失败');
+    });
+  });
+
+  describe('seedMenusAndGrant（接口权限点 + 绑角色 · 坎1）', () => {
+    it('缺的 perms 才建；角色菜单取并集（保留原有），PUT 带 menuIds', async () => {
+      const created: string[] = [];
+      let putBody: any;
+      let menuListCalls = 0;
+      global.fetch = jest.fn(async (url: string, opts: any) => {
+        if (url.endsWith('/auth/login')) return jsonRes({ code: 200, data: { access_token: 'tok' } });
+        if (url.includes('/system/menu/list')) {
+          menuListCalls++;
+          // 首列：customer:list 已存在(id 90001)；其余缺。二列(建完后)：全在。
+          const base = [{ menuId: 90001, perms: 'system:customer:list' }];
+          const rest = [
+            { menuId: 90002, perms: 'system:customer:query' },
+            { menuId: 90003, perms: 'system:customer:add' },
+            { menuId: 90004, perms: 'system:customer:edit' },
+            { menuId: 90005, perms: 'system:customer:remove' },
+          ];
+          return jsonRes({ data: menuListCalls === 1 ? base : [...base, ...rest] });
+        }
+        if (url.endsWith('/system/menu') && opts.method === 'POST') { created.push(JSON.parse(opts.body).perms); return jsonRes({ code: 200 }); }
+        if (url.includes('/system/role/list')) return jsonRes({ rows: [{ roleId: '2068', roleKey: 'app_role_2' }] });
+        if (url.includes('/system/menu/roleMenuTreeselect/2068')) return jsonRes({ data: { checkedKeys: [777] } }); // 角色原有菜单 777
+        if (url.match(/\/system\/role\/2068$/) && opts.method === 'GET') return jsonRes({ code: 200, data: { roleId: '2068', roleKey: 'app_role_2', roleName: '普通', dataScope: '5', status: '0' } });
+        if (url.endsWith('/system/role') && opts.method === 'PUT') { putBody = JSON.parse(opts.body); return jsonRes({ code: 200 }); }
+        throw new Error('unexpected ' + opts.method + ' ' + url);
+      }) as any;
+
+      const r = await client.seedMenusAndGrant(cfg, ['customer'], ['app_role_2']);
+      expect(r.menusCreated).toBe(4); // list 已存在，其余 4 个新建
+      expect(created.sort()).toEqual(['system:customer:add', 'system:customer:edit', 'system:customer:query', 'system:customer:remove']);
+      expect(r.rolesGranted).toBe(1);
+      // 并集：原有 777 + 5 个 customer 权限点；dataScope 不动
+      expect(putBody.menuIds.sort()).toEqual([777, 90001, 90002, 90003, 90004, 90005]);
+      expect(putBody.dataScope).toBe('5');
+    });
+
+    it('无资源或无角色 → 直接返回零，不登录', async () => {
+      global.fetch = jest.fn(async () => { throw new Error('should not fetch'); }) as any;
+      expect(await client.seedMenusAndGrant(cfg, [], ['r'])).toEqual({ menusCreated: 0, rolesGranted: 0 });
+      expect(await client.seedMenusAndGrant(cfg, ['x'], [])).toEqual({ menusCreated: 0, rolesGranted: 0 });
+    });
+  });
+
   // 真·实例集成测试：仅当 RUOYI_BASE_URL 设置时运行（对正在跑的 RuoYi-Vue-Plus）。
   const live = process.env.RUOYI_BASE_URL ? it : it.skip;
   live('LIVE：对真若依跑通 generate(demo_store)，产出含 controller', async () => {
@@ -115,6 +200,37 @@ describe('RuoyiClient（若依 codegen REST 客户端 · M3b）', () => {
     ]);
     expect(r.created + r.skipped).toBe(2); // 首次建 2 / 重跑跳 2
   }, 30000);
+
+  live('LIVE：seedUsers 建张三(仅本人 app_role_2)/李经理(全部 app_role_1)，幂等', async () => {
+    const realCfg: RuoyiClientConfig = {
+      baseUrl: process.env.RUOYI_BASE_URL!,
+      clientId: process.env.RUOYI_CLIENT_ID || 'e5cd7e4891bf95d1d19206ce24a7b32e',
+      username: process.env.RUOYI_USER || 'admin',
+      password: process.env.RUOYI_PASS || 'admin123',
+      tenantId: process.env.RUOYI_TENANT || '000000',
+    };
+    const r = await new RuoyiClient().seedUsers(realCfg, [
+      { userName: 'zhangsan', nickName: '张三', password: 'Zhang@123', roleKey: 'app_role_2' }, // dataScope 5 仅本人
+      { userName: 'lijingli', nickName: '李经理', password: 'Li@123456', roleKey: 'app_role_1' }, // dataScope 1 全部
+    ]);
+    expect(r.created + r.skipped).toBe(2); // 首次建 2 / 重跑跳 2
+  }, 60000);
+
+  live('LIVE：seedMenusAndGrant 给客户系统 4 资源种权限点并绑 app_role_1/2（解 403）', async () => {
+    const realCfg: RuoyiClientConfig = {
+      baseUrl: process.env.RUOYI_BASE_URL!,
+      clientId: process.env.RUOYI_CLIENT_ID || 'e5cd7e4891bf95d1d19206ce24a7b32e',
+      username: process.env.RUOYI_USER || 'admin',
+      password: process.env.RUOYI_PASS || 'admin123',
+      tenantId: process.env.RUOYI_TENANT || '000000',
+    };
+    const r = await new RuoyiClient().seedMenusAndGrant(
+      realCfg,
+      ['customer', 'project', 'task', 'dashboardstats'],
+      ['app_role_1', 'app_role_2'],
+    );
+    expect(r.rolesGranted).toBe(2); // 两个业务角色都绑上
+  }, 60000);
 });
 
 function jsonRes(obj: unknown) {

@@ -86,6 +86,10 @@ export default function DemoPage() {
   const [clickedElement, setClickedElement] = useState<ClickedElement | null>(null);
   const [feedbackComment, setFeedbackComment] = useState('');
   const [themeConfig, setThemeConfig] = useState<ThemeConfig>(DEFAULT_THEME);
+  // 内置政企模板主题（生成前可选一套，走 /demo/from-template 套模板出页）
+  const [tplThemes, setTplThemes] = useState<{ id: string; name: string; primary: string }[]>([]);
+  const [selTheme, setSelTheme] = useState('gov-blue');
+  const [tplBusy, setTplBusy] = useState(false);
   const [shotLayouts, setShotLayouts] = useState<ShotLayout[]>([]);
   const [regenerating, setRegenerating] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
@@ -118,6 +122,18 @@ export default function DemoPage() {
       })
       .catch(() => {});
   }, [projectId, token, isLoading, router]);
+
+  // 载入内置政企模板主题（供生成前选择）
+  useEffect(() => {
+    if (isLoading || !token) return;
+    api.get(`/api/projects/${projectId}/demo/themes`).then((r) => {
+      const t = r?.themes || [];
+      setTplThemes(t);
+      const cur = (themeRef.current as any)?.templateTheme;
+      if (cur) setSelTheme(cur);
+      else if (t[0]) setSelTheme(t[0].id);
+    }).catch(() => {});
+  }, [projectId, token, isLoading]);
 
   // Poll while generating
   useEffect(() => {
@@ -232,12 +248,50 @@ export default function DemoPage() {
   };
 
   const handleGenerate = async () => {
+    const prevStatus = status;
     setStatus('demo_generating');
     setPublicStatusLabel('正在生成预览');
     setProgress({ phase: 'queued', percent: 5, message: '已加入生成队列，即将开始…', startedAt: new Date().toISOString() });
     setNow(Date.now());
     setClickedElement(null);
-    await api.post(`/api/projects/${projectId}/demo/generate`);
+    try {
+      await api.post(`/api/projects/${projectId}/demo/generate`);
+    } catch (e: any) {
+      // 生成请求失败（如项目处于 paused/已交付态、或后端异常）：回滚乐观状态 + 提示，不让整页崩成运行时错误
+      const demo = await api.get(`/api/projects/${projectId}/demo`).catch(() => null);
+      setStatus(demo?.status || prevStatus || 'demo_failed');
+      setPublicStatusLabel(demo?.publicStatusLabel || '');
+      setProgress(demo?.progress || null);
+      alert(e?.message || '生成预览失败，请稍后重试');
+    }
+  };
+
+  // 套内置政企模板生成（生成前选好主题）：确定性 from-template，完后就地刷新预览
+  const handleTemplateGenerate = async () => {
+    const themeName = tplThemes.find((t) => t.id === selTheme)?.name || selTheme;
+    setTplBusy(true);
+    setStatus('demo_generating');
+    setPublicStatusLabel('正在套用模板生成');
+    setProgress({ phase: 'queued', percent: 30, message: `套用「${themeName}」主题生成中…`, startedAt: new Date().toISOString() });
+    setNow(Date.now());
+    setClickedElement(null);
+    try {
+      await api.post(`/api/projects/${projectId}/demo/from-template`, { themeId: selTheme });
+      const demo = await api.get(`/api/projects/${projectId}/demo`);
+      setDemoHtml(demo.html || null);
+      setStatus(demo.status || 'demo_ready');
+      setPublicStatusLabel(demo.publicStatusLabel || '');
+      setProgress(demo.progress || null);
+      if (demo.themeConfig) setThemeConfig(demo.themeConfig);
+    } catch (e: any) {
+      const demo = await api.get(`/api/projects/${projectId}/demo`).catch(() => null);
+      setStatus(demo?.status || 'demo_failed');
+      setPublicStatusLabel(demo?.publicStatusLabel || '');
+      setProgress(demo?.progress || null);
+      alert(e?.message || '套模板生成失败，请稍后重试');
+    } finally {
+      setTplBusy(false);
+    }
   };
 
   const handleSubmitFeedback = async () => {
@@ -306,12 +360,37 @@ export default function DemoPage() {
             <span className="text-sm text-gray-500">{publicStatusLabel}</span>
           )}
           {showGenerateButton && (
-            <button
-              onClick={handleGenerate}
-              className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 transition-colors"
-            >
-              生成预览
-            </button>
+            <div className="flex items-center gap-2">
+              {tplThemes.length > 0 && (
+                <>
+                  <select
+                    value={selTheme}
+                    onChange={(e) => setSelTheme(e.target.value)}
+                    title="选一套内置政企主题"
+                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-700"
+                  >
+                    {tplThemes.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleTemplateGenerate}
+                    disabled={tplBusy}
+                    title="用选中的政企主题套模板生成（风格稳定）"
+                    className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-700 transition-colors disabled:bg-gray-300"
+                  >
+                    {tplBusy ? '生成中…' : '套模板生成'}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={handleGenerate}
+                title="按项目默认方式生成（模板/复刻/AI）"
+                className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 transition-colors"
+              >
+                生成预览
+              </button>
+            </div>
           )}
           {showPreview && (
             <>

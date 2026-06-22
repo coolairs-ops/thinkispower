@@ -1,10 +1,13 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, Optional, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import { SchemaMigrationService } from '../schema-migration.service';
+import { DeepseekService } from '../../../services/deepseek.service';
 import { renderApp } from './app-template';
 import { renderAdminApp } from './admin-template';
 import { injectAppData } from './appdata-inject';
 import { getTheme } from './theme-tokens';
+import { pickFeatureSections, renderFeatureSection, FeatureSection } from './feature.template';
+import { esc } from './app-shell.template';
 import { ParsedModel } from '../data-model.types';
 
 const BADGE_RE = /level|grade|等级|分级|风险|评级/i;
@@ -24,16 +27,20 @@ export class TemplateAppService {
   constructor(
     private prisma: PrismaService,
     private schema: SchemaMigrationService,
+    @Optional() private readonly deepseek?: DeepseekService,
   ) {}
 
   async buildAndStore(projectId: string, themeId?: string): Promise<{ theme: string; resource: string; columns: number }> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true, dataModel: true, themeConfig: true } });
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true, dataModel: true, themeConfig: true, planSummary: true } });
     if (!project) throw new NotFoundException('项目不存在');
     if (!project.dataModel) throw new BadRequestException('项目还没有数据模型，先生成方案/数据模型');
     const entities = this.schema.parseAndValidate(project.dataModel);
     if (!entities.length) throw new BadRequestException('数据模型未解析出实体');
 
-    const primary = entities[0];
+    // 主资源选业务实体：跳过通用的 user/auth 类（几乎每个数据模型都有且常排第一，
+    // 否则所有 demo 工作台都成"用户表(email/password/name)"、只有标题变）。全是通用则退回第一个。
+    const GENERIC_TABLES = new Set(['user', 'users', 'account', 'accounts', 'auth', 'role', 'roles', 'permission', 'permissions', 'sysuser']);
+    const primary = entities.find((e) => !GENERIC_TABLES.has(e.table.toLowerCase())) ?? entities[0];
     const columns = this.deriveColumns(primary);
 
     const tc = (project.themeConfig ?? {}) as Record<string, unknown>;
@@ -45,7 +52,21 @@ export class TemplateAppService {
       kpis: [{ label: `${primary.name} 总数`, resource: primary.table }],
       columns: columns.length ? columns : [{ key: 'id', label: 'ID' }],
     };
-    let html = renderApp({ appName: project.name || '应用', themeId: theme, dashboard: dash });
+    // 业务签名功能段（方案 C）：从 planSummary.features 识别"生成/上传/录入"类功能成页型。
+    // 每段优先 AI 生成更贴合内容（受限于模板组件+主题、超时+消毒），失败/无 LLM 回退确定性页型。
+    const ps = (project.planSummary ?? {}) as { features?: unknown; summary?: unknown };
+    const features = Array.isArray(ps.features) ? ps.features.map((f) => (typeof f === 'string' ? f : String((f as { name?: string })?.name ?? ''))) : [];
+    const summary = typeof ps.summary === 'string' ? ps.summary : '';
+    const picked = pickFeatureSections(features);
+    const featureSections = await Promise.all(
+      picked.map(async (f) => ({
+        key: f.key,
+        label: f.label,
+        icon: f.icon,
+        html: (await this.enrichFeature(f, project.name || '应用', summary, theme)) ?? renderFeatureSection(f),
+      })),
+    );
+    let html = renderApp({ appName: project.name || '应用', themeId: theme, dashboard: dash, featureSections });
     html = injectAppData(html, projectId);
 
     await this.prisma.project.update({
@@ -58,8 +79,51 @@ export class TemplateAppService {
         themeConfig: { ...tc, templateTheme: theme } as never,
       },
     });
-    this.logger.log(`模板出页 ${projectId}: 主题=${theme} 资源=${primary.table} 列=${columns.length} → ${html.length} bytes`);
+    this.logger.log(`模板出页 ${projectId}: 主题=${theme} 资源=${primary.table} 列=${columns.length} 功能段=${featureSections.length} → ${html.length} bytes`);
     return { theme, resource: primary.table, columns: columns.length };
+  }
+
+  /**
+   * AI 增强一个签名功能段（方案 C 的 AI 刀）：DeepSeek 按功能描述生成更贴合的内容，
+   * **约束在模板组件内**（已有 CSS 类 + var(--t-*)，无 script/style/外链）。
+   * 无 LLM / 超时 / 产物不合法 → 返 null，由 buildAndStore 回退到确定性页型（永不空/不崩）。
+   */
+  private async enrichFeature(f: FeatureSection, appName: string, summary: string, themeId: string): Promise<string | null> {
+    if (!this.deepseek) return null;
+    const sys = [
+      '你是政企应用的前端片段生成器。只输出一个 HTML 片段，严格遵守：',
+      '1) 不要 <html>/<head>/<body>/<script>/<style>/<link>/<iframe>，不要 markdown 代码围栏；',
+      '2) 只用这些已有 CSS 类：card h1 btn muted grid kpi badge，表格用 <table><th><td>；',
+      '3) 颜色只用 CSS 变量 var(--t-primary)/var(--t-text)/var(--t-text-2)/var(--t-card-border)/var(--t-surface)，不要写死颜色；',
+      '4) 片段要体现该功能的真实交互（输入区/操作按钮/结果或列表区），贴合业务、可读、克制；',
+      '5) 用中文；不超过约 1500 字符。',
+    ].join('\n');
+    const user = `应用：${appName}${summary ? `（${summary.slice(0, 80)}）` : ''}\n功能：${f.title} —— ${f.desc}\n请生成「${f.title}」功能页的内容片段。`;
+    try {
+      const raw = await this.deepseek.chat(
+        [{ role: 'system', content: sys }, { role: 'user', content: user }],
+        { timeoutMs: 15_000, temperature: 0.4 },
+      );
+      const frag = this.sanitizeFragment(raw);
+      if (!frag) return null;
+      return `<div class="h1">${esc(f.title)}</div>${frag}`;
+    } catch (e) {
+      this.logger.warn(`功能段 AI 增强失败(${f.title})，回退确定性页型: ${e instanceof Error ? e.message : e}`);
+      return null;
+    }
+  }
+
+  /** 消毒 AI 片段：去代码围栏/危险标签/整页包裹；不合法（无标签/过短）返 null。 */
+  private sanitizeFragment(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    let s = String(raw).trim();
+    s = s.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim(); // 去 markdown 围栏
+    s = s.replace(/<\/?(?:html|head|body|!doctype)[^>]*>/gi, ''); // 去整页包裹
+    s = s.replace(/<(script|style|iframe|link|meta)[\s\S]*?<\/\1>/gi, '').replace(/<(?:script|style|iframe|link|meta)[^>]*>/gi, ''); // 去危险标签
+    s = s.replace(/\son\w+\s*=\s*"[^"]*"/gi, '').replace(/\son\w+\s*=\s*'[^']*'/gi, ''); // 去内联事件
+    s = s.trim();
+    if (s.length < 30 || !/<\w+[\s\S]*>/.test(s)) return null; // 不像 HTML 片段
+    return s.slice(0, 8000);
   }
 
   /** 后台管理控制台（按需渲染，不存库）：数据模型 → 套后台外壳(管理侧栏+业务列表) → 注入 appData。 */

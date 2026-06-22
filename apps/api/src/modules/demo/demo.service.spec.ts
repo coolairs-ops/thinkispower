@@ -193,6 +193,13 @@ describe('DemoService', () => {
       await expect(service.generateDemo(mockUserId, mockProjectId)).rejects.toThrow(BadRequestException);
     });
 
+    it('paused（自迭代中途态）允许重生成：入队不报错', async () => {
+      prisma.project.findUnique.mockResolvedValue({ ...planReadyProject, status: 'paused' });
+      const result = await service.generateDemo(mockUserId, mockProjectId);
+      expect(result).toMatchObject({ status: 'demo_generating' });
+      expect(demoQueue.add).toHaveBeenCalled();
+    });
+
     it('should throw BadRequestException if no planSummary', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...planReadyProject, planSummary: null });
 
