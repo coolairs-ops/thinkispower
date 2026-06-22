@@ -12,6 +12,7 @@ import { DeployPipelineService } from '../../services/deploy-pipeline.service';
 import { DeliveryService } from './delivery.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
+import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
 
 @Injectable()
 export class DeliveryEvaluationService {
@@ -27,6 +28,7 @@ export class DeliveryEvaluationService {
     private deployPipeline: DeployPipelineService,
     private qwenReviewer: QwenReviewerService,
     private acceptance: AcceptanceVerificationService,
+    private ruoyiProvision: RuoyiProvisionService,
     @InjectQueue(DELIVERY_QUEUE) private deliveryQueue: Queue,
   ) {}
 
@@ -102,6 +104,11 @@ export class DeliveryEvaluationService {
       );
     }
 
+    // ADR-0005 接线：项目已选若依底座(kind=ruoyi)时，交付即确保后端置备(触发不阻塞)——
+    // 不再要求手动去 deploy 页点。路B 项目→no-op(not-ruoyi)。前端契约收敛已在迭代回路内做。
+    const prov = await this.ruoyiProvision.ensureProvisioned(projectId, { userId });
+    if (prov.triggered) this.logger.log(`[生产交付] 若依后端置备已触发 job=${prov.jobId}`);
+
     const deliveryId = `${projectId.substring(0, 8)}-${Date.now()}`;
     this.logger.log(`[生产交付] 入队: ${deliveryId}`);
 
@@ -121,7 +128,8 @@ export class DeliveryEvaluationService {
       { attempts: 1, removeOnComplete: true, removeOnFail: 50 },
     );
 
-    return { success: true, deliveryId, message: '生产交付已启动' };
+    const ruoyiNote = prov.triggered ? '；若依后端置备已触发' : prov.status === 'ready' ? '；若依后端已就绪' : prov.status === 'provisioning' ? '；若依后端置备中' : '';
+    return { success: true, deliveryId, message: '生产交付已启动' + ruoyiNote, ruoyiBackend: prov.status };
   }
 
   async runProductionDelivery(deliveryId: string, projectId: string, payload: any) {

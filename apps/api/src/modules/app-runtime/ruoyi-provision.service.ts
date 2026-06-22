@@ -1,4 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
 import { AppSpec } from './app-spec.types';
 import { ProvisionResult, ProvisionPhase } from './backend-runtime.interface';
@@ -7,6 +9,8 @@ import { RuoyiRuntime, RuoyiProvisionInfra, ProvisionCheckpoint } from './ruoyi-
 import { RuoyiMysqlDdlDriver } from './ruoyi-mysql-ddl.driver';
 import { RuoyiLocalDeployer } from './ruoyi-local-deployer';
 import { loadRuoyiInstanceConfig, RuoyiInstanceConfig } from './ruoyi-provision.config';
+import { AppSpecAssemblerService } from './app-spec-assembler.service';
+import { RUOYI_PROVISION_QUEUE, RUOYI_PROVISION_JOB } from './ruoyi-provision.queue';
 
 /**
  * 若依全自动 provision 服务（私有化档）。
@@ -25,8 +29,42 @@ export class RuoyiProvisionService {
     private readonly prisma: PrismaService,
     private readonly client: RuoyiClient,
     private readonly runtime: RuoyiRuntime,
+    private readonly assembler: AppSpecAssemblerService,
+    @InjectQueue(RUOYI_PROVISION_QUEUE) private readonly queue: Queue,
   ) {
     this.cfg = loadRuoyiInstanceConfig();
+  }
+
+  /**
+   * 确保若依后端已置备（ADR-0005 接线：交付/迭代流程据此自动触发置备，不再手动去 deploy 页）。
+   * 幂等：未配实例/非若依项目/已就绪/置备中 → 不重复触发（除非 force）。否则装配 spec + 标 provisioning + 入队。
+   * 长任务由 processor 后台跑，本方法只触发不阻塞。force=true 用于显式 opt-in 端点（总是重置重跑）。
+   */
+  async ensureProvisioned(
+    projectId: string,
+    opts: { userId?: string; spec?: AppSpec; force?: boolean } = {},
+  ): Promise<{ triggered: boolean; status: string; jobId?: string; resources?: string[] }> {
+    if (!this.cfg.enabled) return { triggered: false, status: 'disabled' };
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true, backendRuntime: true } });
+    if (!project) return { triggered: false, status: 'no-project' };
+    const be = project.backendRuntime as { kind?: string; status?: string; phase?: ProvisionPhase } | null;
+    if (!opts.force) {
+      // 自动场景：只对"已选若依"的项目动作；已就绪/置备中不重复触发
+      if (be?.kind !== 'ruoyi') return { triggered: false, status: 'not-ruoyi' };
+      if (be?.status === 'ready') return { triggered: false, status: 'ready' };
+      if (be?.status === 'provisioning') return { triggered: false, status: 'provisioning' };
+    }
+    const spec = opts.spec?.entities?.length ? opts.spec : await this.assembler.fromProject(opts.userId ?? project.userId, projectId);
+    if (!spec.entities.length) return { triggered: false, status: 'no-entities' };
+    const resources = spec.entities.map((e) => e.table);
+    const priorPhase = be?.phase; // 续跑相位保留（重 POST 重置 provisioning 时不丢断点）
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { backendRuntime: { kind: 'ruoyi', status: 'provisioning', resources, schemaName: '', provisionedAt: null, ...(priorPhase ? { phase: priorPhase } : {}) } as never },
+    });
+    const job = await this.queue.add(RUOYI_PROVISION_JOB, { projectId, spec }, { attempts: 1, removeOnComplete: 20, removeOnFail: 50 });
+    this.logger.log(`ensureProvisioned project=${projectId} → 入队若依置备 job=${job.id} 资源=[${resources.join(',')}]`);
+    return { triggered: true, status: 'provisioning', jobId: String(job.id), resources };
   }
 
   get enabled(): boolean {
