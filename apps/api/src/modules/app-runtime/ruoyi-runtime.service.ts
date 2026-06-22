@@ -125,13 +125,16 @@ export class RuoyiRuntime implements BackendRuntime {
       await infra.waitReady();
       await checkpoint.save('ready');
     }
-    // ③ RBAC 运行时配：角色 + data_scope（'1'全部/'5'仅本人）
+    // ③ RBAC 运行时配：角色 + data_scope（'1'全部/'5'仅本人）+ 接口权限点（解生成 Controller 的 @SaCheckPermission 403）
     if (!phaseReached(from, 'seeded')) {
       if (spec.roles?.length) {
+        const roleKeys = spec.roles.map((r, i) => roleKey(r.name, i));
         await this.client.seedRoles(
           cfg,
-          spec.roles.map((r, i) => ({ roleName: r.name, roleKey: roleKey(r.name, i), dataScope: r.dataScope })),
+          spec.roles.map((r, i) => ({ roleName: r.name, roleKey: roleKeys[i], dataScope: r.dataScope })),
         );
+        // 坎1：种按钮权限点(sys_menu)并绑业务角色——否则终端用户调生成接口被 @SaCheckPermission 挡成 403
+        await this.client.seedMenusAndGrant(cfg, tables, roleKeys);
       }
       await checkpoint.save('seeded');
     }

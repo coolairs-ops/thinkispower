@@ -149,6 +149,128 @@ export class RuoyiClient {
     return { created, skipped };
   }
 
+  // ─── 终端用户账号 seed（sys_user + 绑角色，data_scope 随角色；P2，供 LIVE 隔离验证/初始账号置备）───
+
+  /** 列角色 roleKey→roleId（seedUsers 绑角色用；roleId 可能是雪花串）。 */
+  async listRoles(cfg: RuoyiClientConfig, token: string): Promise<Map<string, string | number>> {
+    const data = await this.get(cfg, `/system/role/list?pageNum=1&pageSize=200`, token);
+    const rows = (data?.rows ?? data?.data?.rows ?? []) as Array<{ roleId: string | number; roleKey: string }>;
+    return new Map(rows.filter((r) => r.roleKey).map((r) => [r.roleKey, r.roleId]));
+  }
+
+  /** 已存在用户名集合（幂等 seed 用）。 */
+  async listUserNames(cfg: RuoyiClientConfig, token: string): Promise<Set<string>> {
+    const data = await this.get(cfg, `/system/user/list?pageNum=1&pageSize=500`, token);
+    const rows = (data?.rows ?? data?.data?.rows ?? []) as Array<{ userName: string }>;
+    return new Set(rows.map((r) => r.userName).filter(Boolean));
+  }
+
+  /**
+   * 建终端用户（sys_user）并绑角色——data_scope 随角色（普通用户=仅本人/管理=全部），
+   * 是"普通用户只看自己、领导看全部"在运行时真生效的前提（每人调若依带本人 token）。
+   * 幂等：已存在 userName 跳过。roleKey 解析为 roleId；deptId 默认 100（若依内置根部门）。
+   */
+  async seedUsers(
+    cfg: RuoyiClientConfig,
+    users: Array<{ userName: string; nickName?: string; password: string; roleKey: string; deptId?: number }>,
+  ): Promise<{ created: number; skipped: number }> {
+    const token = await this.login(cfg);
+    const roleMap = await this.listRoles(cfg, token);
+    const existing = await this.listUserNames(cfg, token);
+    let created = 0;
+    let skipped = 0;
+    for (const u of users) {
+      if (existing.has(u.userName)) {
+        skipped++;
+        continue;
+      }
+      const roleId = roleMap.get(u.roleKey);
+      if (roleId == null) throw new Error(`seedUsers: 角色不存在 roleKey=${u.roleKey}`);
+      const body = {
+        userName: u.userName,
+        nickName: u.nickName ?? u.userName,
+        password: u.password,
+        deptId: u.deptId ?? 100,
+        roleIds: [roleId],
+        status: '0',
+      };
+      const data = await this.post(cfg, '/system/user', body, token);
+      if (data?.code !== 200) throw new Error(`createUser 失败(${u.userName}): ${JSON.stringify(data).slice(0, 200)}`);
+      created++;
+    }
+    this.logger.log(`若依 seedUsers: 新建 ${created} 用户 / 跳过 ${skipped}（已存在）`);
+    return { created, skipped };
+  }
+
+  // ─── 接口权限种子（坎1：生成的 Controller 带 @SaCheckPermission，角色没权限点→403）───
+
+  /** 列现有菜单 perms→menuId（去重/取新建 id 用）。 */
+  async listMenuPerms(cfg: RuoyiClientConfig, token: string): Promise<Map<string, string | number>> {
+    const data = await this.get(cfg, `/system/menu/list`, token);
+    const rows = (data?.data ?? data?.rows ?? []) as Array<{ menuId: string | number; perms: string }>;
+    return new Map(rows.filter((r) => r.perms).map((r) => [r.perms, r.menuId]));
+  }
+
+  /** 建一个按钮权限点（menu_type=F，parentId=0）。perms 已存在应先经 listMenuPerms 去重避免重复建。 */
+  private async createPermMenu(cfg: RuoyiClientConfig, token: string, perms: string): Promise<void> {
+    const body = { menuName: perms.slice(0, 50), parentId: 0, menuType: 'F', perms, orderNum: 90, isFrame: '1', isCache: '0', visible: '1', status: '0', icon: '#' };
+    const data = await this.post(cfg, '/system/menu', body, token);
+    if (data?.code !== 200) throw new Error(`createMenu 失败(${perms}): ${JSON.stringify(data).slice(0, 200)}`);
+  }
+
+  /** 角色当前已绑菜单 id（roleMenuTreeselect.checkedKeys）。 */
+  private async roleMenuCheckedKeys(cfg: RuoyiClientConfig, token: string, roleId: string | number): Promise<Array<string | number>> {
+    const data = await this.get(cfg, `/system/menu/roleMenuTreeselect/${roleId}`, token);
+    return (data?.data?.checkedKeys ?? data?.checkedKeys ?? []) as Array<string | number>;
+  }
+
+  /**
+   * 给业务资源种按钮权限点（sys_menu）并绑给业务角色——解生成 Controller 的 @SaCheckPermission 403。
+   * perms 对齐 codegen：`<module>:<resource>:<action>`（默认 module=system，actions=CRUD 五项）。
+   * 幂等：已存在 perms 不重建；角色菜单取并集（保留原菜单 + dataScope/dept 不动）。
+   */
+  async seedMenusAndGrant(
+    cfg: RuoyiClientConfig,
+    resources: string[],
+    roleKeys: string[],
+    opts: { module?: string; actions?: string[] } = {},
+  ): Promise<{ menusCreated: number; rolesGranted: number }> {
+    if (!resources.length || !roleKeys.length) return { menusCreated: 0, rolesGranted: 0 };
+    const token = await this.login(cfg);
+    const moduleName = opts.module ?? 'system';
+    const actions = opts.actions ?? ['list', 'query', 'add', 'edit', 'remove'];
+    const wantPerms = resources.flatMap((r) => actions.map((a) => `${moduleName}:${r}:${a}`));
+
+    // ① 确保权限点存在（缺的才建）
+    let permMap = await this.listMenuPerms(cfg, token);
+    let menusCreated = 0;
+    for (const perms of wantPerms) {
+      if (permMap.has(perms)) continue;
+      await this.createPermMenu(cfg, token, perms);
+      menusCreated++;
+    }
+    if (menusCreated) permMap = await this.listMenuPerms(cfg, token); // 取新建的 menuId
+    const wantMenuIds = wantPerms.map((p) => permMap.get(p)).filter((x): x is string | number => x != null);
+
+    // ② 绑给业务角色（并集；getRole 取全字段，PUT 带 menuIds，dataScope 不变）
+    const roleMap = await this.listRoles(cfg, token);
+    let rolesGranted = 0;
+    for (const rk of roleKeys) {
+      const roleId = roleMap.get(rk);
+      if (roleId == null) continue;
+      const current = await this.roleMenuCheckedKeys(cfg, token, roleId);
+      const menuIds = Array.from(new Set<string | number>([...current, ...wantMenuIds]));
+      const roleData = await this.get(cfg, `/system/role/${roleId}`, token);
+      const role = roleData?.data;
+      if (!role) throw new Error(`getRole 失败(${rk})`);
+      const put = await this.put(cfg, '/system/role', { ...role, menuIds, deptIds: [] }, token);
+      if (put?.code !== 200) throw new Error(`绑定角色菜单失败(${rk}): ${JSON.stringify(put).slice(0, 200)}`);
+      rolesGranted++;
+    }
+    this.logger.log(`若依 seedMenusAndGrant: 资源 ${resources.length} / 权限点新建 ${menusCreated} / 绑定角色 ${rolesGranted}`);
+    return { menusCreated, rolesGranted };
+  }
+
   // ─── 终端用户数据代理（适配器②·服务端版：按**本人 token** 调 /system/<resource>，data_scope 据此生效）───
   // 路B appData 契约 ←→ 若依 REST 的转译统一收在这里（原在浏览器注入器里，现搬服务端，浏览器不见若依 token）。
 
