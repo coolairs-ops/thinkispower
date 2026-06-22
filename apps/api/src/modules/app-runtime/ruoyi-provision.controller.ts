@@ -28,6 +28,13 @@ export class RuoyiProvisionController {
     return { queued: r.triggered, jobId: r.jobId, source: body?.entities?.length ? 'body' : 'ir', entities: r.resources };
   }
 
+  /** 指定/取消项目用若依底座（方案页开关，第2层显式意图）。body {use:boolean}。 */
+  @Post('designate')
+  async designate(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { use?: boolean }) {
+    await this.requireOwner(req.user.id, projectId);
+    return this.svc.designate(projectId, !!body?.use);
+  }
+
   @Get()
   async status(@Req() req: any, @Param('projectId') projectId: string) {
     const project = await this.requireOwner(req.user.id, projectId);

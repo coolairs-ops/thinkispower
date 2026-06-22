@@ -30,7 +30,8 @@ export interface BackendRuntimeDescriptor {
   schemaName: string;
   /** 暴露的资源名（= 数据模型里的表名），供前端/传感器枚举 */
   resources: string[];
-  status: 'provisioning' | 'ready' | 'error';
+  /** pending=已指定用若依但还没置备(方案页开关设的意图)；provisioning/ready/error=置备生命周期。 */
+  status: 'pending' | 'provisioning' | 'ready' | 'error';
   provisionedAt?: string;
   error?: string;
   /** provision 断点续跑相位（仅置备中/失败时有意义；ready 终态可省）。失败重跑据此续。 */

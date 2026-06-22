@@ -49,6 +49,9 @@ export default function PlanPage() {
  const [designReady, setDesignReady] = useState(false);
  const [relKey, setRelKey] = useState(0);
  const [detecting, setDetecting] = useState(false);
+ const [useRuoyi, setUseRuoyi] = useState(false);
+ const [ruoyiStatus, setRuoyiStatus] = useState<string | null>(null);
+ const [togglingBackend, setTogglingBackend] = useState(false);
 
  useEffect(() => {
  if (isLoading) return;
@@ -109,6 +112,27 @@ export default function PlanPage() {
  const handleConfirm = async () => {
  await api.put(`/api/projects/${projectId}/plan/confirm`);
  router.push(`/projects/${projectId}/demo`);
+ };
+
+ // 进页加载"后端底座"意图（kind=ruoyi 即已指定若依）
+ useEffect(() => {
+   if (!token) return;
+   api.get(`/api/projects/${projectId}/ruoyi`)
+     .then((r: any) => { const be = r?.backendRuntime; setUseRuoyi(be?.kind === 'ruoyi'); setRuoyiStatus(be?.status ?? null); })
+     .catch(() => {});
+ }, [projectId, token]);
+
+ const toggleBackend = async () => {
+   setTogglingBackend(true);
+   try {
+     const r: any = await api.post(`/api/projects/${projectId}/ruoyi/designate`, { use: !useRuoyi });
+     setUseRuoyi(r.desiredBackend === 'ruoyi');
+     setRuoyiStatus(r.status ?? null);
+   } catch (e: any) {
+     alert(e?.message || '切换后端底座失败');
+   } finally {
+     setTogglingBackend(false);
+   }
  };
 
  // 进页时若设计已采纳过 → 直接开启关系问答（返场用户也能看到）
@@ -175,6 +199,31 @@ export default function PlanPage() {
 
  {/* 规则定义子环节（形态A）：这系统要不要风险评分/分级 */}
  <RuleEngineEntry projectId={projectId} />
+
+ {/* 后端底座选择（ADR-0005 第2层显式意图）：路B 通用CRUD / 若依政企底座 */}
+ <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 flex items-center justify-between gap-4">
+   <div>
+     <div className="font-medium text-gray-900">后端底座</div>
+     <p className="text-xs text-gray-500 mt-0.5">
+       {useRuoyi
+         ? '若依政企底座：多角色 + 数据权限（普通用户只看自己/领导看全部），交付时自动置备'
+         : '路B 通用 CRUD（默认，开箱即用、轻量）'}
+       {useRuoyi && ruoyiStatus && ruoyiStatus !== 'pending' ? `　·　置备状态：${ruoyiStatus}` : ''}
+     </p>
+   </div>
+   <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm shrink-0">
+     <button
+       onClick={() => { if (useRuoyi && !togglingBackend) toggleBackend(); }}
+       disabled={togglingBackend || (useRuoyi && !!ruoyiStatus && ruoyiStatus !== 'pending')}
+       className={`px-4 py-1.5 ${!useRuoyi ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+     >路B</button>
+     <button
+       onClick={() => { if (!useRuoyi && !togglingBackend) toggleBackend(); }}
+       disabled={togglingBackend}
+       className={`px-4 py-1.5 border-l border-gray-300 ${useRuoyi ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+     >若依</button>
+   </div>
+ </div>
 
  {/* Tab bar */}
  <div className="flex gap-0 mb-6 border-b border-gray-200">

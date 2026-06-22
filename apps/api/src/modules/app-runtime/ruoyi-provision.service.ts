@@ -67,6 +67,30 @@ export class RuoyiProvisionService {
     return { triggered: true, status: 'provisioning', jobId: String(job.id), resources };
   }
 
+  /**
+   * 指定/取消项目用若依底座（方案页开关，ADR-0005 第2层"显式意图"）。
+   * use=true：标 backendRuntime={kind:ruoyi,status:pending}（仅"已选"未置备）→ 交付时 ensureProvisioned 自动置备、
+   *   迭代立即按若依契约收敛、serve 未就绪前仍走路B。已是若依(可能已置备)则不动。
+   * use=false：仅当还停在 pending(未真置备)才清回路B；已 provisioning/ready 不擅自抹除。
+   * 纯意图，不校验实例是否配置（置备时 ensureProvisioned 再 gate）。
+   */
+  async designate(projectId: string, use: boolean): Promise<{ desiredBackend: 'ruoyi' | 'crud'; status?: string }> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+    const be = project?.backendRuntime as { kind?: string; status?: string } | null;
+    if (use) {
+      if (be?.kind === 'ruoyi') return { desiredBackend: 'ruoyi', status: be.status }; // 已选/已置备，幂等不动
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { backendRuntime: { kind: 'ruoyi', status: 'pending', resources: [], schemaName: '', provisionedAt: null } as never },
+      });
+      this.logger.log(`designate project=${projectId} → 指定若依底座(pending)`);
+      return { desiredBackend: 'ruoyi', status: 'pending' };
+    }
+    if (be?.kind === 'ruoyi' && be?.status !== 'pending') return { desiredBackend: 'ruoyi', status: be.status }; // 已置备/置备中，不静默清
+    await this.prisma.project.update({ where: { id: projectId }, data: { backendRuntime: null as never } });
+    return { desiredBackend: 'crud' };
+  }
+
   get enabled(): boolean {
     return this.cfg.enabled;
   }

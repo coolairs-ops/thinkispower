@@ -71,6 +71,13 @@ describe('RuoyiProvisionService', () => {
       expect(upd).toMatchObject({ kind: 'ruoyi', status: 'provisioning', phase: 'deployed' });
     });
 
+    it('已指定若依但未置备(status=pending) → 交付时自动触发置备', async () => {
+      const { svc, queue } = make(baseEnv, { kind: 'ruoyi', status: 'pending' });
+      const r = await svc.ensureProvisioned('p1', { userId: 'u1' });
+      expect(r.triggered).toBe(true);
+      expect(queue.add).toHaveBeenCalled();
+    });
+
     it('force（显式 opt-in）→ 即便非 ruoyi 也触发', async () => {
       const { svc, queue } = make(baseEnv, null);
       const r = await svc.ensureProvisioned('p1', { userId: 'u1', force: true });
@@ -82,6 +89,33 @@ describe('RuoyiProvisionService', () => {
       const { svc, queue } = make({ RUOYI_BASE_URL: undefined, RUOYI_SRC_ROOT: undefined }, { kind: 'ruoyi', status: 'error' });
       expect((await svc.ensureProvisioned('p1')).status).toBe('disabled');
       expect(queue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('designate（方案页若依开关·第2层显式意图）', () => {
+    it('路B 项目 use=true → 标 backendRuntime={kind:ruoyi,status:pending}', async () => {
+      const { svc, prisma } = make(baseEnv, null);
+      const r = await svc.designate('p1', true);
+      expect(r).toEqual({ desiredBackend: 'ruoyi', status: 'pending' });
+      expect(prisma.project.update.mock.calls[0][0].data.backendRuntime).toMatchObject({ kind: 'ruoyi', status: 'pending' });
+    });
+
+    it('已是若依(ready) use=true → 幂等不动', async () => {
+      const { svc, prisma } = make(baseEnv, { kind: 'ruoyi', status: 'ready' });
+      expect((await svc.designate('p1', true)).status).toBe('ready');
+      expect(prisma.project.update).not.toHaveBeenCalled();
+    });
+
+    it('pending use=false → 清回路B(null)', async () => {
+      const { svc, prisma } = make(baseEnv, { kind: 'ruoyi', status: 'pending' });
+      expect(await svc.designate('p1', false)).toEqual({ desiredBackend: 'crud' });
+      expect(prisma.project.update.mock.calls[0][0].data.backendRuntime).toBeNull();
+    });
+
+    it('已置备(ready) use=false → 不静默抹除', async () => {
+      const { svc, prisma } = make(baseEnv, { kind: 'ruoyi', status: 'ready' });
+      expect((await svc.designate('p1', false)).desiredBackend).toBe('ruoyi');
+      expect(prisma.project.update).not.toHaveBeenCalled();
     });
   });
 });
