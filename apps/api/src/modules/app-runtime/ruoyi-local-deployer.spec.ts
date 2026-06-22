@@ -93,6 +93,19 @@ describe('RuoyiLocalDeployer（私有化档部署驱动）', () => {
     await expect(new RuoyiLocalDeployer(client as never, cfg).deployTables(ruoyiCfg, ['demo_store'])).rejects.toThrow('无 main/java');
   });
 
+  it('Mapper.java 落盘时注入 @DataPermission（坎2 数据权限）', async () => {
+    const z = new AdmZip();
+    z.addFile(
+      'main/java/org/dromara/system/mapper/CustomerMapper.java',
+      Buffer.from('package org.dromara.system.mapper;\nimport org.dromara.common.mybatis.core.mapper.BaseMapperPlus;\npublic interface CustomerMapper extends BaseMapperPlus<Customer, CustomerVo> {\n}\n'),
+    );
+    const client = { importAndDownload: jest.fn(async () => z.toBuffer()) };
+    await new RuoyiLocalDeployer(client as never, cfg).deployTables(ruoyiCfg, ['customer']);
+    const mapperPath = '/ruoyi/ruoyi-modules/ruoyi-system/src/main/java/org/dromara/system/mapper/CustomerMapper.java';
+    expect(writes[mapperPath].toString()).toContain('@DataPermission');
+    expect(writes[mapperPath].toString()).toContain('value = "create_by"');
+  });
+
   it('deploySources：编译+重启但不探活（断点续跑边界）', async () => {
     const fetchSpy = jest.spyOn(global, 'fetch');
     const client = { importAndDownload: jest.fn(async () => genZip()) };
