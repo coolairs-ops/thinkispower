@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
+import { assertOrgAccess } from '../../common/utils/tenant-scope';
 
 @Injectable()
 export class ProjectService {
@@ -53,9 +54,9 @@ export class ProjectService {
     return this.toPublicProject(project);
   }
 
-  async findAll(userId: string) {
+  async findAll(userId: string, orgId: string | null) {
     const projects = await this.prisma.project.findMany({
-      where: { userId },
+      where: { userId, ...(orgId ? { orgId } : {}) }, // 租户边界：有 org 上下文则按 org 过滤（own + 同租户）
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -77,20 +78,20 @@ export class ProjectService {
     }));
   }
 
-  async findOne(userId: string, projectId: string) {
+  async findOne(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       include: { deliveryOptions: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问该项目');
+    this.assertAccess(project, userId, orgId);
     return this.toPublicProject(project);
   }
 
-  async update(userId: string, projectId: string, data: { name?: string; description?: string; appType?: string; structuredRequirement?: any }) {
+  async update(userId: string, orgId: string | null, projectId: string, data: { name?: string; description?: string; appType?: string; structuredRequirement?: any }) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权修改该项目');
+    this.assertAccess(project, userId, orgId);
 
     const updateData: any = { ...data };
     if (data.structuredRequirement) {
@@ -105,10 +106,10 @@ export class ProjectService {
     return this.toPublicProject(updated);
   }
 
-  async confirmPlan(userId: string, projectId: string) {
+  async confirmPlan(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权操作');
+    this.assertAccess(project, userId, orgId);
     if (project.status !== 'prd_ready') {
       throw new ForbiddenException('项目状态不是 prd_ready，无法确认方案');
     }
@@ -132,10 +133,20 @@ export class ProjectService {
     };
   }
 
-  async remove(userId: string, projectId: string) {
+  async remove(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权操作');
+    this.assertAccess(project, userId, orgId);
     await this.prisma.project.delete({ where: { id: projectId } });
+  }
+
+  /**
+   * A2b 隔离收口：租户边界(org) + 组织内归属(userId) 二维校验。
+   * 有 org 上下文才强制 org 边界（跨租户 → 403；过渡期 allowLegacyNull 放行尚未回填 orgId 的旧项目）；
+   * 无 org 上下文（旧会话）退回纯 userId 归属（仍安全）。userId 校验保留=组织内只动自己的项目。
+   */
+  private assertAccess(project: { orgId: string | null; userId: string }, userId: string, orgId: string | null) {
+    if (orgId) assertOrgAccess(project.orgId, orgId, { allowLegacyNull: true });
+    if (project.userId !== userId) throw new ForbiddenException('无权访问该项目');
   }
 }

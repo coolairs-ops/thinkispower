@@ -12,9 +12,11 @@ describe('ProjectService', () => {
   const mockUserId = 'user-1';
   const mockProjectId = 'project-1';
 
+  const mockOrgId = 'org-1';
   const mockProject = {
     id: mockProjectId,
     userId: mockUserId,
+    orgId: mockOrgId,
     name: '测试项目',
     description: '一个测试项目',
     status: 'needs_input',
@@ -89,10 +91,11 @@ describe('ProjectService', () => {
     it('should return user projects ordered by createdAt desc', async () => {
       prisma.project.findMany.mockResolvedValue([mockProject]);
 
-      const result = await service.findAll(mockUserId);
+      const result = await service.findAll(mockUserId, mockOrgId);
 
       expect(result).toHaveLength(1);
       expect(result[0].status).toBeDefined();
+      expect(prisma.project.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: mockUserId, orgId: mockOrgId } }));
     });
   });
 
@@ -100,7 +103,7 @@ describe('ProjectService', () => {
     it('should return project if user owns it', async () => {
       prisma.project.findUnique.mockResolvedValue(mockProject);
 
-      const result = await service.findOne(mockUserId, mockProjectId);
+      const result = await service.findOne(mockUserId, mockOrgId, mockProjectId);
 
       expect(result).toMatchObject({ id: mockProjectId, name: '测试项目', hasPlan: false });
     });
@@ -108,13 +111,26 @@ describe('ProjectService', () => {
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne(mockUserId, mockProjectId)).rejects.toThrow(NotFoundException);
+      await expect(service.findOne(mockUserId, mockOrgId, mockProjectId)).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException if user is not the owner', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...mockProject, userId: 'other-user' });
 
-      await expect(service.findOne(mockUserId, mockProjectId)).rejects.toThrow(ForbiddenException);
+      await expect(service.findOne(mockUserId, mockOrgId, mockProjectId)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('A2b：跨租户访问被挡（同 user 但 org 不符）→ Forbidden', async () => {
+      prisma.project.findUnique.mockResolvedValue({ ...mockProject, orgId: 'other-org' });
+
+      await expect(service.findOne(mockUserId, mockOrgId, mockProjectId)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('A2b：过渡期旧项目 orgId 为 null → 放行（allowLegacyNull），仍按 userId 归属', async () => {
+      prisma.project.findUnique.mockResolvedValue({ ...mockProject, orgId: null });
+
+      const result = await service.findOne(mockUserId, mockOrgId, mockProjectId);
+      expect(result).toMatchObject({ id: mockProjectId });
     });
   });
 
@@ -123,7 +139,7 @@ describe('ProjectService', () => {
       prisma.project.findUnique.mockResolvedValue(mockProject);
       prisma.project.update.mockResolvedValue({ ...mockProject, name: '新名称' });
 
-      const result = await service.update(mockUserId, mockProjectId, { name: '新名称' });
+      const result = await service.update(mockUserId, mockOrgId, mockProjectId, { name: '新名称' });
 
       expect(result.name).toBe('新名称');
     });
@@ -133,7 +149,7 @@ describe('ProjectService', () => {
       prisma.project.findUnique.mockResolvedValue(mockProject);
       prisma.project.update.mockResolvedValue({ ...mockProject, structuredRequirement: req as any });
 
-      await service.update(mockUserId, mockProjectId, { structuredRequirement: req });
+      await service.update(mockUserId, mockOrgId, mockProjectId, { structuredRequirement: req });
 
       expect(prisma.project.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ structuredRequirement: req }) }),
@@ -143,13 +159,13 @@ describe('ProjectService', () => {
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.update(mockUserId, mockProjectId, { name: 'x' })).rejects.toThrow(NotFoundException);
+      await expect(service.update(mockUserId, mockOrgId, mockProjectId, { name: 'x' })).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException if not owner', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...mockProject, userId: 'other' });
 
-      await expect(service.update(mockUserId, mockProjectId, { name: 'x' })).rejects.toThrow(ForbiddenException);
+      await expect(service.update(mockUserId, mockOrgId, mockProjectId, { name: 'x' })).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -158,7 +174,7 @@ describe('ProjectService', () => {
       prisma.project.findUnique.mockResolvedValue({ ...mockProject, status: 'prd_ready' });
       prisma.project.update.mockResolvedValue({ ...mockProject, status: 'plan_ready' });
 
-      const result = await service.confirmPlan(mockUserId, mockProjectId);
+      const result = await service.confirmPlan(mockUserId, mockOrgId, mockProjectId);
 
       expect(result.status).toBe('plan_ready');
       expect(statusMapper.mapProjectStatusToPublicLabel).toHaveBeenCalledWith('plan_ready');
@@ -167,13 +183,13 @@ describe('ProjectService', () => {
     it('should throw ForbiddenException if status is not prd_ready', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...mockProject, status: 'needs_input' });
 
-      await expect(service.confirmPlan(mockUserId, mockProjectId)).rejects.toThrow(ForbiddenException);
+      await expect(service.confirmPlan(mockUserId, mockOrgId, mockProjectId)).rejects.toThrow(ForbiddenException);
     });
 
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.confirmPlan(mockUserId, mockProjectId)).rejects.toThrow(NotFoundException);
+      await expect(service.confirmPlan(mockUserId, mockOrgId, mockProjectId)).rejects.toThrow(NotFoundException);
     });
   });
 
