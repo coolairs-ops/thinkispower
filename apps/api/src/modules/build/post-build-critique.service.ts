@@ -1,5 +1,6 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 /**
  * 需求补全 v2 · 升级E（后置遍）：建造完成后，对**产物/建造状态**做完备性批判，
@@ -16,13 +17,13 @@ export class PostBuildCritiqueService {
   constructor(private prisma: PrismaService) {}
 
   /** 跑一次后置批判（确定性，无 LLM）。ownership 校验。 */
-  async critique(userId: string, projectId: string): Promise<{ gaps: PostBuildGap[]; summary: PostBuildSummary }> {
+  async critique(userId: string, orgId: string | null, projectId: string): Promise<{ gaps: PostBuildGap[]; summary: PostBuildSummary }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, planSummary: true },
+      select: { userId: true, orgId: true, planSummary: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const modules = await this.prisma.buildModule.findMany({ where: { projectId }, orderBy: { orderIdx: 'asc' } });
     const gaps: PostBuildGap[] = [];

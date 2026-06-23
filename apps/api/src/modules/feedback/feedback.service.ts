@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { SpecificationService } from '../specification/specification.service';
 import { EVENTS, TaskFailedPayload, TasksCompletedPayload } from '../../events/event-types';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 @Injectable()
 export class FeedbackService {
@@ -17,13 +18,13 @@ export class FeedbackService {
     private specService: SpecificationService,
   ) {}
 
-  async findAll(userId: string, projectId: string) {
+  async findAll(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true },
+      select: { userId: true, orgId: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     return this.prisma.feedbackItem.findMany({
       where: { projectId },
@@ -43,15 +44,16 @@ export class FeedbackService {
 
   async create(
     userId: string,
+    orgId: string | null,
     projectId: string,
     data: { moduleKey?: string; elementPath?: string; pageUrl?: string; comment: string },
   ) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, status: true },
+      select: { userId: true, orgId: true, status: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     // 自动判定 bug vs 变更请求（基于冻结的规格）
     let feedbackType = 'bug';
@@ -105,13 +107,13 @@ export class FeedbackService {
     };
   }
 
-  async updateStatus(userId: string, projectId: string, feedbackId: string, newStatus: string) {
+  async updateStatus(userId: string, orgId: string | null, projectId: string, feedbackId: string, newStatus: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true },
+      select: { userId: true, orgId: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const feedback = await this.prisma.feedbackItem.findFirst({
       where: { id: feedbackId, projectId },

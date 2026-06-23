@@ -11,18 +11,18 @@ export class BusinessRuleCompletionController {
   /** 检测候选业务规则（清楚的 autofill / 模糊的 ask 出选择题） */
   @Post('detect')
   async detect(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.svc.detect(req.user.id, projectId);
+    return this.svc.detect(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 取已存候选 + 已确定规则 */
   @Get()
   async get(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.svc.get(req.user.id, projectId);
+    return this.svc.get(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 回写：autofill + 客户对 ask 的答案（键=规则名，值=选定 outcome；'__skip__'=不要） */
   @Post('apply')
   async apply(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { answers?: Record<string, string> }) {
-    return this.svc.apply(req.user.id, projectId, body?.answers ?? {});
+    return this.svc.apply(req.user.id, req.user.orgId ?? null, projectId, body?.answers ?? {});
   }
 }

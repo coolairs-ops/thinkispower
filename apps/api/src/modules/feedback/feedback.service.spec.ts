@@ -70,7 +70,7 @@ describe('FeedbackService', () => {
       prisma.project.findUnique.mockResolvedValue(mockProject);
       prisma.feedbackItem.findMany.mockResolvedValue([mockFeedback]);
 
-      const result = await service.findAll(mockUserId, mockProjectId);
+      const result = await service.findAll(mockUserId, null, mockProjectId);
 
       expect(result).toHaveLength(1);
       expect(result[0].comment).toBe('这里需要一个导出按钮');
@@ -79,13 +79,13 @@ describe('FeedbackService', () => {
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.findAll(mockUserId, mockProjectId)).rejects.toThrow(NotFoundException);
+      await expect(service.findAll(mockUserId, null, mockProjectId)).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException if not owner', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...mockProject, userId: 'other' });
 
-      await expect(service.findAll(mockUserId, mockProjectId)).rejects.toThrow(ForbiddenException);
+      await expect(service.findAll(mockUserId, null, mockProjectId)).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -94,7 +94,7 @@ describe('FeedbackService', () => {
       prisma.project.findUnique.mockResolvedValue(mockProject);
       prisma.feedbackItem.create.mockResolvedValue(mockFeedback);
 
-      const result = await service.create(mockUserId, mockProjectId, {
+      const result = await service.create(mockUserId, null, mockProjectId, {
         moduleKey: 'customer-list',
         elementPath: 'add-btn',
         comment: '这里需要一个导出按钮',
@@ -114,7 +114,7 @@ describe('FeedbackService', () => {
       prisma.project.findUnique.mockResolvedValue(mockProject);
       prisma.feedbackItem.create.mockResolvedValue(mockFeedback);
 
-      await service.create(mockUserId, mockProjectId, { comment: '修改一下' });
+      await service.create(mockUserId, null, mockProjectId, { comment: '修改一下' });
 
       expect(prisma.project.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -127,7 +127,7 @@ describe('FeedbackService', () => {
       prisma.project.findUnique.mockResolvedValue({ ...mockProject, status: 'plan_ready' });
       prisma.feedbackItem.create.mockResolvedValue(mockFeedback);
 
-      await service.create(mockUserId, mockProjectId, { comment: '修改一下' });
+      await service.create(mockUserId, null, mockProjectId, { comment: '修改一下' });
 
       expect(prisma.project.update).not.toHaveBeenCalled();
     });
@@ -135,13 +135,13 @@ describe('FeedbackService', () => {
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.create(mockUserId, mockProjectId, { comment: 'test' })).rejects.toThrow(NotFoundException);
+      await expect(service.create(mockUserId, null, mockProjectId, { comment: 'test' })).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException if not owner', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...mockProject, userId: 'other' });
 
-      await expect(service.create(mockUserId, mockProjectId, { comment: 'test' })).rejects.toThrow(ForbiddenException);
+      await expect(service.create(mockUserId, null, mockProjectId, { comment: 'test' })).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -151,7 +151,7 @@ describe('FeedbackService', () => {
       prisma.feedbackItem.findFirst.mockResolvedValue(mockFeedback);
       prisma.feedbackItem.update.mockResolvedValue({ id: mockFeedbackId, status: 'resolved' });
 
-      const result = await service.updateStatus(mockUserId, mockProjectId, mockFeedbackId, 'resolved');
+      const result = await service.updateStatus(mockUserId, null, mockProjectId, mockFeedbackId, 'resolved');
 
       expect(result).toEqual({ id: mockFeedbackId, status: 'resolved' });
     });
@@ -161,7 +161,7 @@ describe('FeedbackService', () => {
       prisma.feedbackItem.findFirst.mockResolvedValue(mockFeedback);
 
       await expect(
-        service.updateStatus(mockUserId, mockProjectId, mockFeedbackId, 'invalid'),
+        service.updateStatus(mockUserId, null, mockProjectId, mockFeedbackId, 'invalid'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -170,7 +170,7 @@ describe('FeedbackService', () => {
       prisma.feedbackItem.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.updateStatus(mockUserId, mockProjectId, 'nonexistent', 'resolved'),
+        service.updateStatus(mockUserId, null, mockProjectId, 'nonexistent', 'resolved'),
       ).rejects.toThrow(NotFoundException);
     });
   });

@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { SensorService } from '../../sensors/sensor.service';
 import { LlmGatewayService } from '../../integrations/llm/llm-gateway.service';
 import { FusedReport } from '../../sensors/sensor-report.interface';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 export type ScenarioStatus = 'pass' | 'fail' | 'manual';
 
@@ -60,8 +61,8 @@ export class AcceptanceVerificationService {
   ) {}
 
   /** 执行验收：跑传感器 + 逐条语义判定，落库并返回报告 */
-  async verify(userId: string, projectId: string): Promise<AcceptanceReport> {
-    const { project, spec } = await this.load(userId, projectId);
+  async verify(userId: string, orgId: string | null, projectId: string): Promise<AcceptanceReport> {
+    const { project, spec } = await this.load(userId, orgId, projectId);
     const scenarios = this.scenariosOf(spec);
 
     if (!spec || scenarios.length === 0) {
@@ -120,16 +121,17 @@ export class AcceptanceVerificationService {
    */
   async gate(
     userId: string,
+    orgId: string | null,
     projectId: string,
   ): Promise<{ allowed: boolean; passRate: number | null; threshold: number; report: AcceptanceReport }> {
     const threshold = this.threshold();
-    const { spec } = await this.load(userId, projectId);
+    const { spec } = await this.load(userId, orgId, projectId);
     if (!spec || this.scenariosOf(spec).length === 0) {
       return { allowed: true, passRate: null, threshold, report: this.emptyReport(spec?.version ?? null) };
     }
 
     const verified = ((spec.verificationResults as unknown as ScenarioVerification[]) ?? []).length > 0 && spec.passRate != null;
-    const report = verified ? await this.getReport(userId, projectId) : await this.verify(userId, projectId);
+    const report = verified ? await this.getReport(userId, orgId, projectId) : await this.verify(userId, orgId, projectId);
     const passRate = report.passRate ?? 0;
     return { allowed: passRate >= threshold, passRate, threshold, report };
   }
@@ -140,8 +142,8 @@ export class AcceptanceVerificationService {
   }
 
   /** 读取已落库的验收报告（不重算），供报告页展示 */
-  async getReport(userId: string, projectId: string): Promise<AcceptanceReport> {
-    const { spec } = await this.load(userId, projectId);
+  async getReport(userId: string, orgId: string | null, projectId: string): Promise<AcceptanceReport> {
+    const { spec } = await this.load(userId, orgId, projectId);
     if (!spec) throw new NotFoundException('规格不存在，请先生成规格');
 
     const results = (spec.verificationResults as unknown as ScenarioVerification[]) ?? [];
@@ -161,12 +163,13 @@ export class AcceptanceVerificationService {
   /** 人工裁定单条「待人工/未通过」场景，回写状态并重算 passRate + changeLog */
   async manualConfirm(
     userId: string,
+    orgId: string | null,
     projectId: string,
     scenarioName: string,
     status: ScenarioStatus,
     note?: string,
   ): Promise<AcceptanceReport> {
-    const { spec } = await this.load(userId, projectId);
+    const { spec } = await this.load(userId, orgId, projectId);
     if (!spec) throw new NotFoundException('规格不存在');
     const results = (spec.verificationResults as unknown as ScenarioVerification[]) ?? [];
     const target = results.find((r) => r.scenarioName === scenarioName);
@@ -189,13 +192,13 @@ export class AcceptanceVerificationService {
 
   // ───────────────────────── 内部 ─────────────────────────
 
-  private async load(userId: string, projectId: string) {
+  private async load(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, demoHtml: true, description: true },
+      select: { id: true, userId: true, orgId: true, demoHtml: true, description: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const spec = await this.prisma.specification.findUnique({ where: { projectId } });
     return { project, spec };

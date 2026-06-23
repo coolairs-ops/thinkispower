@@ -181,7 +181,7 @@ export class GuardianRemediationService {
 
   private async safeVerify(userId: string, projectId: string): Promise<AcceptanceReport | null> {
     try {
-      return await this.acceptance.verify(userId, projectId);
+      return await this.acceptance.verify(userId, null, projectId);
     } catch (e) {
       this.logger.warn(`守护重验失败 ${projectId}: ${e}`);
       return null;

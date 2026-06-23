@@ -36,11 +36,11 @@ export class FollowUpQuestionService {
   ) {}
 
   /** 合批取追加问答：D 的 ask 缺口 + 关系 ask + 业务规则 ask → 统一问题列表。无 ask 项 → 空（前端不弹窗）。 */
-  async getQuestions(userId: string, projectId: string): Promise<{ questions: FollowUpQuestion[] }> {
+  async getQuestions(userId: string, orgId: string | null, projectId: string): Promise<{ questions: FollowUpQuestion[] }> {
     const [{ gaps }, { candidates }, { candidates: ruleCands }] = await Promise.all([
-      this.req.get(userId, projectId),
-      this.rel.get(userId, projectId),
-      this.biz.get(userId, projectId),
+      this.req.get(userId, orgId, projectId),
+      this.rel.get(userId, orgId, projectId),
+      this.biz.get(userId, orgId, projectId),
     ]);
     const questions: FollowUpQuestion[] = [];
 
@@ -98,6 +98,7 @@ export class FollowUpQuestionService {
    */
   async submit(
     userId: string,
+    orgId: string | null,
     projectId: string,
     body: {
       relations?: Record<string, { cardinality?: string; onDelete?: string; required?: boolean }>;
@@ -105,16 +106,16 @@ export class FollowUpQuestionService {
       businessRules?: Record<string, string>;
     },
   ): Promise<{ relations: unknown; requirement: unknown; businessRules: unknown; specRegenerated: boolean; specStale: boolean }> {
-    const rel = await this.rel.apply(userId, projectId, body.relations ?? {});
-    const req = await this.req.apply(userId, projectId, body.acceptGaps ?? []);
-    const biz = await this.biz.apply(userId, projectId, body.businessRules ?? {});
+    const rel = await this.rel.apply(userId, orgId, projectId, body.relations ?? {});
+    const req = await this.req.apply(userId, orgId, projectId, body.acceptGaps ?? []);
+    const biz = await this.biz.apply(userId, orgId, projectId, body.businessRules ?? {});
 
     // 回写后让正式规格随动：未冻结自动重生成（业务规则/关系/页面立刻反映）；
     // 已冻结(generateDraft 会抛)→ 不偷改已确认规格，回 specStale 信号让前端提示"解冻后重确认"。
     let specRegenerated = false;
     let specStale = false;
     try {
-      await this.spec.generateDraft(userId, projectId);
+      await this.spec.generateDraft(userId, orgId, projectId);
       specRegenerated = true;
     } catch {
       specStale = true;

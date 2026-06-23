@@ -32,7 +32,7 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
           },
         ]),
       );
-      const r = await svc.detect('u1', 'p1');
+      const r = await svc.detect('u1', null, 'p1');
       expect(r.candidates).toHaveLength(2);
       expect(r.candidates[0]).toMatchObject({ parent: '客户', child: '项目', disposition: 'autofill' });
       expect(r.candidates[1].disposition).toBe('ask');
@@ -44,14 +44,14 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
 
     it('模型给非法 JSON → 候选空，不崩，仍存', async () => {
       deepseek.chat.mockResolvedValue('抱歉无法分析');
-      const r = await svc.detect('u1', 'p1');
+      const r = await svc.detect('u1', null, 'p1');
       expect(r.candidates).toEqual([]);
       expect(prisma.project.update).toHaveBeenCalled();
     });
 
     it('过滤缺 parent/child 的脏项；非法 cardinality 降级 1-N', async () => {
       deepseek.chat.mockResolvedValue('[{"parent":"客户","child":"项目","cardinality":"乱","disposition":"autofill"},{"child":"x"},{"parent":"y"}]');
-      const r = await svc.detect('u1', 'p1');
+      const r = await svc.detect('u1', null, 'p1');
       expect(r.candidates).toHaveLength(1);
       expect(r.candidates[0].cardinality).toBe('1-N');
     });
@@ -63,7 +63,7 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
           { parent: '分类', child: '分类', cardinality: 'N-N', fkField: 'parentId', disposition: 'autofill' }, // 无 tree 标记但同实体
         ]),
       );
-      const r = await svc.detect('u1', 'p1');
+      const r = await svc.detect('u1', null, 'p1');
       expect(r.candidates[0]).toMatchObject({ tree: true, fkField: 'parentId', cardinality: '1-N' });
       expect(r.candidates[1]).toMatchObject({ parent: '分类', tree: true, cardinality: '1-N' }); // N-N 被树覆盖归 1-N
     });
@@ -72,12 +72,12 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
       deepseek.chat.mockResolvedValue(
         JSON.stringify([{ parent: '学生', child: '课程', cardinality: 'N-N', joinTable: 'student_course', disposition: 'ask' }]),
       );
-      const r = await svc.detect('u1', 'p1');
+      const r = await svc.detect('u1', null, 'p1');
       expect(r.candidates[0]).toMatchObject({ cardinality: 'N-N', joinTable: 'student_course', tree: undefined });
     });
 
     it('ownership：非属主拒绝', async () => {
-      await expect(svc.detect('other', 'p1')).rejects.toThrow(ForbiddenException);
+      await expect(svc.detect('other', null, 'p1')).rejects.toThrow(ForbiddenException);
       expect(deepseek.chat).not.toHaveBeenCalled();
     });
   });
@@ -91,7 +91,7 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
 
     it('autofill 候选直接成关系（默认 required/restrict）', async () => {
       withCandidates([{ parent: '客户', child: '项目', cardinality: '1-N', fkField: 'customerId', source: 'page', disposition: 'autofill' }]);
-      const r = await svc.apply('u1', 'p1');
+      const r = await svc.apply('u1', null, 'p1');
       expect(r.relations).toHaveLength(1);
       expect(r.relations[0]).toMatchObject({ parent: '客户', child: '项目', cardinality: '1-N', required: true, onDelete: 'restrict', confirmed: true });
       expect(prisma.project.update.mock.calls[0][0].data.structuredRequirement.relations).toHaveLength(1);
@@ -99,37 +99,37 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
 
     it('ask 候选按 answers 定案（基数 + 级联）', async () => {
       withCandidates([{ parent: '客户', child: '工单', cardinality: '1-N', disposition: 'ask' }]);
-      const r = await svc.apply('u1', 'p1', { '客户->工单': { cardinality: '1-N', onDelete: 'cascade' } });
+      const r = await svc.apply('u1', null, 'p1', { '客户->工单': { cardinality: '1-N', onDelete: 'cascade' } });
       expect(r.relations[0]).toMatchObject({ child: '工单', cardinality: '1-N', onDelete: 'cascade' });
     });
 
     it('ask 答"没关系"(none) → 丢弃，不回写', async () => {
       withCandidates([{ parent: '客户', child: '日志', cardinality: '1-N', disposition: 'ask' }]);
-      const r = await svc.apply('u1', 'p1', { '客户->日志': { cardinality: 'none' } });
+      const r = await svc.apply('u1', null, 'p1', { '客户->日志': { cardinality: 'none' } });
       expect(r.relations).toHaveLength(0);
     });
 
     it('ask 无答案 → 用候选默认基数、级联兜底 restrict', async () => {
       withCandidates([{ parent: '客户', child: '工单', cardinality: '1-N', disposition: 'ask' }]);
-      const r = await svc.apply('u1', 'p1'); // 不传 answers
+      const r = await svc.apply('u1', null, 'p1'); // 不传 answers
       expect(r.relations[0]).toMatchObject({ cardinality: '1-N', onDelete: 'restrict' });
     });
 
     it('非法 onDelete 答案 → 兜底 restrict', async () => {
       withCandidates([{ parent: '客户', child: '项目', cardinality: '1-N', disposition: 'autofill' }]);
-      const r = await svc.apply('u1', 'p1', { '客户->项目': { onDelete: 'bogus' } });
+      const r = await svc.apply('u1', null, 'p1', { '客户->项目': { onDelete: 'bogus' } });
       expect(r.relations[0].onDelete).toBe('restrict');
     });
 
     it('树候选 → 回写带 tree=true、自外键', async () => {
       withCandidates([{ parent: '部门', child: '部门', cardinality: '1-N', tree: true, fkField: 'parentId', disposition: 'autofill' }]);
-      const r = await svc.apply('u1', 'p1');
+      const r = await svc.apply('u1', null, 'p1');
       expect(r.relations[0]).toMatchObject({ parent: '部门', child: '部门', tree: true, fkField: 'parentId', cardinality: '1-N' });
     });
 
     it('N-N 候选 → 回写保留（不丢弃），带 joinTable', async () => {
       withCandidates([{ parent: '学生', child: '课程', cardinality: 'N-N', joinTable: 'student_course', disposition: 'autofill' }]);
-      const r = await svc.apply('u1', 'p1');
+      const r = await svc.apply('u1', null, 'p1');
       expect(r.relations).toHaveLength(1);
       expect(r.relations[0]).toMatchObject({ cardinality: 'N-N', joinTable: 'student_course' });
     });
@@ -140,7 +140,7 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
       ...project,
       structuredRequirement: { relationCandidates: [{ parent: '客户', child: '项目' }], relations: [{ parent: '客户', child: '项目', confirmed: true }] },
     });
-    const r = await svc.get('u1', 'p1');
+    const r = await svc.get('u1', null, 'p1');
     expect(r.candidates).toHaveLength(1);
     expect(r.relations).toHaveLength(1);
     expect(deepseek.chat).not.toHaveBeenCalled();

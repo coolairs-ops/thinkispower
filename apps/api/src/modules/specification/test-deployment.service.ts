@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as crypto from 'crypto';
@@ -19,13 +20,13 @@ export class TestDeploymentService {
   constructor(private prisma: PrismaService) {}
 
   /** 启动测试环境部署 */
-  async deploy(userId: string, projectId: string) {
+  async deploy(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, demoHtml: true, name: true },
+      select: { id: true, userId: true, orgId: true, demoHtml: true, name: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     if (!project.demoHtml) throw new NotFoundException('请先生成 Demo 预览');
 
     // 检查是否已有活跃部署
@@ -66,13 +67,13 @@ export class TestDeploymentService {
   }
 
   /** 查询部署状态 */
-  async getStatus(userId: string, projectId: string) {
+  async getStatus(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true },
+      select: { userId: true, orgId: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const deployment = await this.prisma.testDeployment.findFirst({
       where: { projectId },
@@ -91,13 +92,13 @@ export class TestDeploymentService {
   }
 
   /** 销毁测试环境 */
-  async destroy(userId: string, projectId: string) {
+  async destroy(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true },
+      select: { userId: true, orgId: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const deployment = await this.prisma.testDeployment.findFirst({
       where: { projectId, status: { in: ['ready', 'failed'] } },

@@ -11,7 +11,7 @@ export class FollowUpQuestionController {
   /** 取合批问题列表（空 → 前端不弹窗） */
   @Get()
   async questions(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.svc.getQuestions(req.user.id, projectId);
+    return this.svc.getQuestions(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 提交答案：relations 答案路由关系 apply、acceptGaps 路由需求 apply */
@@ -25,6 +25,6 @@ export class FollowUpQuestionController {
       businessRules?: Record<string, string>;
     },
   ) {
-    return this.svc.submit(req.user.id, projectId, body ?? {});
+    return this.svc.submit(req.user.id, req.user.orgId ?? null, projectId, body ?? {});
   }
 }

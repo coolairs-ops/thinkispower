@@ -37,7 +37,7 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
         relations: [],
       });
 
-      const { questions } = await svc.getQuestions('u1', 'p1');
+      const { questions } = await svc.getQuestions('u1', null, 'p1');
       expect(questions).toHaveLength(3); // 1 需求 + 2 关系
       const reqQ = questions.find((q) => q.group === 'requirement')!;
       expect(reqQ).toMatchObject({ id: 'gap:数据权限', title: '数据权限', missing: '数据权限' });
@@ -54,26 +54,26 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
           { name: '路径审批', disposition: 'autofill' }, // 非 ask 不进
         ],
       });
-      const { questions } = await svc.getQuestions('u1', 'p1');
+      const { questions } = await svc.getQuestions('u1', null, 'p1');
       expect(questions).toHaveLength(1);
       expect(questions[0]).toMatchObject({ id: 'rule:金额精度', group: 'businessRule', title: '金额精度', ruleName: '金额精度' });
     });
 
     it('submit 把 businessRules 答案路由业务规则 apply', async () => {
-      await svc.submit('u1', 'p1', { businessRules: { 金额精度: '保留2位' } });
-      expect(biz.apply).toHaveBeenCalledWith('u1', 'p1', { 金额精度: '保留2位' });
+      await svc.submit('u1', null, 'p1', { businessRules: { 金额精度: '保留2位' } });
+      expect(biz.apply).toHaveBeenCalledWith('u1', null, 'p1', { 金额精度: '保留2位' });
     });
 
     it('submit 后自动重生成规格（未冻结）→ specRegenerated', async () => {
-      const r = await svc.submit('u1', 'p1', {});
-      expect(spec.generateDraft).toHaveBeenCalledWith('u1', 'p1');
+      const r = await svc.submit('u1', null, 'p1', {});
+      expect(spec.generateDraft).toHaveBeenCalledWith('u1', null, 'p1');
       expect(r.specRegenerated).toBe(true);
       expect(r.specStale).toBe(false);
     });
 
     it('规格已冻结(generateDraft 抛)→ 不偷改，specStale', async () => {
       spec.generateDraft.mockRejectedValue(new Error('规格已确认，如需修改请先解冻'));
-      const r = await svc.submit('u1', 'p1', {});
+      const r = await svc.submit('u1', null, 'p1', {});
       expect(r.specRegenerated).toBe(false);
       expect(r.specStale).toBe(true);
     });
@@ -81,14 +81,14 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
     it('无 ask 项 → 空列表（前端据此不弹窗）', async () => {
       req.get.mockResolvedValue({ gaps: [{ kind: 'screen', missing: 'x', disposition: 'autofill' }] });
       rel.get.mockResolvedValue({ candidates: [{ parent: 'a', child: 'b', disposition: 'autofill' }], relations: [] });
-      const { questions } = await svc.getQuestions('u1', 'p1');
+      const { questions } = await svc.getQuestions('u1', null, 'p1');
       expect(questions).toEqual([]);
     });
 
     it('ask 缺口缺 question/options → 不进列表（不抛半成品）', async () => {
       req.get.mockResolvedValue({ gaps: [{ kind: 'flow', missing: '审批', disposition: 'ask' }] });
       rel.get.mockResolvedValue({ candidates: [], relations: [] });
-      const { questions } = await svc.getQuestions('u1', 'p1');
+      const { questions } = await svc.getQuestions('u1', null, 'p1');
       expect(questions).toEqual([]);
     });
   });
@@ -98,21 +98,21 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
       rel.apply.mockResolvedValue({ relations: [{ parent: '客户', child: '工单' }] });
       req.apply.mockResolvedValue({ added: { pages: [] }, specSync: 'noop' });
 
-      const r = await svc.submit('u1', 'p1', {
+      const r = await svc.submit('u1', null, 'p1', {
         relations: { '客户->工单': { cardinality: '1-N', onDelete: 'cascade' } },
         acceptGaps: ['数据看板'],
       });
-      expect(rel.apply).toHaveBeenCalledWith('u1', 'p1', { '客户->工单': { cardinality: '1-N', onDelete: 'cascade' } });
-      expect(req.apply).toHaveBeenCalledWith('u1', 'p1', ['数据看板']);
+      expect(rel.apply).toHaveBeenCalledWith('u1', null, 'p1', { '客户->工单': { cardinality: '1-N', onDelete: 'cascade' } });
+      expect(req.apply).toHaveBeenCalledWith('u1', null, 'p1', ['数据看板']);
       expect(r.relations).toHaveLength(1);
     });
 
     it('空提交 → 各自用空默认调（不崩）', async () => {
       rel.apply.mockResolvedValue({ relations: [] });
       req.apply.mockResolvedValue({});
-      await svc.submit('u1', 'p1', {});
-      expect(rel.apply).toHaveBeenCalledWith('u1', 'p1', {});
-      expect(req.apply).toHaveBeenCalledWith('u1', 'p1', []);
+      await svc.submit('u1', null, 'p1', {});
+      expect(rel.apply).toHaveBeenCalledWith('u1', null, 'p1', {});
+      expect(req.apply).toHaveBeenCalledWith('u1', null, 'p1', []);
     });
   });
 });

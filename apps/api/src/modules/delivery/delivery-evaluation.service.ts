@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
@@ -13,6 +13,7 @@ import { DeliveryService } from './delivery.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 @Injectable()
 export class DeliveryEvaluationService {
@@ -33,13 +34,13 @@ export class DeliveryEvaluationService {
   ) {}
 
   /** 请求评估 — 只分析不交付，返回风险+修复建议 */
-  async requestEvaluation(userId: string, projectId: string) {
+  async requestEvaluation(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, demoHtml: true, planSummary: true, description: true },
+      select: { id: true, userId: true, orgId: true, status: true, demoHtml: true, planSummary: true, description: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     let analysis: any = null;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -69,7 +70,7 @@ export class DeliveryEvaluationService {
     // 验收报告（可验收/可追溯）：逐条场景 → 来源 → 实现 → 检查结果 + 通过率
     let acceptance: any = null;
     try {
-      acceptance = await this.acceptance.verify(userId, projectId);
+      acceptance = await this.acceptance.verify(userId, orgId, projectId);
     } catch (e) {
       this.logger.warn(`验收报告生成失败(不阻断评估): ${e}`);
     }
@@ -78,19 +79,19 @@ export class DeliveryEvaluationService {
   }
 
   /** 终稿生产交付 — 异步执行 */
-  async productionDeliver(userId: string, projectId: string, payload: {
+  async productionDeliver(userId: string, orgId: string | null, projectId: string, payload: {
     projectName?: string; planSummary?: any; demoHtml?: string;
   }) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, demoHtml: true },
+      select: { id: true, userId: true, orgId: true, demoHtml: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     if (!project.demoHtml) throw new BadRequestException('请先生成 Demo 预览');
 
     // 验收门控（P15-Y）：规格含验收场景时，通过率需达标才放行生产交付
-    const gate = await this.acceptance.gate(userId, projectId);
+    const gate = await this.acceptance.gate(userId, orgId, projectId);
     if (!gate.allowed) {
       const pct = Math.round((gate.passRate ?? 0) * 100);
       const need = Math.round(gate.threshold * 100);
@@ -302,13 +303,13 @@ export class DeliveryEvaluationService {
   }
 
   /** 加入修复队列 */
-  async acceptRiskFix(userId: string, projectId: string, riskIndex: number, customFix?: string) {
+  async acceptRiskFix(userId: string, orgId: string | null, projectId: string, riskIndex: number, customFix?: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, structuredRequirement: true },
+      select: { id: true, userId: true, orgId: true, structuredRequirement: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const analysis = (project.structuredRequirement as any)?.deliveryAnalysis;
     const risks = analysis?.risks || [];
@@ -331,13 +332,13 @@ export class DeliveryEvaluationService {
   }
 
   /** 异步批量执行修复 + 重新评估 */
-  async reEvaluate(userId: string, projectId: string) {
+  async reEvaluate(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, structuredRequirement: true, demoHtml: true, planSummary: true, description: true },
+      select: { id: true, userId: true, orgId: true, structuredRequirement: true, demoHtml: true, planSummary: true, description: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const sr = (project.structuredRequirement as any) || {};
     const queue = sr.fixQueue || [];
@@ -362,12 +363,14 @@ export class DeliveryEvaluationService {
   }
 
   /** 查询修复状态 */
-  async getReEvaluateStatus(userId: string, projectId: string) {
+  async getReEvaluateStatus(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { structuredRequirement: true },
+      select: { userId: true, orgId: true, structuredRequirement: true },
     });
-    const sr = (project?.structuredRequirement as any) || {};
+    if (!project) throw new NotFoundException('项目不存在');
+    assertResourceAccess(project, userId, orgId);
+    const sr = (project.structuredRequirement as any) || {};
     const lastResult = sr.lastReEvaluate;
     const queue = sr.fixQueue || [];
     const analysis = sr.deliveryAnalysis;
@@ -451,13 +454,13 @@ export class DeliveryEvaluationService {
   }
 
   /** 导入 AI 建议 */
-  async acceptSuggestion(userId: string, projectId: string, suggestionId: string) {
+  async acceptSuggestion(userId: string, orgId: string | null, projectId: string, suggestionId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, structuredRequirement: true },
+      select: { id: true, userId: true, orgId: true, structuredRequirement: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const analysis = (project.structuredRequirement as any)?.deliveryAnalysis;
     const suggestions = analysis?.suggestions || [];

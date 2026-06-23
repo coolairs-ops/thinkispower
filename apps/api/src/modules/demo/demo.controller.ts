@@ -9,12 +9,12 @@ export class DemoController {
 
   @Get()
   async getDemo(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.demoService.getDemo(req.user.id, projectId);
+    return this.demoService.getDemo(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Post('generate')
   async generateDemo(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.demoService.generateDemo(req.user.id, projectId);
+    return this.demoService.generateDemo(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 人在回路：用修正后的布局描述重新生成看图复刻 demo */
@@ -24,13 +24,13 @@ export class DemoController {
     @Param('projectId') projectId: string,
     @Body() body: { layouts?: Array<{ name: string; layout: string }> },
   ) {
-    return this.demoService.regenerateFromLayouts(req.user.id, projectId, body?.layouts || []);
+    return this.demoService.regenerateFromLayouts(req.user.id, req.user.orgId ?? null, projectId, body?.layouts || []);
   }
 
   /** 保存预览里直接编辑后的 HTML（档位调整等局部修改） */
   @Patch('html')
   async saveEditedHtml(@Req() req: any, @Param('projectId') projectId: string, @Body('html') html: string) {
-    return this.demoService.saveEditedHtml(req.user.id, projectId, html);
+    return this.demoService.saveEditedHtml(req.user.id, req.user.orgId ?? null, projectId, html);
   }
 
   /** 保存 demo 外观主题（Phase A 换肤：主色/明暗/圆角） */
@@ -40,6 +40,6 @@ export class DemoController {
     @Param('projectId') projectId: string,
     @Body() body: { primary?: string; mode?: 'light' | 'dark'; radius?: number },
   ) {
-    return this.demoService.saveTheme(req.user.id, projectId, body);
+    return this.demoService.saveTheme(req.user.id, req.user.orgId ?? null, projectId, body);
   }
 }

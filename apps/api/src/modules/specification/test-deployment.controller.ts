@@ -10,18 +10,18 @@ export class TestDeploymentController {
   /** 启动测试环境部署 */
   @Post()
   async deploy(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.deployService.deploy(req.user.id, projectId);
+    return this.deployService.deploy(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 查询部署状态 */
   @Get()
   async getStatus(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.deployService.getStatus(req.user.id, projectId);
+    return this.deployService.getStatus(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 销毁测试环境 */
   @Delete()
   async destroy(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.deployService.destroy(req.user.id, projectId);
+    return this.deployService.destroy(req.user.id, req.user.orgId ?? null, projectId);
   }
 }
