@@ -115,6 +115,121 @@ describe('TemplateAppService（模板出页接进 serve 链）', () => {
     expect(store.demoHtml).toContain('一键生成'); // 不合法→回退
   });
 
+  // 若依底座字段名归一（补模板路径的口子）：codegen 把无下划线驼峰列名小写，代理返回的行键即小写；
+  // 列 key（运行时 row[key] 取值）须按底座方言归一，否则整列空白。label（表头展示）仍用模型原名。
+  const camelEntities = [{ name: '客户', table: 'customer', fields: [F('id', true), F('name'), F('contactInfo'), F('userId'), F('status')] }];
+  function buildBackend(backendRuntime: any) {
+    const store: any = {};
+    const prisma = {
+      project: {
+        findUnique: jest.fn().mockResolvedValue({ name: '客户系统', dataModel: 'x', themeConfig: {}, planSummary: null, backendRuntime }),
+        update: jest.fn().mockImplementation(({ data }: any) => { Object.assign(store, data); return Promise.resolve({}); }),
+      },
+    };
+    const schema = { parseAndValidate: jest.fn().mockReturnValue(camelEntities) };
+    return { svc: new TemplateAppService(prisma as any, schema as any), store };
+  }
+
+  it('若依底座：列 key 小写化（contactInfo→contactinfo），表头仍展示原名', async () => {
+    const { svc, store } = buildBackend({ kind: 'ruoyi', status: 'ready' });
+    await svc.buildAndStore('p1', 'gov-blue');
+    expect(store.demoHtml).toContain('"columns":["name","contactinfo","userid","status"]'); // 数据访问键归一
+    expect(store.demoHtml).toContain('<th>contactInfo</th>'); // 表头展示名不变
+    expect(store.demoHtml).not.toContain('"contactInfo"'); // 不再有驼峰 key（否则取不到若依小写行键）
+  });
+
+  it('路B（无若依底座）：列 key 保持模型驼峰原名', async () => {
+    const { svc, store } = buildBackend(null);
+    await svc.buildAndStore('p1', 'gov-blue');
+    expect(store.demoHtml).toContain('"columns":["name","contactInfo","userId","status"]'); // 不归一
+  });
+
+  // S3：buildAndStore 接 schema 驱动（composer→renderSchema），替掉固定骨架+静态占位；
+  // composer 缺省/出错 → 回退旧 renderApp（现有 12 测都没注入 composer，故仍验旧路径，不破坏）。
+  describe('S3 schema 驱动出页', () => {
+    const schemaResult = {
+      schema: { appName: '客户系统', pages: [{ key: 'dashboard', title: '工作台', nav: { icon: 'layout-dashboard', label: '工作台' }, blocks: [{ type: 'table', bind: { resource: 'company', fields: ['name'] }, props: { title: '企业列表' } }] }] },
+      source: 'llm', dropped: [],
+    };
+    function buildWithComposer(compose: jest.Mock) {
+      const store: any = {};
+      const prisma = {
+        project: {
+          findUnique: jest.fn().mockResolvedValue({ name: '客户系统', dataModel: 'x', themeConfig: {}, planSummary: { pages: ['工作台'], features: ['剧本生成'] }, backendRuntime: null }),
+          update: jest.fn().mockImplementation(({ data }: any) => { Object.assign(store, data); return Promise.resolve({}); }),
+        },
+      };
+      const schema = { parseAndValidate: jest.fn().mockReturnValue(entities) };
+      const composer = { compose } as any;
+      return { svc: new TemplateAppService(prisma as any, schema as any, undefined, composer), store, compose };
+    }
+
+    it('注入 composer → 走 schema 渲染，不再出静态占位功能段', async () => {
+      const compose = jest.fn().mockResolvedValue(schemaResult);
+      const { svc, store } = buildWithComposer(compose);
+      const r = await svc.buildAndStore('p1', 'gov-blue');
+      expect(compose).toHaveBeenCalledWith(expect.objectContaining({ appName: '客户系统', dataModel: 'x', pageLabels: ['工作台'], features: ['剧本生成'] }));
+      expect(store.demoHtml).toContain('"resource":"company"'); // renderSchema 的块绑定
+      expect(store.demoHtml).toContain('企业列表');
+      expect(store.demoHtml).not.toContain('生成结果（演示）'); // 旧 feature.template 静态占位已不出
+      expect(r.theme).toBe('gov-blue');
+    });
+
+    it('composer 抛错 → 回退旧 renderApp（不崩、仍出页）', async () => {
+      const compose = jest.fn().mockRejectedValue(new Error('llm down'));
+      const { svc, store } = buildWithComposer(compose);
+      await svc.buildAndStore('p1', 'gov-blue');
+      expect(store.demoHtml).toContain('"primaryResource":"company"'); // 旧 dashboard 模板标志
+      expect(store.status).toBe('demo_ready');
+    });
+  });
+
+  // S4：schema 落库 + 编辑闭环（saveAppSchema 校验门→重渲染→落库；getAppSchema 返回 schema+契约）
+  describe('S4 schema 编辑闭环', () => {
+    const editRaw = {
+      appName: '客户系统', pages: [{
+        key: 'd', title: '工作台', blocks: [
+          { type: 'table', bind: { resource: 'company', fields: ['name', 'level'] }, props: { title: '企业', badges: ['level'] } },
+          { type: 'table', bind: { resource: 'ghost' } }, // 越界资源 → 校验门丢弃
+        ],
+      }],
+    };
+    function mk(findUnique: jest.Mock) {
+      const store: any = {};
+      const prisma = { project: { findUnique, update: jest.fn().mockImplementation(({ data }: any) => { Object.assign(store, data); return Promise.resolve({}); }) } };
+      const schema = { parseAndValidate: jest.fn().mockReturnValue(entities) };
+      return { svc: new TemplateAppService(prisma as any, schema as any), store, prisma };
+    }
+
+    it('saveAppSchema：校验门丢越界 → 重渲染 → 落库 appSchema+demoHtml', async () => {
+      const find = jest.fn().mockResolvedValue({ name: '客户系统', dataModel: 'x', themeConfig: {}, backendRuntime: null });
+      const { svc, store } = mk(find);
+      const r = await svc.saveAppSchema('p1', editRaw);
+      expect(r.dropped.some((d) => d.includes('越界资源'))).toBe(true); // ghost 被丢
+      expect(r.schema.pages[0].blocks).toHaveLength(1);                 // 仅留合法 table
+      expect(store.appSchema).toBeDefined();                            // schema 落库
+      expect(store.demoHtml).toContain('"resource":"company"');         // 重渲染绑定
+      expect(store.demoHtml).toContain('<th>name</th>');
+      expect(store.status).toBe('demo_ready');
+    });
+
+    it('saveAppSchema：无合法页 → BadRequest（不偷偷存空页）', async () => {
+      const find = jest.fn().mockResolvedValue({ name: 'x', dataModel: 'x', themeConfig: {}, backendRuntime: null });
+      const { svc } = mk(find);
+      await expect(svc.saveAppSchema('p1', { appName: 'x', pages: [{ key: 'p', title: 't', blocks: [{ type: 'ghostblock' }] }] }))
+        .rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('getAppSchema：返回已存 schema + 可绑数据契约（资源/字段）', async () => {
+      const stored = { appName: 'x', pages: [{ key: 'd', title: '工作台', blocks: [] }] };
+      const find = jest.fn().mockResolvedValue({ dataModel: 'x', backendRuntime: null, appSchema: stored });
+      const { svc } = mk(find);
+      const r = await svc.getAppSchema('p1');
+      expect(r.schema).toEqual(stored);
+      expect(r.contract.resources.map((res) => res.name)).toContain('company'); // 契约供面板选 bind
+    });
+  });
+
   it('renderAdmin：按需渲染后台控制台（管理侧栏 + 业务列表 + appData，不存库）', async () => {
     const { svc, prisma } = build('model Company { id String @id }');
     const html = await svc.renderAdmin('p1');
