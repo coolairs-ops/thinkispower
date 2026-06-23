@@ -139,21 +139,23 @@ export function extractJson(text: string): unknown {
   return null;
 }
 
+/** 组件库 + 硬约束规格（compose/revise 共用，避免提示词漂移）。 */
+const BLOCK_LIBRARY = [
+  'AppSchema 形状：{ "appName": string, "pages": [ { "key": string, "title": string, "nav": {"icon","label"}, "blocks": [Block] } ] }',
+  'Block 只能是下列组件库类型之一，bind/props 形状如下：',
+  '- kpi：单指标卡。{ "type":"kpi", "bind":{"resource"}, "props":{"label"} }',
+  '- table：数据列表。{ "type":"table", "bind":{"resource","fields"}, "props":{"title","searchable":bool,"rowActions":[],"badges":[]} }',
+  '- detail：单条详情。{ "type":"detail", "bind":{"resource","fields"}, "props":{"title"} }',
+  '- form：录入/编辑表单。{ "type":"form", "bind":{"resource","fields"}, "props":{"title","submitLabel"} }',
+  '- generate：输入→生成并保存。{ "type":"generate", "bind":{"resource","fields"}, "props":{"title","inputLabel","button"} }',
+  '- richtext：说明性 HTML。{ "type":"richtext", "props":{"html"} }',
+  '硬约束：bind.resource 只能取数据契约里的资源名；fields 只能取该资源列出的字段。禁止臆造资源/字段。',
+  'tabler 图标名填 nav.icon（如 layout-dashboard/users/login/books）。每页 2~5 个块，贴合该页职责。',
+].join('\n');
+
 /** 组件库 + 数据契约 → LLM 编排 prompt（先验约束：块类型只能取库、bind 只能取契约）。 */
 export function buildComposePrompt(appName: string, pageLabels: string[], features: string[], contract: DataContract): { system: string; user: string } {
-  const system = [
-    '你是政企应用的「页面结构编排器」。只输出一个 JSON 对象（AppSchema），不要 markdown 之外的任何解释。',
-    'AppSchema 形状：{ "appName": string, "pages": [ { "key": string, "title": string, "nav": {"icon","label"}, "blocks": [Block] } ] }',
-    'Block 只能是下列组件库类型之一，bind/props 形状如下：',
-    '- kpi：单指标卡。{ "type":"kpi", "bind":{"resource"}, "props":{"label"} }',
-    '- table：数据列表。{ "type":"table", "bind":{"resource","fields"}, "props":{"title","searchable":bool,"rowActions":[],"badges":[]} }',
-    '- detail：单条详情。{ "type":"detail", "bind":{"resource","fields"}, "props":{"title"} }',
-    '- form：录入/编辑表单。{ "type":"form", "bind":{"resource","fields"}, "props":{"title","submitLabel"} }',
-    '- generate：输入→生成并保存。{ "type":"generate", "bind":{"resource","fields"}, "props":{"title","inputLabel","button"} }',
-    '- richtext：说明性 HTML。{ "type":"richtext", "props":{"html"} }',
-    '硬约束：bind.resource 只能取数据契约里的资源名；fields 只能取该资源列出的字段。禁止臆造资源/字段。',
-    'tabler 图标名填 nav.icon（如 layout-dashboard/users/login/books）。每页 2~5 个块，贴合该页职责。',
-  ].join('\n');
+  const system = '你是政企应用的「页面结构编排器」。只输出一个 JSON 对象（AppSchema），不要 markdown 之外的任何解释。\n' + BLOCK_LIBRARY;
   const user = [
     `## 应用\n${appName}`,
     pageLabels.length ? `## 期望页面\n${pageLabels.join('、')}` : '',
@@ -161,5 +163,19 @@ export function buildComposePrompt(appName: string, pageLabels: string[], featur
     contractPromptBlock(contract) || '## 数据契约\n（无，尽量用 richtext 说明）',
     '按上述编排出 AppSchema JSON。',
   ].filter(Boolean).join('\n\n');
+  return { system, user };
+}
+
+/** 修订 prompt（S5 自迭代用）：据传感器建议改现有 schema，保留合理部分、只改问题、不臆造。 */
+export function buildRevisePrompt(current: AppSchema, recommendations: string[], contract: DataContract): { system: string; user: string } {
+  const system = '你在**修订**一份现有页面 schema（AppSchema）。只输出修订后的完整 JSON 对象，不要任何解释。\n'
+    + '据修复建议改进它：保留合理的页/块，只针对建议指出的问题增删改块或调整 bind/props，不要推倒重来、不要臆造资源/字段。\n'
+    + BLOCK_LIBRARY;
+  const user = [
+    '## 当前 schema\n```json\n' + JSON.stringify({ appName: current.appName, pages: current.pages }) + '\n```',
+    '## 修复建议（逐条尽量落实）\n' + recommendations.map((r, i) => `${i + 1}. ${r}`).join('\n'),
+    contractPromptBlock(contract) || '## 数据契约\n（无）',
+    '输出修订后的完整 AppSchema JSON。',
+  ].join('\n\n');
   return { system, user };
 }

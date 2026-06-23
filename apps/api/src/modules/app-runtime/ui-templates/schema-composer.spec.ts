@@ -105,3 +105,37 @@ describe('SchemaComposerService.compose', () => {
     expect(fields).not.toContain('userId');
   });
 });
+
+describe('SchemaComposerService.reviseSchema (S5 自迭代改 schema)', () => {
+  const model = [{ name: 'Project', table: 'project', fields: [{ name: 'title' }, { name: 'status' }] }];
+  const mkSchema = () => ({ parseAndValidate: jest.fn().mockReturnValue(model) });
+  const current = { appName: 'x', pages: [{ key: 'd', title: '工作台', blocks: [{ type: 'table', bind: { resource: 'project', fields: ['title'] } }] }] } as any;
+
+  it('LLM 修订产合法 schema → changed=true（越界仍被校验门挡）', async () => {
+    const deepseek = { chatWithRetry: jest.fn().mockResolvedValue('```json\n{"appName":"x","pages":[{"key":"d","title":"工作台","blocks":[{"type":"table","bind":{"resource":"project","fields":["title","status","ghost"]}}]}]}\n```') };
+    const svc = new SchemaComposerService(mkSchema() as any, deepseek as any);
+    const r = await svc.reviseSchema(current, ['加上状态列'], 'x');
+    expect(r.changed).toBe(true);
+    const fields = (r.schema.pages[0].blocks[0] as any).bind.fields as string[];
+    expect(fields).toEqual(['title', 'status']); // ghost 越界字段被丢
+  });
+
+  it('无 deepseek → changed=false，原样返回', async () => {
+    const r = await new SchemaComposerService(mkSchema() as any).reviseSchema(current, ['x'], 'x');
+    expect(r.changed).toBe(false);
+    expect(r.schema).toBe(current);
+  });
+
+  it('无建议 → 不调 LLM、changed=false', async () => {
+    const deepseek = { chatWithRetry: jest.fn() };
+    const r = await new SchemaComposerService(mkSchema() as any, deepseek as any).reviseSchema(current, [], 'x');
+    expect(r.changed).toBe(false);
+    expect(deepseek.chatWithRetry).not.toHaveBeenCalled();
+  });
+
+  it('LLM 抛错 → changed=false，保留原 schema', async () => {
+    const deepseek = { chatWithRetry: jest.fn().mockRejectedValue(new Error('down')) };
+    const r = await new SchemaComposerService(mkSchema() as any, deepseek as any).reviseSchema(current, ['x'], 'x');
+    expect(r.changed).toBe(false);
+  });
+});

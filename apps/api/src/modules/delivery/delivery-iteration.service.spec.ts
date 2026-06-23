@@ -108,3 +108,46 @@ describe('DeliveryIterationService.startAutoIterate 入队（BullMQ 迁移）', 
     expect(systemLock.delete).toHaveBeenCalledWith({ where: { id: 'auto_iteration' } });
   });
 });
+
+/**
+ * S5：自迭代修复改 schema 而非改 HTML。autoFixViaSchema 对 schema 驱动项目走 reviseSchema→重渲染→
+ * 持久 appSchema；非 schema 项目返回 null（调用方回退 HTML 版 autoFix）。
+ */
+describe('DeliveryIterationService.autoFixViaSchema (S5)', () => {
+  const mk = (findUnique: jest.Mock, composer: any) => {
+    const store: any = {};
+    const prisma = { project: { findUnique, update: jest.fn().mockImplementation(({ data }: any) => { Object.assign(store, data); return Promise.resolve({}); }) } };
+    const svc = new DeliveryIterationService(
+      prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, undefined, composer as never,
+    );
+    return { svc, store };
+  };
+
+  it('有 appSchema 且修订有变化 → 重渲染 + 持久修订后的 appSchema，返回新 HTML', async () => {
+    const appSchema = { appName: 'x', pages: [{ key: 'd', title: 't', blocks: [{ type: 'table', bind: { resource: 'r', fields: ['a'] } }] }] };
+    const revised = { appName: 'x', pages: [{ key: 'd', title: 't', blocks: [{ type: 'table', bind: { resource: 'r', fields: ['a', 'b'] } }] }] };
+    const find = jest.fn().mockResolvedValue({ dataModel: 'x', backendRuntime: null, appSchema });
+    const composer = { reviseSchema: jest.fn().mockResolvedValue({ schema: revised, dropped: [], changed: true }) };
+    const { svc, store } = mk(find, composer);
+    const html = await (svc as any).autoFixViaSchema('p1', ['加字段 b']);
+    expect(html).toContain('"resource":"r"');   // renderSchema 输出
+    expect(store.appSchema).toEqual(revised);    // 持久修订后的 schema
+    expect(composer.reviseSchema).toHaveBeenCalled();
+  });
+
+  it('无 appSchema → 返回 null，不调 reviseSchema（回退 HTML 修复）', async () => {
+    const find = jest.fn().mockResolvedValue({ dataModel: 'x', backendRuntime: null, appSchema: null });
+    const composer = { reviseSchema: jest.fn() };
+    const { svc } = mk(find, composer);
+    expect(await (svc as any).autoFixViaSchema('p1', ['x'])).toBeNull();
+    expect(composer.reviseSchema).not.toHaveBeenCalled();
+  });
+
+  it('修订无变化（changed=false）→ 返回 null', async () => {
+    const appSchema = { appName: 'x', pages: [{ key: 'd', title: 't', blocks: [{ type: 'table', bind: { resource: 'r', fields: ['a'] } }] }] };
+    const find = jest.fn().mockResolvedValue({ dataModel: 'x', backendRuntime: null, appSchema });
+    const composer = { reviseSchema: jest.fn().mockResolvedValue({ schema: appSchema, dropped: [], changed: false }) };
+    const { svc } = mk(find, composer);
+    expect(await (svc as any).autoFixViaSchema('p1', ['x'])).toBeNull();
+  });
+});

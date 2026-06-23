@@ -6,6 +6,10 @@ import { AUTO_ITERATE_QUEUE, AUTO_ITERATE_JOB } from './auto-iterate.queue';
 import { PrismaService } from '../../database/prisma.service';
 import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
 import { buildDataContract, checkContractConformance, normalizeContractForRuntime, contractPromptBlock } from '../app-runtime/app-contract';
+import { renderSchema } from '../app-runtime/ui-templates/schema-renderer';
+import { injectAppData } from '../app-runtime/ui-templates/appdata-inject';
+import { SchemaComposerService } from '../app-runtime/ui-templates/schema-composer.service';
+import { AppSchema } from '../app-runtime/ui-templates/page-schema.types';
 import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { QualityGateService } from '../../services/quality-gate.service';
 import { DeepseekService } from '../../services/deepseek.service';
@@ -30,6 +34,7 @@ export class DeliveryIterationService {
     private htmlExtractor: HtmlModuleExtractorService,
     @InjectQueue(AUTO_ITERATE_QUEUE) private autoIterateQueue: Queue,
     @Optional() private schema?: SchemaMigrationService,
+    @Optional() private composer?: SchemaComposerService,
   ) {}
 
   /** 启动自动迭代优化（IterativeOptimizer 包装） */
@@ -346,11 +351,19 @@ export class DeliveryIterationService {
           pushPhase('fix', ['sense-l1', 'sense-l2', 'sense-l3']);
           emit({ type: 'round', round, phase: 'fix', message: `第${round}轮定向修复...` });
           try {
-            const newDemo = await DeliveryService.withTimeout(
-              this.autoFix(projectId, fused.recommendations),
-              150000, // 按模块串行修复最多 4 个模块，给足时延余量
-              `第${round}轮自动修复`,
+            // S5：schema 驱动项目改 schema（结构化、契约校验、绕开"无批注修不动"）；否则/未变 → 回退 HTML 修复
+            let newDemo = await DeliveryService.withTimeout(
+              this.autoFixViaSchema(projectId, fused.recommendations),
+              150000,
+              `第${round}轮 schema 修订`,
             );
+            if (!newDemo) {
+              newDemo = await DeliveryService.withTimeout(
+                this.autoFix(projectId, fused.recommendations),
+                150000, // 按模块串行修复最多 4 个模块，给足时延余量
+                `第${round}轮自动修复`,
+              );
+            }
             if (newDemo) {
               await this.prisma.project.update({
                 where: { id: projectId },
@@ -483,6 +496,34 @@ export class DeliveryIterationService {
    */
   async runTargetedFix(projectId: string, recommendations: string[]): Promise<string | null> {
     return this.autoFix(projectId, recommendations);
+  }
+
+  /**
+   * S5：schema 驱动项目的修复——据建议修订 appSchema → renderSchema 重渲染 → 持久 appSchema，返回新 HTML。
+   * 结构化修改比改 HTML 字符串健壮（不丢内容/批注）、契约校验防越界、绕开"模板无批注修不动"病根。
+   * 非 schema 项目 / 未注入 composer / 修订无变化 → 返回 null（调用方回退到 HTML 版 autoFix）。
+   * 仅自迭代回路调用；守护的 runTargetedFix 仍走 autoFix（不触发 appSchema 持久化副作用）。
+   */
+  private async autoFixViaSchema(projectId: string, recommendations: string[]): Promise<string | null> {
+    if (!this.composer || recommendations.length === 0) return null;
+    const usefulRecs = recommendations.filter(r => !r.includes('整体质量'));
+    if (usefulRecs.length === 0) return null;
+
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { dataModel: true, backendRuntime: true, appSchema: true },
+    });
+    const appSchema = (project as { appSchema?: unknown } | null)?.appSchema as AppSchema | undefined;
+    if (!appSchema?.pages?.length) return null;
+
+    const backendKind = (project?.backendRuntime as { kind?: string } | null)?.kind;
+    const { schema, dropped, changed } = await this.composer.reviseSchema(appSchema, usefulRecs, project?.dataModel, backendKind);
+    if (!changed) return null;
+
+    const html = injectAppData(renderSchema(schema), projectId);
+    await this.prisma.project.update({ where: { id: projectId }, data: { appSchema: schema } as never });
+    this.logger.log(`autoFix(schema) ${projectId}: 修订 ${schema.pages.length}页 丢弃${dropped.length} → ${html.length}b`);
+    return html;
   }
 
   private async autoFix(projectId: string, recommendations: string[]): Promise<string | null> {
