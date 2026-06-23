@@ -119,31 +119,31 @@ describe('GuardianService', () => {
   describe('getStatus / manualCheck — ownership', () => {
     it('getStatus 非所有者 → 403', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: 'owner' });
-      await expect(service.getStatus('attacker', 'p1')).rejects.toThrow(ForbiddenException);
+      await expect(service.getStatus('attacker', null, 'p1')).rejects.toThrow(ForbiddenException);
     });
 
     it('getStatus 项目不存在 → 404', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
-      await expect(service.getStatus('u', 'p1')).rejects.toThrow(NotFoundException);
+      await expect(service.getStatus('u', null, 'p1')).rejects.toThrow(NotFoundException);
     });
 
     it('getStatus 返回 enabled/deployed/latest/history', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: 'u', guardianEnabled: true, productionUrl: 'http://x' });
       prisma.guardianCheck.findMany.mockResolvedValue([{ id: 'gc2' }, { id: 'gc1' }]);
-      const s = await service.getStatus('u', 'p1');
+      const s = await service.getStatus('u', null, 'p1');
       expect(s).toEqual({ enabled: true, deployed: true, latest: { id: 'gc2' }, history: [{ id: 'gc2' }, { id: 'gc1' }] });
     });
 
     it('manualCheck 所有者 → 入队 manual 巡检', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: 'u' });
-      const r = await service.manualCheck('u', 'p1');
+      const r = await service.manualCheck('u', null, 'p1');
       expect(queue.add).toHaveBeenCalledWith('guardian-check', { projectId: 'p1', trigger: 'manual' }, expect.objectContaining({ attempts: 1 }));
       expect(r.success).toBe(true);
     });
 
     it('manualCheck 非所有者 → 403，不入队', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: 'owner' });
-      await expect(service.manualCheck('attacker', 'p1')).rejects.toThrow(ForbiddenException);
+      await expect(service.manualCheck('attacker', null, 'p1')).rejects.toThrow(ForbiddenException);
       expect(queue.add).not.toHaveBeenCalled();
     });
   });

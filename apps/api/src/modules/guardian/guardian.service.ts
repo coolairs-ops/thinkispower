@@ -1,5 +1,6 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
@@ -102,30 +103,30 @@ export class GuardianService implements OnModuleInit {
   }
 
   /** 列出某项目的分级修复记录（ownership 校验） */
-  async listRemediations(userId: string, projectId: string) {
-    await this.assertOwner(userId, projectId);
+  async listRemediations(userId: string, orgId: string | null, projectId: string) {
+    await this.assertOwner(userId, orgId, projectId);
     return this.remediation.list(projectId);
   }
 
   /** 人工触发应用一条修复（建议/确认级）（ownership 校验） */
-  async applyRemediation(userId: string, projectId: string, remediationId: string) {
-    await this.assertOwner(userId, projectId);
+  async applyRemediation(userId: string, orgId: string | null, projectId: string, remediationId: string) {
+    await this.assertOwner(userId, orgId, projectId);
     return this.remediation.apply(remediationId);
   }
 
   /** 月度健康报告（ownership 校验）。month 形如 YYYY-MM */
-  async monthlyReport(userId: string, projectId: string, month: string) {
-    await this.assertOwner(userId, projectId);
+  async monthlyReport(userId: string, orgId: string | null, projectId: string, month: string) {
+    await this.assertOwner(userId, orgId, projectId);
     return this.report.monthly(projectId, month);
   }
 
-  private async assertOwner(userId: string, projectId: string) {
+  private async assertOwner(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true },
+      select: { userId: true, orgId: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
   }
 
   /** 健康分：有验收场景 → 通过率(0.7)+传感器分(0.3)；否则退到传感器分；都无 → unknown */
@@ -172,13 +173,13 @@ export class GuardianService implements OnModuleInit {
   }
 
   /** 守护状态（最新 + 历史），带 ownership 校验 */
-  async getStatus(userId: string, projectId: string) {
+  async getStatus(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, guardianEnabled: true, productionUrl: true },
+      select: { userId: true, orgId: true, guardianEnabled: true, productionUrl: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const checks = await this.prisma.guardianCheck.findMany({
       where: { projectId },
@@ -194,13 +195,13 @@ export class GuardianService implements OnModuleInit {
   }
 
   /** 手动触发巡检：ownership 校验后入队（巡检本身较慢，异步执行，前端轮询状态） */
-  async manualCheck(userId: string, projectId: string) {
+  async manualCheck(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true },
+      select: { userId: true, orgId: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     await this.queue.add(
       GUARDIAN_CHECK_JOB,

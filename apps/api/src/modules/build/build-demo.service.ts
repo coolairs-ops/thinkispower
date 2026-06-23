@@ -1,5 +1,6 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { tailwindCdnUrl, daisyuiCssUrl } from '../../common/asset-urls';
 import { buildDemoShell, assembleDemoPages } from '../../integrations/cloudecode/demo-shell';
@@ -21,13 +22,13 @@ export class BuildDemoService {
   ) {}
 
   /** 触发一次建造（同步跑完；生产应入队）。ownership 校验。 */
-  async start(userId: string, projectId: string) {
+  async start(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, planSummary: true },
+      select: { userId: true, orgId: true, planSummary: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const mods = this.pageItems(project.planSummary);
     await this.orchestrator.plan(projectId, mods.map((m) => ({ name: m.name, spec: m.brief })));
@@ -39,8 +40,8 @@ export class BuildDemoService {
   }
 
   /** 建造状态（ownership 校验）。 */
-  async status(userId: string, projectId: string) {
-    await this.assertOwner(userId, projectId);
+  async status(userId: string, orgId: string | null, projectId: string) {
+    await this.assertOwner(userId, orgId, projectId);
     return this.orchestrator.status(projectId);
   }
 
@@ -83,9 +84,9 @@ export class BuildDemoService {
     return (labels.length ? labels : ['总览', '列表']).map((label) => ({ name: short(label), brief: label }));
   }
 
-  private async assertOwner(userId: string, projectId: string) {
-    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+  private async assertOwner(userId: string, orgId: string | null, projectId: string) {
+    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true, orgId: true } });
     if (!p) throw new NotFoundException('项目不存在');
-    if (p.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(p, userId, orgId);
   }
 }

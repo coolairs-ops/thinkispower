@@ -10,19 +10,19 @@ export class GuardianController {
   /** 守护状态：是否入列、最新健康快照、近 20 条历史 */
   @Get()
   async getStatus(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.guardian.getStatus(req.user.id, projectId);
+    return this.guardian.getStatus(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 手动触发一次巡检（异步入队） */
   @Post('check')
   async check(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.guardian.manualCheck(req.user.id, projectId);
+    return this.guardian.manualCheck(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 分级修复记录列表 */
   @Get('remediations')
   async remediations(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.guardian.listRemediations(req.user.id, projectId);
+    return this.guardian.listRemediations(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   /** 人工触发应用一条修复（建议/确认级）：快照→修复→重验→劣化回滚 */
@@ -32,7 +32,7 @@ export class GuardianController {
     @Param('projectId') projectId: string,
     @Param('remediationId') remediationId: string,
   ) {
-    return this.guardian.applyRemediation(req.user.id, projectId, remediationId);
+    return this.guardian.applyRemediation(req.user.id, req.user.orgId ?? null, projectId, remediationId);
   }
 
   /** 月度健康报告（聚合本月巡检 + 分级修复台账）。?month=YYYY-MM，缺省取当月 */
@@ -43,6 +43,6 @@ export class GuardianController {
     @Query('month') month?: string,
   ) {
     const m = month || new Date().toISOString().slice(0, 7);
-    return this.guardian.monthlyReport(req.user.id, projectId, m);
+    return this.guardian.monthlyReport(req.user.id, req.user.orgId ?? null, projectId, m);
   }
 }
