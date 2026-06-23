@@ -1,6 +1,6 @@
 # ADR-0008: 能力来源分流 —— 验收/迭代按 capability provenance 分桶，外部能力留标准端口 + 备忘录台账
 
-**Status:** Proposed（2026-06-24；由 A3c live 验证时实测"迭代卡 71 / 接了若依仍报大量未实现"反向暴露，本 ADR 形式化解法）
+**Status:** Accepted（2026-06-24；由 A3c live 验证时实测"迭代卡 71 / 接了若依仍报大量未实现"反向暴露并形式化。近期切片 S1+S1.5+S2+S3 已落地、全仓 1002 测绿；D3/D4 端口与 gap_workflow、规格落库 fulfilledBy 为后续）
 **Date:** 2026-06-24
 **Deciders:** 平台负责人
 **关联:** 修 [ADR-0005] 自迭代回路与 [ADR-0007] 契约门**共同的盲点**——评估器只看 demo HTML、不认能力的真实来源；落实 [ADR-0002] 原则①（完整闭环）"hard enforcement 靠确定性门不靠提示词"；为 [ADR-0006] 装配线（适配器①②/provisionApp）补"外部能力"这一类装配位；接 ADR-0004（授权计量，文件待补）——外部能力端口正是计量/授权的落点。**吸收两份既有设计**：`motherbase.schema` 的 `platform_self_knowledge`（平台自我认知/能力清单）作 D1 权威源；`plugin-registry.schema` v2 的 `catalog/registry/gap_workflow/external_adapter`（对内简单 catalog、对外才说 ARD/OKF）作 D1/D3/D4 的能力中心模型。能力来源分流落在「系统模块结构」的 G1(需求采集) 与 F1(平台自我认知) 之间。
@@ -105,7 +105,7 @@ interface IndustryRulePack { evaluate(facts): Promise<{ verdict: string; evidenc
 
 1. [x] **（S1，已落）** 能力来源分类器 `capability-provenance.ts`（`inferFulfillment`）+ 权威源 `capability-registry.ts`（catalog+maturity，由 `platform-capability-overview.md` 形式化；注册表优先/关键词兜底）。
 2. [x] **（S2，已落）** `TraceabilityValidator.validate` 按 `fulfilledBy` 分流：self→HTML、backend→认置备(`backendRuntime.status==='ready'`)、external→待对接移出分母、deferred→移出分母。
-3. [ ] **（S3，下一步）** `acceptance-verification.judge/gate` 同样按 `fulfilledBy` 分流 + `gate()` 三态分桶放行（self must 达阈 / backend 认 ready / external·deferred 受控 acknowledged 不阻断）。
+3. [x] **（S3，已落）** `acceptance-verification.verify` 按 `fulfilledBy` 分流（self 判 HTML / backend 认 `backendRuntime.status==='ready'` / external·deferred 受控放行）；`computePassRate` 把 external·deferred 移出分母 → `gate()` 自然成三态分桶（旧数据无 fulfilledBy 视为 self、向后兼容）；`productionDeliver` 阻断清单也排除 external·deferred。
 4. [ ] **（近期）** 规格物化时把 `fulfilledBy` 落到 `acceptanceScenarios[i]`（现为评估时即时推断，落库后人可覆盖）。
 5. [ ] **（中期）** Capability Port 接口族 + `NotConfiguredAdapter`（speech/ocr/oa/rulepack），生成器在对应 UI 调端口、未配置优雅降级（D3）。
 6. [ ] **（中期）** Gap Workflow 缺口工单 + needed_by_count 聚合 + 《集成对接清单》渲染（D4）。

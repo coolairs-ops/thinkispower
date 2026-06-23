@@ -140,4 +140,35 @@ describe('AcceptanceVerificationService', () => {
     expect(r.total).toBe(1);
     expect(sensors.runAll).not.toHaveBeenCalled();
   });
+
+  // ── ADR-0008 D5：验收按能力来源分桶 ──
+  const mixed = [
+    { name: '下单', given: '', when: '', then: '生成订单', priority: 'must', coverage: [], provenance: [] }, // self
+    { name: '多用户权限管理', given: '', when: '', then: '仅管理员可删除', priority: 'must', coverage: [], provenance: [] }, // backend
+    { name: '语音录入', given: '', when: '', then: '语音转写为文本', priority: 'nice', coverage: [], provenance: [] }, // external
+  ];
+
+  it('backend 已置备按置备信用、external 移出通过率分母', async () => {
+    prisma.specification.findUnique.mockResolvedValue({ projectId: 'p1', version: 1, acceptanceScenarios: mixed, changeLog: [] });
+    prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'u1', demoHtml: '<body>x</body>', description: '', backendRuntime: { kind: 'ruoyi', status: 'ready' } });
+    llm.chat.mockResolvedValue(JSON.stringify({ verdicts: [{ index: 1, status: 'pass', evidence: 'ok' }] }));
+
+    const r = await service.verify('u1', null, 'p1');
+    const by = Object.fromEntries(r.scenarios.map((s) => [s.scenarioName, s]));
+    expect(by['多用户权限管理'].fulfilledBy).toBe('backend');
+    expect(by['多用户权限管理'].status).toBe('pass'); // 若依 ready → 信用
+    expect(by['语音录入'].fulfilledBy).toBe('external');
+    expect(by['语音录入'].evidence).toContain('待对接');
+    // self(pass) + backend(pass) 计分，external 不计 → 2/2 = 1
+    expect(r.passRate).toBe(1);
+  });
+
+  it('backend 未置备 → 该项待人工、拖累通过率（self pass + backend manual = 0.5）', async () => {
+    prisma.specification.findUnique.mockResolvedValue({ projectId: 'p1', version: 1, acceptanceScenarios: mixed.slice(0, 2), changeLog: [] });
+    prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'u1', demoHtml: '<body>x</body>', description: '', backendRuntime: null });
+    llm.chat.mockResolvedValue(JSON.stringify({ verdicts: [{ index: 1, status: 'pass', evidence: 'ok' }] }));
+
+    const r = await service.verify('u1', null, 'p1');
+    expect(r.passRate).toBe(0.5);
+  });
 });
