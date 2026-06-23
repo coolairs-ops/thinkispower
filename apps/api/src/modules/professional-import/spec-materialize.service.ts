@@ -110,10 +110,13 @@ export class SpecMaterializeService {
       return batch.projectId;
     }
 
+    // A2c：orgId 已必填——旧批次 batch.orgId 可能为空，回退当前租户上下文；都空则明确报错（不产 orgless 项目）
+    const orgId = batch.orgId ?? ctx.orgId;
+    if (!orgId) throw new BadRequestException('无有效租户上下文，无法物化导入项目');
     const project = await this.prisma.project.create({
       data: {
         userId: ctx.userId,
-        orgId: batch.orgId,
+        orgId,
         name: batch.name || positioning?.slice(0, 40) || '导入项目',
         description: positioning || '',
         status: 'spec_ready',
