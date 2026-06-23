@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, Req, ForbiddenException } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ProjectService } from './project.service';
 import { DeliveryService } from '../delivery/delivery.service';
@@ -13,7 +13,9 @@ export class ProjectController {
 
   @Post()
   async create(@Req() req: any, @Body() body: { name: string; description?: string }) {
-    return this.projectService.create(req.user.id, req.user.orgId ?? null, body);
+    // A2c：orgId 已必填——无租户上下文不许建项目（避免产生 orgless 项目，挡在 DB NOT NULL 之前给清晰报错）
+    if (!req.user.orgId) throw new ForbiddenException('无有效租户上下文，无法创建项目');
+    return this.projectService.create(req.user.id, req.user.orgId, body);
   }
 
   @Get()

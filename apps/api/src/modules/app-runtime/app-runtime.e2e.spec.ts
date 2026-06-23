@@ -57,9 +57,11 @@ describe('路 B 端到端验收 (集成, 需真 Postgres)', () => {
   it('数据模型 → 部署置备 → CRUD 真存 → 传感器健康/故障可感知', async () => {
     if (!dbUp) return;
     const user = await prisma.user.create({ data: { email: `e2e-${Date.now()}@acc.local`, hashedPassword: 'x' } });
+    const org = await prisma.organization.create({ data: { name: 'e2e', slug: `e2e-${Date.now()}` } });
     const project = await prisma.project.create({
       data: {
         userId: user.id,
+        orgId: org.id,
         name: '路B验收',
         dataModel: DATA_MODEL,
         demoHtml: '<html><head></head><body><script>/*appData*/</script></body></html>',
@@ -98,6 +100,7 @@ describe('路 B 端到端验收 (集成, 需真 Postgres)', () => {
       await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${migration.schemaNameFor(pid)}" CASCADE`);
       await prisma.deployment.deleteMany({ where: { projectId: pid } }).catch(() => undefined);
       await prisma.project.delete({ where: { id: pid } }).catch(() => undefined);
+      await prisma.organization.delete({ where: { id: org.id } }).catch(() => undefined);
       await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
     }
   });
@@ -105,8 +108,9 @@ describe('路 B 端到端验收 (集成, 需真 Postgres)', () => {
   it('无数据模型项目 → 纯前端部署，传感器跳过满分', async () => {
     if (!dbUp) return;
     const user = await prisma.user.create({ data: { email: `e2e-${Date.now()}-2@acc.local`, hashedPassword: 'x' } });
+    const org = await prisma.organization.create({ data: { name: 'e2e', slug: `e2e-${Date.now()}-2` } });
     const project = await prisma.project.create({
-      data: { userId: user.id, name: '纯前端', demoHtml: '<html><body>静态</body></html>' },
+      data: { userId: user.id, orgId: org.id, name: '纯前端', demoHtml: '<html><body>静态</body></html>' },
     });
     try {
       const dep = await deployment.deploy(project.id);
@@ -117,6 +121,7 @@ describe('路 B 端到端验收 (集成, 需真 Postgres)', () => {
     } finally {
       await prisma.deployment.deleteMany({ where: { projectId: project.id } }).catch(() => undefined);
       await prisma.project.delete({ where: { id: project.id } }).catch(() => undefined);
+      await prisma.organization.delete({ where: { id: org.id } }).catch(() => undefined);
       await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
     }
   });
