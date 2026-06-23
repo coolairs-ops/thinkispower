@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
 import TemplateGenerator from './template-generator';
+import SchemaEditor from './schema-editor';
 
 interface StepLog {
   step: string;
@@ -216,6 +217,8 @@ export default function TestDeployPage() {
         </div>
 
         <TemplateGenerator projectId={projectId} />
+
+        <SchemaEditor projectId={projectId} />
 
         {message && (
           <div className={`mb-4 p-3 rounded-lg text-sm ${message.includes('失败') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
