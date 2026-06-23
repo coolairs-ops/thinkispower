@@ -18,28 +18,28 @@ export class ProjectController {
 
   @Get()
   async findAll(@Req() req: any) {
-    return this.projectService.findAll(req.user.id);
+    return this.projectService.findAll(req.user.id, req.user.orgId ?? null);
   }
 
   @Get(':projectId')
   async findOne(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.projectService.findOne(req.user.id, projectId);
+    return this.projectService.findOne(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Patch(':projectId')
   async update(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { name?: string; description?: string; appType?: string; structuredRequirement?: any }) {
-    return this.projectService.update(req.user.id, projectId, body);
+    return this.projectService.update(req.user.id, req.user.orgId ?? null, projectId, body);
   }
 
   @Delete(':projectId')
   async remove(@Req() req: any, @Param('projectId') projectId: string) {
-    await this.projectService.remove(req.user.id, projectId);
+    await this.projectService.remove(req.user.id, req.user.orgId ?? null, projectId);
     return { success: true };
   }
 
   @Post(':projectId/confirm-plan')
   async confirmPlan(@Req() req: any, @Param('projectId') projectId: string) {
-    await this.projectService.confirmPlan(req.user.id, projectId);
+    await this.projectService.confirmPlan(req.user.id, req.user.orgId ?? null, projectId);
     return { success: true, message: '方案已确认，可前往规格页或交付页继续' };
   }
 }
