@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException, ForbiddenException, ConflictException, Logger, Optional } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { Subject, ReplaySubject, Observable } from 'rxjs';
+import { AUTO_ITERATE_QUEUE, AUTO_ITERATE_JOB } from './auto-iterate.queue';
 import { PrismaService } from '../../database/prisma.service';
 import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
 import { buildDataContract, checkContractConformance, normalizeContractForRuntime, contractPromptBlock } from '../app-runtime/app-contract';
@@ -25,6 +28,7 @@ export class DeliveryIterationService {
     private sensorService: SensorService,
     private optimizer: IterativeOptimizerService,
     private htmlExtractor: HtmlModuleExtractorService,
+    @InjectQueue(AUTO_ITERATE_QUEUE) private autoIterateQueue: Queue,
     @Optional() private schema?: SchemaMigrationService,
   ) {}
 
@@ -70,10 +74,21 @@ export class DeliveryIterationService {
     });
     this.logger.log(`[autoIterate] 全局锁已获取: 项目 ${projectId}, taskId ${taskId}`);
 
-    this.runAutoIterate(taskId, projectId, subject).catch(e => {
-      this.logger.error(`autoIterate failed: ${e}`, e instanceof Error ? e.stack : '');
-      if (!subject.closed) { subject.next({ type: 'error', message: String(e) }); subject.complete(); }
-    });
+    // 入队 BullMQ（取代原 fire-and-forget）：job 持久化于 Redis，进程崩溃后 stalled 机制
+    // 重拨续跑，不再留下孤儿锁。attempts=1：循环内部已各有降级/重试，崩溃恢复靠 stalled 重拨。
+    // 入队失败要释放刚拿到的锁与内存流，否则前端永远等不到一个不存在的迭代。
+    try {
+      await this.autoIterateQueue.add(
+        AUTO_ITERATE_JOB,
+        { taskId, projectId },
+        { attempts: 1, removeOnComplete: true, removeOnFail: 50 },
+      );
+    } catch (e) {
+      this.iterateSubjects.delete(taskId);
+      await this.clearIterationLock(projectId, taskId);
+      this.logger.error(`autoIterate 入队失败，已释放锁: ${e}`, e instanceof Error ? e.stack : '');
+      throw e;
+    }
 
     return { taskId };
   }
@@ -158,7 +173,13 @@ export class DeliveryIterationService {
 
   // ─── 内部实现 ───
 
-  private async runAutoIterate(taskId: string, projectId: string, subject: Subject<any>) {
+  /**
+   * 执行自迭代长循环（由 AutoIterateProcessor 调用）。
+   * Subject 从内存 map 取（startAutoIterate 同进程入队时已建）；崩溃重拨后的 job 在新进程
+   * 没有 Subject → emit 仅落库 autoIterateState，前端轮询对账（实时流是延迟优化、非真相源）。
+   */
+  async executeAutoIterate(taskId: string, projectId: string) {
+    const subject = this.iterateSubjects.get(taskId);
     // ── 持久化运行状态（真相源）：每个事件归并进 state 并落库，前端可对账自愈，不依赖内存流 ──
     const state: {
       taskId: string; status: string; round: number; score: number;
@@ -185,7 +206,7 @@ export class DeliveryIterationService {
         default:
           if (TERMINAL[event.type]) { state.status = TERMINAL[event.type]; state.terminal = event; if (event.message) state.statusText = event.message; }
       }
-      if (!subject.closed) subject.next(event);
+      if (subject && !subject.closed) subject.next(event);
       persist();
     };
 
@@ -362,14 +383,14 @@ export class DeliveryIterationService {
             });
           } catch {}
           emit({ type: 'needs_human', round, fixFailCount, message: msg });
-          subject.complete();
+          subject?.complete();
           return;
         }
 
         if (fused.stopIteration && score >= 90) {
           pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
           emit({ type: 'done', reason: '达标', score, rounds: round, history });
-          subject.complete();
+          subject?.complete();
           break;
         }
 
@@ -381,7 +402,7 @@ export class DeliveryIterationService {
             stuckCount: STUCK_LIMIT, history,
             message: '传感器建议停止迭代，当前评分未达标，请决策',
           });
-          subject.complete();
+          subject?.complete();
           return;
         }
 
@@ -392,7 +413,7 @@ export class DeliveryIterationService {
             if (stuckCount >= STUCK_LIMIT) {
               pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
               emit({ type: 'stuck', round, score, prevScore, stuckCount, history, message: '连续3轮无改善' });
-              subject.complete();
+              subject?.complete();
               return;
             }
           } else {
@@ -407,7 +428,7 @@ export class DeliveryIterationService {
       const last = history[history.length - 1];
       pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
       emit({ type: 'done', reason: '达到最大轮数', score: last?.score ?? 0, rounds: history.length, history });
-      subject.complete();
+      subject?.complete();
     } finally {
       // 兜底：循环异常退出时也标记终态，避免持久状态停在 running 误导前端
       if (state.status === 'running') { state.status = 'error'; state.terminal = { type: 'error', message: '迭代异常结束' }; persist(); }

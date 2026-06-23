@@ -4,7 +4,7 @@ import { renderDashboard } from './dashboard.template';
 import { renderApp, defaultFrontNav } from './app-template';
 import { renderKnowledge } from './knowledge.template';
 import { renderQa } from './qa.template';
-import { renderAdminApp, defaultAdminNav } from './admin-template';
+import { renderAdminApp, buildAdminNav, deriveAdminCaps } from './admin-template';
 
 describe('内置模板渲染（套模板填数据，替代 DeepSeek 即兴）', () => {
   it('主题 token：6 套齐全，CSS vars 含主色，未知 id 回退政务蓝', () => {
@@ -80,9 +80,8 @@ describe('内置模板渲染（套模板填数据，替代 DeepSeek 即兴）', 
     expect(renderQa()).toContain('ti-send');
   });
 
-  it('后台：管理侧栏预置 + 业务列表（appData），删掉了监控/代码生成', () => {
-    const nav = defaultAdminNav();
-    const labels = nav.map((n) => n.label);
+  it('后台：通用栏恒在 + 业务列表（appData），删掉了监控/代码生成', () => {
+    const labels = buildAdminNav('data', { rules: true, knowledge: true }).map((n) => n.label);
     expect(labels).toEqual(['业务数据', '规则配置', '知识库管理', '用户管理', '角色权限', '组织部门', '操作审计', '系统设置']);
     expect(labels).not.toContain('系统监控');
     expect(labels).not.toContain('代码生成');
@@ -91,5 +90,25 @@ describe('内置模板渲染（套模板填数据，替代 DeepSeek 即兴）', 
     expect(html).toContain('角色权限');
     expect(html).toContain('id="adm-rows"');
     expect(html).toContain('window.appData.list'); // 业务列表实时取数
+  });
+
+  it('后台侧栏按能力出：无能力 → 规则配置/知识库管理不出，通用栏恒在', () => {
+    const labels = buildAdminNav('data', {}).map((n) => n.label);
+    expect(labels).toEqual(['业务数据', '用户管理', '角色权限', '组织部门', '操作审计', '系统设置']);
+    expect(labels).not.toContain('规则配置'); // 不再无条件固化
+    expect(labels).not.toContain('知识库管理');
+  });
+
+  it('后台侧栏按能力出：仅启用规则 → 出规则配置，不出知识库', () => {
+    const labels = buildAdminNav('data', { rules: true }).map((n) => n.label);
+    expect(labels).toContain('规则配置');
+    expect(labels).not.toContain('知识库管理');
+  });
+
+  it('deriveAdminCaps：业务规则非空→rules；功能/页面提知识库→knowledge', () => {
+    expect(deriveAdminCaps({ businessRules: [{ name: '审批' }] }, null)).toEqual({ rules: true, knowledge: false });
+    expect(deriveAdminCaps(null, { features: ['知识库检索'], pages: [] })).toEqual({ rules: false, knowledge: true });
+    expect(deriveAdminCaps(null, { features: ['登录'], pages: [{ name: '工作台' }] })).toEqual({ rules: false, knowledge: false });
+    expect(deriveAdminCaps({ businessRules: [] }, {})).toEqual({ rules: false, knowledge: false });
   });
 });

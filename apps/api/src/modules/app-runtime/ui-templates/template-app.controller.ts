@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Req, UseGuards, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Put, Get, Body, Param, Req, UseGuards, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PrismaService } from '../../../database/prisma.service';
 import { TemplateAppService } from './template-app.service';
@@ -34,6 +34,20 @@ export class TemplateAppController {
   async admin(@Req() req: any, @Param('projectId') projectId: string) {
     await this.requireOwner(req.user.id, projectId);
     return { html: await this.svc.renderAdmin(projectId) };
+  }
+
+  /** 读页面 schema + 可绑数据契约（编辑面板 S4：bind 只能从契约选）。 */
+  @Get('app-schema')
+  async getSchema(@Req() req: any, @Param('projectId') projectId: string) {
+    await this.requireOwner(req.user.id, projectId);
+    return this.svc.getAppSchema(projectId);
+  }
+
+  /** 保存编辑后的 schema：校验门 + 重渲染 demoHtml + 落库。body { schema }。 */
+  @Put('app-schema')
+  async putSchema(@Req() req: any, @Param('projectId') projectId: string, @Body() body: { schema: unknown }) {
+    await this.requireOwner(req.user.id, projectId);
+    return this.svc.saveAppSchema(projectId, body?.schema);
   }
 
   private async requireOwner(userId: string, projectId: string) {

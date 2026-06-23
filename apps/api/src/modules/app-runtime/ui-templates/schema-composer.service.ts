@@ -1,0 +1,61 @@
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { SchemaMigrationService } from '../schema-migration.service';
+import { DeepseekService } from '../../../services/deepseek.service';
+import { buildDataContract, normalizeContractForRuntime, DataContract } from '../app-contract';
+import { AppSchema } from './page-schema.types';
+import { coerceSchema, fallbackSchema, extractJson, buildComposePrompt } from './schema-composer';
+
+/**
+ * Schema 编排服务（Schema 驱动 S2）：需求/数据模型 → AppSchema。
+ *
+ * LLM 编排页面结构 → coerceSchema 确定性校验门（越界丢弃）→ 无合法页则确定性兜底。
+ * 契约按 backendKind 归一（若依→字段名小写），故 schema 路径天然带字段名归一。
+ * 不接生产路径（S3 再路由 generateDemo 过来）。DeepseekService 全局可注入；无则纯兜底。
+ */
+@Injectable()
+export class SchemaComposerService {
+  private readonly logger = new Logger(SchemaComposerService.name);
+
+  constructor(
+    private schema: SchemaMigrationService,
+    @Optional() private deepseek?: DeepseekService,
+  ) {}
+
+  async compose(input: {
+    appName: string;
+    dataModel: string | null | undefined;
+    backendKind?: string;
+    pageLabels?: string[];
+    features?: string[];
+  }): Promise<{ schema: AppSchema; source: 'llm' | 'fallback'; dropped: string[] }> {
+    let contract: DataContract;
+    try {
+      contract = normalizeContractForRuntime(buildDataContract(this.schema.parseAndValidate(input.dataModel || '')), input.backendKind);
+    } catch (e) {
+      this.logger.warn(`数据模型解析失败，用空契约兜底: ${e instanceof Error ? e.message : e}`);
+      contract = { resources: [] };
+    }
+
+    if (!this.deepseek || !input.dataModel) {
+      return { schema: fallbackSchema(input.appName, contract), source: 'fallback', dropped: [] };
+    }
+
+    try {
+      const { system, user } = buildComposePrompt(input.appName, input.pageLabels ?? [], input.features ?? [], contract);
+      const resp = await this.deepseek.chatWithRetry(
+        [{ role: 'system', content: system }, { role: 'user', content: user }],
+        { temperature: 0.3, maxTokens: 4096 },
+      );
+      const { schema, dropped } = coerceSchema(extractJson(resp || ''), contract);
+      if (schema && schema.pages.length) {
+        if (dropped.length) this.logger.warn(`schema 编排丢弃越界项 ${dropped.length}: ${dropped.slice(0, 5).join(' | ')}`);
+        this.logger.log(`schema 编排完成 (LLM): ${schema.pages.length} 页`);
+        return { schema, source: 'llm', dropped };
+      }
+      this.logger.warn(`LLM schema 无合法页（${dropped.join('；') || '空'}），退回确定性兜底`);
+    } catch (e) {
+      this.logger.warn(`LLM schema 编排失败，退回兜底: ${e instanceof Error ? e.message : e}`);
+    }
+    return { schema: fallbackSchema(input.appName, contract), source: 'fallback', dropped: [] };
+  }
+}

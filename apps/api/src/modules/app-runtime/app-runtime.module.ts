@@ -24,6 +24,7 @@ import { LlmFactExtractor } from './knowledge/llm-fact-extractor';
 import { KnowledgeController } from './knowledge/knowledge.controller';
 import { TemplateAppService } from './ui-templates/template-app.service';
 import { TemplateAppController } from './ui-templates/template-app.controller';
+import { SchemaComposerService } from './ui-templates/schema-composer.service';
 import { QaService } from './qa/qa.service';
 import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
 
@@ -54,8 +55,9 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     KnowledgeSourceService,
     LlmFactExtractor,
     TemplateAppService,
+    SchemaComposerService,
     QaService,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService, TemplateAppService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService, TemplateAppService, SchemaComposerService],
 })
 export class AppRuntimeModule {}

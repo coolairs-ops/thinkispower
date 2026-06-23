@@ -25,7 +25,7 @@ describe('DeliveryIterationService.autoFixWholeHtml 防退化护栏', () => {
     const deepseek = { chat } as unknown;
     service = new DeliveryIterationService(
       {} as never, {} as never, {} as never, deepseek as never,
-      {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never,
     );
   });
 
@@ -58,5 +58,53 @@ describe('DeliveryIterationService.autoFixWholeHtml 防退化护栏', () => {
       `<!-- ${filler} --></body></html>`;
     chat.mockResolvedValue(wrap(sameSize));
     expect(await callFix()).toBeNull();
+  });
+});
+
+/**
+ * 自迭代迁 BullMQ：startAutoIterate 改为「拿全局锁 → 入队 AUTO_ITERATE_JOB」，
+ * 不再进程内 fire-and-forget（进程重启即孤儿）。崩溃恢复靠 BullMQ stalled 重拨。
+ */
+describe('DeliveryIterationService.startAutoIterate 入队（BullMQ 迁移）', () => {
+  const build = (queueAdd: jest.Mock) => {
+    let captured: { id: string; projectId: string; taskId: string } | undefined;
+    const systemLock = {
+      findUnique: jest.fn().mockImplementation(async () => captured ?? null),
+      upsert: jest.fn().mockImplementation(async ({ create }: any) => { captured = create; return create; }),
+      delete: jest.fn().mockImplementation(async () => { captured = undefined; return {}; }),
+    };
+    const prisma = { systemLock } as unknown;
+    const queue = { add: queueAdd } as unknown;
+    const service = new DeliveryIterationService(
+      prisma as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, queue as never,
+    );
+    return { service, systemLock };
+  };
+
+  it('获取全局锁后入队 AUTO_ITERATE_JOB，不再进程内直接执行', async () => {
+    const add = jest.fn().mockResolvedValue(undefined);
+    const { service, systemLock } = build(add);
+    const executeSpy = jest
+      .spyOn(service, 'executeAutoIterate')
+      .mockResolvedValue(undefined as never);
+
+    const { taskId } = await service.startAutoIterate('proj-1234abcd');
+
+    expect(systemLock.upsert).toHaveBeenCalled();
+    expect(add).toHaveBeenCalledWith(
+      'auto-iterate',
+      { taskId, projectId: 'proj-1234abcd' },
+      expect.objectContaining({ attempts: 1 }),
+    );
+    expect(executeSpy).not.toHaveBeenCalled(); // 入队，不再 fire-and-forget
+  });
+
+  it('入队失败 → 释放刚获取的锁并抛出（不留孤儿锁）', async () => {
+    const add = jest.fn().mockRejectedValue(new Error('redis down'));
+    const { service, systemLock } = build(add);
+
+    await expect(service.startAutoIterate('proj-1234abcd')).rejects.toThrow('redis down');
+    expect(systemLock.delete).toHaveBeenCalledWith({ where: { id: 'auto_iteration' } });
   });
 });

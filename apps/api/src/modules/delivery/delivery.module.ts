@@ -5,6 +5,8 @@ import { DeliveryService } from './delivery.service';
 import { DeliveryEvaluationService } from './delivery-evaluation.service';
 import { DeliveryProcessor } from './delivery.processor';
 import { DELIVERY_QUEUE } from './delivery.queue';
+import { AutoIterateProcessor } from './auto-iterate.processor';
+import { AUTO_ITERATE_QUEUE } from './auto-iterate.queue';
 import { DeliveryIterationService } from './delivery-iteration.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
@@ -21,9 +23,9 @@ import { IterativeOptimizerService } from '../../services/iterative-optimizer.se
 import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 
 @Module({
-  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule, AppRuntimeModule, BullModule.registerQueue({ name: DELIVERY_QUEUE })],
+  imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule, AppRuntimeModule, BullModule.registerQueue({ name: DELIVERY_QUEUE }, { name: AUTO_ITERATE_QUEUE })],
   controllers: [DeliveryController],
-  providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService],
+  providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, AutoIterateProcessor, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService],
   exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService],
 })
 export class DeliveryModule {}

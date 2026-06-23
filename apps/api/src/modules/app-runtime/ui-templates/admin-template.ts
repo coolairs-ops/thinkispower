@@ -1,17 +1,46 @@
 import { renderShell, NavItem, esc } from './app-shell.template';
 
-/** 后台预置侧栏（用户敲定）：业务运营 + 权限组织 + 系统。删掉若依的系统监控/代码生成/表单构建。 */
-export function defaultAdminNav(active = 'data'): NavItem[] {
-  return [
-    { key: 'data', label: '业务数据', icon: 'database', active: active === 'data' },
-    { key: 'rules', label: '规则配置', icon: 'adjustments', active: active === 'rules' },
-    { key: 'knowledge', label: '知识库管理', icon: 'books', active: active === 'knowledge' },
-    { key: 'users', label: '用户管理', icon: 'users', active: active === 'users' },
-    { key: 'roles', label: '角色权限', icon: 'lock-access', active: active === 'roles' },
-    { key: 'depts', label: '组织部门', icon: 'sitemap', active: active === 'depts' },
-    { key: 'audit', label: '操作审计', icon: 'history', active: active === 'audit' },
-    { key: 'settings', label: '系统设置', icon: 'settings', active: active === 'settings' },
-  ];
+/** 后台能力开关：能力相关栏目按项目实际启用的能力出现，避免规则/知识库等无条件固化。 */
+export interface AdminCaps {
+  rules?: boolean;     // 启用规则引擎（有业务规则）→ 出「规则配置」
+  knowledge?: boolean; // 启用知识库（功能/页面含知识库）→ 出「知识库管理」
+}
+
+/**
+ * 后台侧栏（参考若依分层）：
+ * - 通用恒在：业务数据 / 用户管理 / 角色权限 / 组织部门 / 操作审计 / 系统设置（任何政企后台都要）。
+ * - 能力相关：规则配置 / 知识库管理，按 caps 条件出（不再无条件固化——规则/知识库不是每个项目都用）。
+ * 删掉若依的系统监控/代码生成/表单构建（不交付）。
+ */
+export function buildAdminNav(active = 'data', caps: AdminCaps = {}): NavItem[] {
+  const items: Omit<NavItem, 'active'>[] = [{ key: 'data', label: '业务数据', icon: 'database' }];
+  if (caps.rules) items.push({ key: 'rules', label: '规则配置', icon: 'adjustments' });
+  if (caps.knowledge) items.push({ key: 'knowledge', label: '知识库管理', icon: 'books' });
+  items.push(
+    { key: 'users', label: '用户管理', icon: 'users' },
+    { key: 'roles', label: '角色权限', icon: 'lock-access' },
+    { key: 'depts', label: '组织部门', icon: 'sitemap' },
+    { key: 'audit', label: '操作审计', icon: 'history' },
+    { key: 'settings', label: '系统设置', icon: 'settings' },
+  );
+  return items.map((n) => ({ ...n, active: n.key === active }));
+}
+
+/**
+ * 从项目信号推断后台能力（无显式开关字段时的务实判定，纯函数）：
+ * - rules：结构化需求里有业务规则（business-rule-completion 写入）。
+ * - knowledge：方案的功能/页面名提到知识库（暂用关键字，接入正式能力开关后可替换）。
+ */
+export function deriveAdminCaps(structuredRequirement?: unknown, planSummary?: unknown): AdminCaps {
+  const sr = structuredRequirement as { businessRules?: unknown } | null;
+  const rules = Array.isArray(sr?.businessRules) && sr!.businessRules.length > 0;
+  const ps = planSummary as { features?: unknown; pages?: unknown } | null;
+  const names = [ps?.features, ps?.pages]
+    .flatMap((arr) => (Array.isArray(arr) ? arr : []))
+    .map((x) => (typeof x === 'string' ? x : String((x as { name?: string; label?: string })?.name ?? (x as { label?: string })?.label ?? '')))
+    .join(' ');
+  const knowledge = /知识库|知识|knowledge/i.test(names);
+  return { rules, knowledge };
 }
 
 export interface AdminConfig {
@@ -22,6 +51,7 @@ export interface AdminConfig {
   resource: string;
   resourceLabel: string;
   columns: { key: string; label: string; badge?: boolean }[];
+  caps?: AdminCaps;
 }
 
 /** 后台业务数据列表（toolbar + appData 实时表格 + 行操作）。 */
@@ -48,7 +78,7 @@ export function renderAdminApp(cfg: AdminConfig): string {
     org: cfg.org,
     themeId: cfg.themeId,
     user: cfg.user,
-    nav: defaultAdminNav('data'),
+    nav: buildAdminNav('data', cfg.caps),
     contentHtml: renderAdminList(cfg),
   });
 }
