@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { DeepseekService } from '../../services/deepseek.service';
 import { CreateSpecDto, UpdateSpecDto, FreezeSpecDto } from './dto/spec.dto';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 @Injectable()
 export class SpecificationService {
@@ -15,13 +16,13 @@ export class SpecificationService {
   ) {}
 
   /** 从项目已有的 plan/discovery 数据自动生成初始规格草案 */
-  async generateDraft(userId: string, projectId: string) {
+  async generateDraft(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true, planSummary: true, structuredRequirement: true, description: true, name: true },
+      select: { id: true, userId: true, orgId: true, status: true, planSummary: true, structuredRequirement: true, description: true, name: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     // 检查是否已有规格
     const existing = await this.prisma.specification.findUnique({ where: { projectId } });
@@ -146,13 +147,13 @@ export class SpecificationService {
   }
 
   /** 获取项目当前规格 */
-  async getSpec(userId: string, projectId: string) {
+  async getSpec(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, name: true, status: true, specVersion: true, specConfirmedAt: true },
+      select: { userId: true, orgId: true, name: true, status: true, specVersion: true, specConfirmedAt: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const spec = await this.prisma.specification.findUnique({ where: { projectId } });
     if (!spec) {
@@ -162,13 +163,13 @@ export class SpecificationService {
   }
 
   /** 更新规格内容（draft 状态可编辑） */
-  async updateSpec(userId: string, projectId: string, dto: UpdateSpecDto) {
+  async updateSpec(userId: string, orgId: string | null, projectId: string, dto: UpdateSpecDto) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true },
+      select: { userId: true, orgId: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     let spec = await this.prisma.specification.findUnique({ where: { projectId } });
     if (!spec) throw new NotFoundException('规格不存在，请先生成');
@@ -194,13 +195,13 @@ export class SpecificationService {
   }
 
   /** 冻结/解冻规格 */
-  async freezeSpec(userId: string, projectId: string, dto: FreezeSpecDto) {
+  async freezeSpec(userId: string, orgId: string | null, projectId: string, dto: FreezeSpecDto) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, status: true },
+      select: { id: true, userId: true, orgId: true, status: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const spec = await this.prisma.specification.findUnique({ where: { projectId } });
     if (!spec) throw new NotFoundException('规格不存在，请先生成');

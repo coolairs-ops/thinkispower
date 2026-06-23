@@ -21,12 +21,12 @@ export class DeliveryController {
   // ── 验收报告（P15-Y 可验收/可追溯）──
   @Get('acceptance-report')
   async getAcceptanceReport(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.acceptanceService.getReport(req.user.id, projectId);
+    return this.acceptanceService.getReport(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Post('acceptance-verify')
   async runAcceptanceVerify(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.acceptanceService.verify(req.user.id, projectId);
+    return this.acceptanceService.verify(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Post('acceptance-manual-confirm')
@@ -37,13 +37,13 @@ export class DeliveryController {
     @Body('status') status: ScenarioStatus,
     @Body('note') note?: string,
   ) {
-    return this.acceptanceService.manualConfirm(req.user.id, projectId, scenarioName, status, note);
+    return this.acceptanceService.manualConfirm(req.user.id, req.user.orgId ?? null, projectId, scenarioName, status, note);
   }
 
   // ── 交付页面数据 ──
   @Get()
   async getDelivery(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.deliveryService.getDelivery(req.user.id, projectId);
+    return this.deliveryService.getDelivery(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   // ── 唯一交付入口：全栈代码生成 ──
@@ -51,7 +51,7 @@ export class DeliveryController {
   @RequiredPlan('enterprise')
   @Post('deliver')
   async deliver(@Req() req: any, @Param('projectId') projectId: string, @Body() body: any) {
-    return this.evaluationService.productionDeliver(req.user.id, projectId, body);
+    return this.evaluationService.productionDeliver(req.user.id, req.user.orgId ?? null, projectId, body);
   }
 
   // ── 交付进度 SSE ──
@@ -75,27 +75,27 @@ export class DeliveryController {
   // ── 评估 ──
   @Post('evaluate')
   async requestEvaluation(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.evaluationService.requestEvaluation(req.user.id, projectId);
+    return this.evaluationService.requestEvaluation(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Post('re-evaluate')
   async reEvaluate(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.evaluationService.reEvaluate(req.user.id, projectId);
+    return this.evaluationService.reEvaluate(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Post('re-evaluate-status')
   async reEvaluateStatus(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.evaluationService.getReEvaluateStatus(req.user.id, projectId);
+    return this.evaluationService.getReEvaluateStatus(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Post('accept-risk-fix')
   async acceptRiskFix(@Req() req: any, @Param('projectId') projectId: string, @Body('riskIndex') riskIndex: number, @Body('customFix') customFix?: string) {
-    return this.evaluationService.acceptRiskFix(req.user.id, projectId, riskIndex, customFix);
+    return this.evaluationService.acceptRiskFix(req.user.id, req.user.orgId ?? null, projectId, riskIndex, customFix);
   }
 
   @Post('accept-suggestion')
   async acceptSuggestion(@Req() req: any, @Param('projectId') projectId: string, @Body('suggestionId') suggestionId: string) {
-    return this.evaluationService.acceptSuggestion(req.user.id, projectId, suggestionId);
+    return this.evaluationService.acceptSuggestion(req.user.id, req.user.orgId ?? null, projectId, suggestionId);
   }
 
   // ── 自迭代 ──

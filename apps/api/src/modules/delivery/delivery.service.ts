@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { BuildService } from '../../services/build.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -13,14 +14,14 @@ export class DeliveryService {
     private buildService: BuildService,
   ) {}
 
-  async getDelivery(userId: string, projectId: string) {
+  async getDelivery(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       include: { deliveryOptions: true, user: { select: { plan: true } } },
     });
 
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     const options = project.deliveryOptions;
     const latestBuild = await this.buildService.getLatestBuild(projectId);

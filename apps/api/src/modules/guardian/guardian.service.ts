@@ -73,7 +73,7 @@ export class GuardianService implements OnModuleInit {
 
     let report: AcceptanceReport | null = null;
     try {
-      report = await this.acceptance.verify(project.userId, projectId);
+      report = await this.acceptance.verify(project.userId, null, projectId);
     } catch (e) {
       this.logger.warn(`Guardian 巡检验收失败 ${projectId}: ${e}`);
     }

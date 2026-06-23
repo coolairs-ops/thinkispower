@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 /**
  * 业务规则补全（A 抽取 + B 问答合一）。
@@ -39,8 +40,8 @@ export class BusinessRuleCompletionService {
   ) {}
 
   /** 检测候选业务规则（A 抽取 + B 问答合一调用）。存库 + 返回。 */
-  async detect(userId: string, projectId: string): Promise<{ candidates: BusinessRuleCandidate[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async detect(userId: string, orgId: string | null, projectId: string): Promise<{ candidates: BusinessRuleCandidate[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const ctx = this.gatherContext(project.planSummary);
 
@@ -63,8 +64,8 @@ export class BusinessRuleCompletionService {
   }
 
   /** 取已存候选 + 已确定规则。 */
-  async get(userId: string, projectId: string): Promise<{ candidates: BusinessRuleCandidate[]; rules: BusinessRule[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async get(userId: string, orgId: string | null, projectId: string): Promise<{ candidates: BusinessRuleCandidate[]; rules: BusinessRule[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     return {
       candidates: (sr.businessRuleCandidates as BusinessRuleCandidate[]) ?? [],
@@ -76,8 +77,8 @@ export class BusinessRuleCompletionService {
    * 回写：autofill 规则直接定案；ask 规则按 answers（键=规则名，值=选定 outcome）定案。
    * 答案为 '__skip__' 的丢弃。结果写 structuredRequirement.businessRules（规格 generateDraft 会读）。
    */
-  async apply(userId: string, projectId: string, answers: Record<string, string> = {}): Promise<{ rules: BusinessRule[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async apply(userId: string, orgId: string | null, projectId: string, answers: Record<string, string> = {}): Promise<{ rules: BusinessRule[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const candidates = (sr.businessRuleCandidates as BusinessRuleCandidate[]) ?? [];
 
@@ -160,13 +161,13 @@ export class BusinessRuleCompletionService {
     }
   }
 
-  private async requireProject(userId: string, projectId: string) {
+  private async requireProject(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, name: true, structuredRequirement: true, planSummary: true },
+      select: { userId: true, orgId: true, name: true, structuredRequirement: true, planSummary: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     return project;
   }
 }

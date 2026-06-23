@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 /**
  * 实体关系补全（relationship-completion-design.md）。
@@ -64,8 +65,8 @@ export class RelationCompletionService {
   ) {}
 
   /** 检测候选关系（A+D 合一调用）：找有证据的 1—N 候选，明显→autofill，模糊→ask+选择题。存库+返回。 */
-  async detect(userId: string, projectId: string): Promise<{ candidates: RelationCandidate[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async detect(userId: string, orgId: string | null, projectId: string): Promise<{ candidates: RelationCandidate[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const ctx = this.gatherContext(project.planSummary, sr);
 
@@ -88,8 +89,8 @@ export class RelationCompletionService {
   }
 
   /** 取已存候选（不重新调模型）。 */
-  async get(userId: string, projectId: string): Promise<{ candidates: RelationCandidate[]; relations: Relation[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async get(userId: string, orgId: string | null, projectId: string): Promise<{ candidates: RelationCandidate[]; relations: Relation[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     return {
       candidates: (sr.relationCandidates as RelationCandidate[]) ?? [],
@@ -103,10 +104,11 @@ export class RelationCompletionService {
    */
   async apply(
     userId: string,
+    orgId: string | null,
     projectId: string,
     answers: Record<string, { cardinality?: string; onDelete?: string; required?: boolean }> = {},
   ): Promise<{ relations: Relation[] }> {
-    const project = await this.requireProject(userId, projectId);
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const candidates = (sr.relationCandidates as RelationCandidate[]) ?? [];
 
@@ -228,13 +230,13 @@ export class RelationCompletionService {
     }
   }
 
-  private async requireProject(userId: string, projectId: string) {
+  private async requireProject(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, name: true, structuredRequirement: true, planSummary: true },
+      select: { userId: true, orgId: true, name: true, structuredRequirement: true, planSummary: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     return project;
   }
 }

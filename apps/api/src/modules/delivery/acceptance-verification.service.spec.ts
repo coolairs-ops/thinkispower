@@ -41,17 +41,17 @@ describe('AcceptanceVerificationService', () => {
 
   it('项目不存在 → NotFound', async () => {
     prisma.project.findUnique.mockResolvedValue(null);
-    await expect(service.verify('u1', 'p1')).rejects.toThrow(NotFoundException);
+    await expect(service.verify('u1', null, 'p1')).rejects.toThrow(NotFoundException);
   });
 
   it('跨用户 → Forbidden', async () => {
     prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'other', demoHtml: '', description: '' });
-    await expect(service.verify('u1', 'p1')).rejects.toThrow(ForbiddenException);
+    await expect(service.verify('u1', null, 'p1')).rejects.toThrow(ForbiddenException);
   });
 
   it('无场景 → hasScenarios=false, passRate=null, 不落库', async () => {
     prisma.specification.findUnique.mockResolvedValue({ projectId: 'p1', version: 1, acceptanceScenarios: [], changeLog: [] });
-    const r = await service.verify('u1', 'p1');
+    const r = await service.verify('u1', null, 'p1');
     expect(r.hasScenarios).toBe(false);
     expect(r.passRate).toBeNull();
     expect(prisma.specification.update).not.toHaveBeenCalled();
@@ -65,7 +65,7 @@ describe('AcceptanceVerificationService', () => {
       ],
     }));
 
-    const r = await service.verify('u1', 'p1');
+    const r = await service.verify('u1', null, 'p1');
 
     expect(r.total).toBe(2);
     expect(r.passed).toBe(1);
@@ -91,7 +91,7 @@ describe('AcceptanceVerificationService', () => {
 
   it('demoHtml 为空 → 全部待人工(manual)，passRate=0', async () => {
     prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'u1', demoHtml: '', description: '' });
-    const r = await service.verify('u1', 'p1');
+    const r = await service.verify('u1', null, 'p1');
     expect(r.manual).toBe(2);
     expect(r.passRate).toBe(0);
     expect(llm.chat).not.toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe('AcceptanceVerificationService', () => {
 
   it('LLM 异常 → 场景降级待人工，不抛错', async () => {
     llm.chat.mockRejectedValue(new Error('llm down'));
-    const r = await service.verify('u1', 'p1');
+    const r = await service.verify('u1', null, 'p1');
     expect(r.manual).toBe(2);
     expect(r.scenarios[0].evidence).toContain('暂不可用');
   });
@@ -107,7 +107,7 @@ describe('AcceptanceVerificationService', () => {
   it('传感器异常不阻断 → 仍能语义判定落库', async () => {
     sensors.runAll.mockRejectedValue(new Error('sensor down'));
     llm.chat.mockResolvedValue(JSON.stringify({ verdicts: [{ index: 1, status: 'pass', evidence: 'ok' }, { index: 2, status: 'pass', evidence: 'ok' }] }));
-    const r = await service.verify('u1', 'p1');
+    const r = await service.verify('u1', null, 'p1');
     expect(r.passRate).toBe(1);
     expect(r.overallScore).toBeNull();
   });
@@ -119,7 +119,7 @@ describe('AcceptanceVerificationService', () => {
     ];
     prisma.specification.findUnique.mockResolvedValue({ projectId: 'p1', version: 2, acceptanceScenarios: scenarios, verificationResults: existing, passRate: 0.5, changeLog: [] });
 
-    const r = await service.manualConfirm('u1', 'p1', '下单', 'pass', '已人工核对');
+    const r = await service.manualConfirm('u1', null, 'p1', '下单', 'pass', '已人工核对');
 
     expect(r.passRate).toBe(1);
     const data = prisma.specification.update.mock.calls[0][0].data;
@@ -135,7 +135,7 @@ describe('AcceptanceVerificationService', () => {
       verificationResults: [{ scenarioName: '成功登录', status: 'pass', checks: [], coverage: [], provenance: [], given: '', when: '', then: '', priority: 'must', evidence: '', verifiedAt: '' }],
       passRate: 1, verifiedAt: new Date('2026-06-06T00:00:00Z'),
     });
-    const r = await service.getReport('u1', 'p1');
+    const r = await service.getReport('u1', null, 'p1');
     expect(r.passRate).toBe(1);
     expect(r.total).toBe(1);
     expect(sensors.runAll).not.toHaveBeenCalled();

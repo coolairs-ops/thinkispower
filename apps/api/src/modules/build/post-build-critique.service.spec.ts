@@ -21,7 +21,7 @@ describe('PostBuildCritiqueService（后置遍 · 升级E）', () => {
 
   it('blocked 模块 → 后置缺口，含测试门失败原因，可重建', async () => {
     setup({ modules: [{ name: '看板', status: 'blocked', result: { failedPhase: 'test', detail: { len: 800, hasAction: false } } }] });
-    const r = await svc.critique('u1', 'p1');
+    const r = await svc.critique('u1', null, 'p1');
     expect(r.gaps).toHaveLength(1);
     expect(r.gaps[0]).toMatchObject({ kind: 'blocked', moduleName: '看板', rebuildable: true });
     expect(r.gaps[0].issue).toContain('缺少可操作元素');
@@ -29,19 +29,19 @@ describe('PostBuildCritiqueService（后置遍 · 升级E）', () => {
 
   it('done 且产物正常 → 不产生缺口', async () => {
     setup({ modules: [{ name: '列表', status: 'done', result: { html: '<div data-module-key="x">' + 'x'.repeat(300) + '</div>' } }] });
-    const r = await svc.critique('u1', 'p1');
+    const r = await svc.critique('u1', null, 'p1');
     expect(r.gaps).toHaveLength(0);
   });
 
   it('done 但内容为空/占位 → empty 缺口', async () => {
     setup({ modules: [{ name: '设置', status: 'done', result: { html: '<div class="alert">「设置」暂无内容</div>' } }] });
-    const r = await svc.critique('u1', 'p1');
+    const r = await svc.critique('u1', null, 'p1');
     expect(r.gaps.map((g) => g.kind)).toEqual(['empty']);
   });
 
   it('pending/中断模块 → pending 缺口', async () => {
     setup({ modules: [{ name: '报表', status: 'pending', result: null }] });
-    const r = await svc.critique('u1', 'p1');
+    const r = await svc.critique('u1', null, 'p1');
     expect(r.gaps[0]).toMatchObject({ kind: 'pending', rebuildable: true });
   });
 
@@ -53,7 +53,7 @@ describe('PostBuildCritiqueService（后置遍 · 升级E）', () => {
         { name: '门店', status: 'done', result: { html: '<div data-module-key="x">' + 'x'.repeat(300) + '</div>' } },
       ], // 只建了 2 个
     });
-    const r = await svc.critique('u1', 'p1');
+    const r = await svc.critique('u1', null, 'p1');
     const uncovered = r.gaps.filter((g) => g.kind === 'uncovered-page').map((g) => g.moduleName);
     expect(uncovered).toEqual(['巡检', '报表', '审批', '设置', '权限', '日志']);
     expect(r.gaps.every((g) => g.kind !== 'uncovered-page' || g.rebuildable === false)).toBe(true);
@@ -61,7 +61,7 @@ describe('PostBuildCritiqueService（后置遍 · 升级E）', () => {
 
   it('写一条 critique 建造日志', async () => {
     setup({ modules: [{ name: '看板', status: 'blocked', result: { failedPhase: 'generate' } }] });
-    await svc.critique('u1', 'p1');
+    await svc.critique('u1', null, 'p1');
     expect(prisma.buildJournalEntry.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ phase: 'critique' }) }),
     );
@@ -69,13 +69,13 @@ describe('PostBuildCritiqueService（后置遍 · 升级E）', () => {
 
   it('ownership：非属主拒绝，不读模块', async () => {
     setup({ userId: 'owner' });
-    await expect(svc.critique('intruder', 'p1')).rejects.toThrow(ForbiddenException);
+    await expect(svc.critique('intruder', null, 'p1')).rejects.toThrow(ForbiddenException);
     expect(prisma.buildModule.findMany).not.toHaveBeenCalled();
   });
 
   it('项目不存在 → NotFound', async () => {
     setup();
     prisma.project.findUnique.mockResolvedValue(null);
-    await expect(svc.critique('u1', 'missing')).rejects.toThrow(NotFoundException);
+    await expect(svc.critique('u1', null, 'missing')).rejects.toThrow(NotFoundException);
   });
 });

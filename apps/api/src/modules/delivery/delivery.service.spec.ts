@@ -37,7 +37,7 @@ describe('DeliveryService', () => {
         user: { plan: 'pro' },
       });
 
-      const result = await service.getDelivery(mockUserId, mockProjectId);
+      const result = await service.getDelivery(mockUserId, null, mockProjectId);
       expect(result.status).toBe('completed');
       expect(result.productionUrl).toBe('http://example.com');
       expect(result.isPro).toBe(true);
@@ -45,12 +45,12 @@ describe('DeliveryService', () => {
 
     it('should throw NotFoundException for non-existent project', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
-      await expect(service.getDelivery(mockUserId, 'bad-id')).rejects.toThrow('项目不存在');
+      await expect(service.getDelivery(mockUserId, null, 'bad-id')).rejects.toThrow('项目不存在');
     });
 
     it('should throw ForbiddenException for unauthorized access', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: 'other-user', user: { plan: 'free' } });
-      await expect(service.getDelivery(mockUserId, mockProjectId)).rejects.toThrow('无权访问');
+      await expect(service.getDelivery(mockUserId, null, mockProjectId)).rejects.toThrow('无权访问');
     });
   });
 

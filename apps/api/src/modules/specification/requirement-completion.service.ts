@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 
 /** 需求补全工具包 v2 · 升级A：IR 完备性批判 + 30题补集（docs/requirement-completion-kit-v2.md §1） */
 
@@ -57,8 +58,8 @@ export class RequirementCompletionService {
   ) {}
 
   /** 跑一次 IR 完备性批判：找"整块漏掉的实体/页面/流程/角色/维度"，存库 + 返回。 */
-  async analyze(userId: string, projectId: string): Promise<{ gaps: CompletenessGap[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async analyze(userId: string, orgId: string | null, projectId: string): Promise<{ gaps: CompletenessGap[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const prd = (sr.prd as Record<string, unknown>) || sr;
 
@@ -95,8 +96,8 @@ export class RequirementCompletionService {
   }
 
   /** 取已存的完备性缺口（不重新调模型）。 */
-  async get(userId: string, projectId: string): Promise<{ gaps: CompletenessGap[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async get(userId: string, orgId: string | null, projectId: string): Promise<{ gaps: CompletenessGap[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     return { gaps: (sr.completenessGaps as CompletenessGap[]) ?? [] };
   }
@@ -105,8 +106,8 @@ export class RequirementCompletionService {
    * 升级D 处置分类（阶段4.5）：对已存的完备性缺口逐条判 autofill/ask/info，
    * ask 类附带给用户的小问题，富集回 completenessGaps + 返回。需先跑过 analyze(A)。
    */
-  async classify(userId: string, projectId: string): Promise<{ gaps: CompletenessGap[] }> {
-    const project = await this.requireProject(userId, projectId);
+  async classify(userId: string, orgId: string | null, projectId: string): Promise<{ gaps: CompletenessGap[] }> {
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const gaps = (sr.completenessGaps as CompletenessGap[]) ?? [];
     if (gaps.length === 0) return { gaps: [] };
@@ -138,10 +139,11 @@ export class RequirementCompletionService {
    */
   async apply(
     userId: string,
+    orgId: string | null,
     projectId: string,
     accept: string[] = [],
   ): Promise<{ added: Record<string, string[]>; applied: number; specSync: SpecSync }> {
-    const project = await this.requireProject(userId, projectId);
+    const project = await this.requireProject(userId, orgId, projectId);
     const sr = (project.structuredRequirement as Record<string, unknown>) || {};
     const gaps = (sr.completenessGaps as CompletenessGap[]) ?? [];
     const acceptSet = new Set(accept);
@@ -347,13 +349,13 @@ ${list}
     });
   }
 
-  private async requireProject(userId: string, projectId: string) {
+  private async requireProject(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, name: true, structuredRequirement: true, planSummary: true },
+      select: { userId: true, orgId: true, name: true, structuredRequirement: true, planSummary: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     return project;
   }
 }

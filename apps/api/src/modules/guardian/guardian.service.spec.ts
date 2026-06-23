@@ -72,7 +72,7 @@ describe('GuardianService', () => {
       prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: 'org1' });
       acceptance.verify.mockResolvedValue(report({ passRate: 1, overallScore: 90, total: 3, passed: 3 }));
       const rec = await service.runCheck('p1', 'manual');
-      expect(acceptance.verify).toHaveBeenCalledWith('owner', 'p1');
+      expect(acceptance.verify).toHaveBeenCalledWith('owner', null, 'p1');
       expect(rec!.healthScore).toBe(97);
       expect(rec!.status).toBe('healthy');
       expect(rec!.trigger).toBe('manual');
