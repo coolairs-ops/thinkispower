@@ -94,7 +94,7 @@ describe('DemoService', () => {
     it('should return HTML when status is demo_ready', async () => {
       prisma.project.findUnique.mockResolvedValue(baseProject);
 
-      const result = await service.getDemo(mockUserId, mockProjectId);
+      const result = await service.getDemo(mockUserId, null, mockProjectId);
 
       expect(result.html).toContain('Hello'); // 原内容保留
       expect(result.html).toContain('id="tip-theme"'); // 注入了主题覆盖层
@@ -105,7 +105,7 @@ describe('DemoService', () => {
     it('should return HTML for completed status', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...baseProject, status: 'completed' });
 
-      const result = await service.getDemo(mockUserId, mockProjectId);
+      const result = await service.getDemo(mockUserId, null, mockProjectId);
 
       expect(result.html).toBeDefined();
     });
@@ -113,7 +113,7 @@ describe('DemoService', () => {
     it('should return null HTML when status is not ready', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...baseProject, status: 'needs_input', demoHtml: null });
 
-      const result = await service.getDemo(mockUserId, mockProjectId);
+      const result = await service.getDemo(mockUserId, null, mockProjectId);
 
       expect(result.html).toBeNull();
     });
@@ -121,7 +121,7 @@ describe('DemoService', () => {
     it('should return HTML when paused（自迭代需人工介入后仍可看/可编辑 demo）', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...baseProject, status: 'paused' });
 
-      const result = await service.getDemo(mockUserId, mockProjectId);
+      const result = await service.getDemo(mockUserId, null, mockProjectId);
 
       expect(result.html).toContain('Hello');
       expect(result.status).toBe('paused');
@@ -130,13 +130,13 @@ describe('DemoService', () => {
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.getDemo(mockUserId, mockProjectId)).rejects.toThrow(NotFoundException);
+      await expect(service.getDemo(mockUserId, null, mockProjectId)).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException if user is not owner', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...baseProject, userId: 'other' });
 
-      await expect(service.getDemo(mockUserId, mockProjectId)).rejects.toThrow(ForbiddenException);
+      await expect(service.getDemo(mockUserId, null, mockProjectId)).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -144,7 +144,7 @@ describe('DemoService', () => {
     it('清理 tip-theme 与高亮、补 DOCTYPE 后落库', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: mockUserId });
       const dirty = '<html><head><style id="tip-theme">:root{}</style></head><body><button class="btn annotation-highlight">x</button></body></html>';
-      await service.saveEditedHtml(mockUserId, mockProjectId, dirty);
+      await service.saveEditedHtml(mockUserId, null, mockProjectId, dirty);
       const saved = prisma.project.update.mock.calls[0][0].data.demoHtml as string;
       expect(saved).not.toContain('tip-theme');
       expect(saved).not.toContain('annotation-highlight');
@@ -154,12 +154,12 @@ describe('DemoService', () => {
 
     it('跨用户 → Forbidden', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: 'other' });
-      await expect(service.saveEditedHtml(mockUserId, mockProjectId, '<html>'.padEnd(60, 'x'))).rejects.toThrow(ForbiddenException);
+      await expect(service.saveEditedHtml(mockUserId, null, mockProjectId, '<html>'.padEnd(60, 'x'))).rejects.toThrow(ForbiddenException);
     });
 
     it('空 HTML → BadRequest', async () => {
       prisma.project.findUnique.mockResolvedValue({ userId: mockUserId });
-      await expect(service.saveEditedHtml(mockUserId, mockProjectId, '')).rejects.toThrow(BadRequestException);
+      await expect(service.saveEditedHtml(mockUserId, null, mockProjectId, '')).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -167,7 +167,7 @@ describe('DemoService', () => {
     it('入队 BullMQ 并置 demo_generating（写 queued 进度，不直接生成）', async () => {
       prisma.project.findUnique.mockResolvedValue(planReadyProject);
 
-      const result = await service.generateDemo(mockUserId, mockProjectId);
+      const result = await service.generateDemo(mockUserId, null, mockProjectId);
 
       expect(result).toMatchObject({ status: 'demo_generating', message: expect.any(String) });
       expect(prisma.project.update).toHaveBeenCalledWith(
@@ -190,12 +190,12 @@ describe('DemoService', () => {
     it('should throw BadRequestException if status not allowed', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...planReadyProject, status: 'needs_input' });
 
-      await expect(service.generateDemo(mockUserId, mockProjectId)).rejects.toThrow(BadRequestException);
+      await expect(service.generateDemo(mockUserId, null, mockProjectId)).rejects.toThrow(BadRequestException);
     });
 
     it('paused（自迭代中途态）允许重生成：入队不报错', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...planReadyProject, status: 'paused' });
-      const result = await service.generateDemo(mockUserId, mockProjectId);
+      const result = await service.generateDemo(mockUserId, null, mockProjectId);
       expect(result).toMatchObject({ status: 'demo_generating' });
       expect(demoQueue.add).toHaveBeenCalled();
     });
@@ -203,19 +203,19 @@ describe('DemoService', () => {
     it('should throw BadRequestException if no planSummary', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...planReadyProject, planSummary: null });
 
-      await expect(service.generateDemo(mockUserId, mockProjectId)).rejects.toThrow(BadRequestException);
+      await expect(service.generateDemo(mockUserId, null, mockProjectId)).rejects.toThrow(BadRequestException);
     });
 
     it('should throw NotFoundException if project does not exist', async () => {
       prisma.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.generateDemo(mockUserId, mockProjectId)).rejects.toThrow(NotFoundException);
+      await expect(service.generateDemo(mockUserId, null, mockProjectId)).rejects.toThrow(NotFoundException);
     });
 
     it('should throw ForbiddenException if not owner', async () => {
       prisma.project.findUnique.mockResolvedValue({ ...planReadyProject, userId: 'other' });
 
-      await expect(service.generateDemo(mockUserId, mockProjectId)).rejects.toThrow(ForbiddenException);
+      await expect(service.generateDemo(mockUserId, null, mockProjectId)).rejects.toThrow(ForbiddenException);
     });
   });
 

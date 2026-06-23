@@ -42,3 +42,17 @@ export function orgScope(ctxOrgId: string | null | undefined): { orgId: string }
   if (!ctxOrgId) throw new ForbiddenException('无有效的租户上下文');
   return { orgId: ctxOrgId };
 }
+
+/**
+ * 资源访问校验（A2b/A3 共用）：对**已加载**的资源对象做租户边界(org) + 归属(userId) 二维校验。
+ * 有 org 上下文才强制 org 边界（跨租户→403；过渡期 allowLegacyNull 放行未回填 orgId 的旧资源）；
+ * 无 org 上下文（旧会话）退回纯 userId 归属（仍安全）。资源经 projectId 关联 Project 时传 project 即可。
+ */
+export function assertResourceAccess(
+  resource: { orgId: string | null; userId: string },
+  userId: string,
+  orgId: string | null,
+): void {
+  if (orgId) assertOrgAccess(resource.orgId, orgId, { allowLegacyNull: true });
+  if (resource.userId !== userId) throw new ForbiddenException('无权访问');
+}

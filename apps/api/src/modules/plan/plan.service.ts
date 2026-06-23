@@ -80,8 +80,8 @@ export class PlanService {
       },
     });
 
-    // Trigger demo generation asynchronously
-    this.demoService.generateDemo(userId, projectId).catch((err) => {
+    // Trigger demo generation asynchronously（plan.service 尚未接 org 维度，orgId 暂传 null；generateDemo 仍做 userId 归属校验）
+    this.demoService.generateDemo(userId, null, projectId).catch((err) => {
       this.logger.error(`Failed to auto-generate demo after plan confirm: ${err.message}`);
     });
 

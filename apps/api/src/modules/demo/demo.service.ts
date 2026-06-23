@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
@@ -7,6 +7,7 @@ import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoSnapshotService } from '../demo-snapshot/demo-snapshot.service';
 import { CloudecodeClient } from '../../integrations/cloudecode/cloudecode.client';
 import { isProjectLocked } from '../../common/utils/project-status';
+import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { DEMO_QUEUE, DemoGenerateJob } from './demo.queue';
 import { ThemeService, ThemeConfig } from './theme.service';
 import { ScreenshotReplicateService } from './screenshot-replicate.service';
@@ -48,13 +49,13 @@ export class DemoService {
     private config: ConfigService,
   ) {}
 
-  async getDemo(userId: string, projectId: string) {
+  async getDemo(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, name: true, userId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, themeConfig: true, shotLayouts: true, backendRuntime: true, updatedAt: true },
+      select: { id: true, name: true, userId: true, orgId: true, status: true, publicStatusLabel: true, demoUrl: true, demoHtml: true, demoProgress: true, themeConfig: true, shotLayouts: true, backendRuntime: true, updatedAt: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
 
     let status = project.status;
     let publicStatusLabel = project.publicStatusLabel;
@@ -82,10 +83,10 @@ export class DemoService {
   }
 
   /** 保存用户在预览里直接编辑后的 HTML（局部档位调整），清理临时注入后落库 */
-  async saveEditedHtml(userId: string, projectId: string, html: string): Promise<{ success: boolean }> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+  async saveEditedHtml(userId: string, orgId: string | null, projectId: string, html: string): Promise<{ success: boolean }> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true, orgId: true } });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     if (!html || html.length < 50) throw new BadRequestException('HTML 内容无效');
     // 去掉读时注入的主题覆盖层与批注高亮（临时态，不应固化进 demoHtml）
     let clean = html.replace(/<style id="tip-theme">[\s\S]*?<\/style>/g, '').replace(/ ?annotation-highlight/g, '');
@@ -96,19 +97,19 @@ export class DemoService {
   }
 
   /** 保存 demo 外观主题（Phase A 换肤），返回规范化后的配置 */
-  async saveTheme(userId: string, projectId: string, config: Partial<ThemeConfig>): Promise<ThemeConfig> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+  async saveTheme(userId: string, orgId: string | null, projectId: string, config: Partial<ThemeConfig>): Promise<ThemeConfig> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true, orgId: true } });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     const normalized = this.theme.normalize(config);
     await this.prisma.project.update({ where: { id: projectId }, data: { themeConfig: normalized as never } });
     return normalized;
   }
 
-  async generateDemo(userId: string, projectId: string) {
-    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { id: true, userId: true, status: true, planSummary: true } });
+  async generateDemo(userId: string, orgId: string | null, projectId: string) {
+    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { id: true, userId: true, orgId: true, status: true, planSummary: true } });
     if (!p) throw new NotFoundException('项目不存在');
-    if (p.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(p, userId, orgId);
     return this.doGenerate(p);
   }
 
@@ -193,10 +194,10 @@ export class DemoService {
   }
 
   /** 人在回路：用（修正后的）布局描述重新生成，跳过 vision —— 省成本、采纳人工纠错 */
-  async regenerateFromLayouts(userId: string, projectId: string, layouts: Array<{ name: string; layout: string }>): Promise<{ success: boolean }> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true } });
+  async regenerateFromLayouts(userId: string, orgId: string | null, projectId: string, layouts: Array<{ name: string; layout: string }>): Promise<{ success: boolean }> {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true, orgId: true } });
     if (!project) throw new NotFoundException('项目不存在');
-    if (project.userId !== userId) throw new ForbiddenException('无权访问');
+    assertResourceAccess(project, userId, orgId);
     if (!Array.isArray(layouts) || layouts.length === 0) throw new BadRequestException('缺少布局描述');
     const pages: Array<{ name: string; html: string }> = [];
     for (let i = 0; i < layouts.length; i++) {

@@ -10,7 +10,7 @@ export class FeedbackController {
 
   @Get()
   async findAll(@Req() req: any, @Param('projectId') projectId: string) {
-    return this.feedbackService.findAll(req.user.id, projectId);
+    return this.feedbackService.findAll(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   @Post()
@@ -19,7 +19,7 @@ export class FeedbackController {
     @Param('projectId') projectId: string,
     @Body() body: CreateFeedbackDto,
   ) {
-    return this.feedbackService.create(req.user.id, projectId, body);
+    return this.feedbackService.create(req.user.id, req.user.orgId ?? null, projectId, body);
   }
 
   @Patch(':feedbackId')
@@ -29,6 +29,6 @@ export class FeedbackController {
     @Param('feedbackId') feedbackId: string,
     @Body() body: UpdateFeedbackStatusDto,
   ) {
-    return this.feedbackService.updateStatus(req.user.id, projectId, feedbackId, body.status!);
+    return this.feedbackService.updateStatus(req.user.id, req.user.orgId ?? null, projectId, feedbackId, body.status!);
   }
 }
