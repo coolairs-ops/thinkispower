@@ -8,6 +8,8 @@
  * 推断只是默认值，规格阶段人可显式覆盖 `fulfilledBy`。
  */
 
+import { matchCapability, OUT_OF_SCOPE } from './capability-registry';
+
 export type Fulfillment = 'self' | 'backend' | 'external' | 'deferred';
 
 /** external 能力对应的标准协议端口（ADR-0008 D3 的 Capability Port） */
@@ -26,31 +28,22 @@ export interface ProvenanceVerdict {
   fulfilledBy: Fulfillment;
   /** 仅 external 有：命中的协议端口 */
   protocol?: ExternalProtocol;
+  /** 命中的能力 id（命中注册表时有），供台账/缺口工单(gap_workflow)回指 */
+  capId?: string;
   /** 命中的判定信号（供台账/排查透明可溯，不参与逻辑） */
   reason: string;
 }
 
-/** 本期明确不做 → 移出覆盖率分母 */
+/** 本期明确不做 → 移出覆盖率分母（lifecycle 状态，非能力本身） */
 const DEFERRED = /(暂不|本期不做|不在本期|二期|后续再|暂缓|待定不做)/u;
 
-/** external：协议 → 触发词（具体、克制，避免过度触发把 self 误判成 external） */
-const EXTERNAL_RULES: Array<{ protocol: ExternalProtocol; re: RegExp }> = [
-  { protocol: 'asr', re: /(语音转写|语音识别|语音输入|语音转文字|录音转写|\bASR\b)/u },
-  { protocol: 'ocr', re: /(拍照识别|扫描识别|图片识别|票据识别|证件识别|身份证识别|\bOCR\b)/u },
-  { protocol: 'oa', re: /(OA对接|对接OA|外部审批|审批对接|办公系统对接|流程对接外部)/u },
-  { protocol: 'rulepack', re: /(行业规则包|合规校验|法规校验|监管对接|药监对接)/u },
-  { protocol: 'sms', re: /(短信网关|短信验证码|短信通知|短信下发)/u },
-  { protocol: 'email', re: /(邮件网关|邮件下发|邮件通知发送)/u },
-  { protocol: 'map', re: /(地图服务|地理定位|定位服务|\bLBS\b)/u },
-  { protocol: 'payment', re: /(在线支付|微信支付|支付宝|第三方支付|收款对接)/u },
-  { protocol: 'generic', re: /(第三方系统|外部系统对接|接口对接|数据连接器|同步至外部|对接外部)/u },
-];
-
-/** backend：能力在后端底座（若依等），HTML 这层天然看不见 → 不该用 HTML 判 */
-const BACKEND = /(登录认证|身份认证|鉴权|权限控制|权限管理|角色权限|数据权限|数据隔离|多用户权限|\bRBAC\b|只看自己|看全部数据|按角色|登录页|账号管理|用户管理|单点登录|\bSSO\b)/u;
+/** 后端底座兜底信号（注册表未命中时的保守回退） */
+const BACKEND_FALLBACK = /(登录认证|鉴权|权限|角色|数据隔离|多用户|\bRBAC\b|账号管理|用户管理|\bSSO\b)/u;
 
 /**
- * 判定一条需求/验收标准的能力来源。
+ * 判定一条需求/验收标准的能力来源（ADR-0008 D1）。
+ * 权威源 = 平台能力注册表（catalog + maturity，见 capability-registry.ts）；
+ * 注册表未命中时回退保守关键词、默认 self。
  * @param criterion 形如「功能: 多用户权限管理」「页面: 登录页」「MVP: 语音录入工单」的标准串
  */
 export function inferFulfillment(criterion: string): ProvenanceVerdict {
@@ -61,16 +54,20 @@ export function inferFulfillment(criterion: string): ProvenanceVerdict {
   const def = DEFERRED.exec(text);
   if (def) return { fulfilledBy: 'deferred', reason: `命中延期信号「${def[0]}」` };
 
-  // 2) 外部对接 → external（带协议端口）
-  for (const { protocol, re } of EXTERNAL_RULES) {
-    const m = re.exec(text);
-    if (m) return { fulfilledBy: 'external', protocol, reason: `命中外部能力「${m[0]}」→ ${protocol}` };
+  // 2) 品类外（能力圈外）→ deferred
+  const oos = OUT_OF_SCOPE.exec(text);
+  if (oos) return { fulfilledBy: 'deferred', reason: `品类外「${oos[0]}」，不在平台能力圈` };
+
+  // 3) 查能力注册表（权威）→ 用条目的 fulfillment + maturity
+  const cap = matchCapability(text);
+  if (cap) {
+    return { fulfilledBy: cap.fulfillment, protocol: cap.protocol, capId: cap.capId, reason: `命中能力「${cap.name}」(${cap.maturity})` };
   }
 
-  // 3) 后端底座能力 → backend
-  const be = BACKEND.exec(text);
-  if (be) return { fulfilledBy: 'backend', reason: `命中后端能力「${be[0]}」` };
+  // 4) 注册表未命中 → 保守关键词兜底（后端信号 → backend）
+  const be = BACKEND_FALLBACK.exec(text);
+  if (be) return { fulfilledBy: 'backend', reason: `注册表未命中，关键词兜底「${be[0]}」→ backend` };
 
-  // 4) 兜底：前端可实现 → self（保守默认，仍按 HTML 严判）
-  return { fulfilledBy: 'self', reason: '无后端/外部信号，默认前端可实现' };
+  // 5) 默认前端可实现 → self（保守，仍按 HTML 严判）
+  return { fulfilledBy: 'self', reason: '注册表未命中、无后端信号，默认前端可实现' };
 }

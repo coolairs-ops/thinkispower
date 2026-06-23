@@ -60,9 +60,19 @@ describe('inferFulfillment（能力来源分类 · ADR-0008 D1）', () => {
     });
   });
 
-  it('verdict 始终带可溯源 reason', () => {
-    expect(inferFulfillment('页面: 登录页').reason).toMatch(/登录页/);
-    expect(inferFulfillment('语音转写').reason).toMatch(/asr/);
+  it('命中注册表时带 capId + maturity（供 gap_workflow 回指）', () => {
+    const login = inferFulfillment('页面: 登录页');
+    expect(login.fulfilledBy).toBe('backend');
+    expect(login.capId).toBe('PLG-rbac');
+    expect(login.reason).toMatch(/green/); // maturity 进 reason
+    const asr = inferFulfillment('工单语音转写');
+    expect(asr.capId).toBe('PLG-asr');
+    expect(asr.reason).toMatch(/red/);
+  });
+
+  it('品类外 → deferred（OUT_OF_SCOPE）', () => {
+    expect(inferFulfillment('支持实时音视频通话').fulfilledBy).toBe('deferred');
+    expect(inferFulfillment('高并发C端秒杀').fulfilledBy).toBe('deferred');
   });
 
   // 截图实测：11 项「未实现」分类后，backend 类应被救出（不再算 self 的 HTML 未实现）
