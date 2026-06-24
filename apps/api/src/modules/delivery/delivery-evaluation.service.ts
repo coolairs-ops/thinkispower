@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
@@ -14,6 +14,9 @@ import { QwenReviewerService } from '../../services/qwen-reviewer.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
+import { decideDeliveryOutcome, DeployResultStatus } from './golive-gate';
+import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
+import { buildDataContract, checkContractConformance } from '../app-runtime/app-contract';
 
 @Injectable()
 export class DeliveryEvaluationService {
@@ -31,6 +34,7 @@ export class DeliveryEvaluationService {
     private acceptance: AcceptanceVerificationService,
     private ruoyiProvision: RuoyiProvisionService,
     @InjectQueue(DELIVERY_QUEUE) private deliveryQueue: Queue,
+    @Optional() private schema?: SchemaMigrationService,
   ) {}
 
   /** 请求评估 — 只分析不交付，返回风险+修复建议 */
@@ -241,37 +245,19 @@ export class DeliveryEvaluationService {
         this.logger.log(`[编译验证] ${compilationPassed ? '✅ 通过' : '❌ 未通过'} (${compileResult.rounds} 轮)${compilationError ? ': ' + compilationError : ''}`);
       }
 
-      // ═══ 冒烟测试: 自动生成测试文件 ═══
-      this.logger.log(`[冒烟测试] 生成测试文件...`);
-      const smokeResult = await this.generateAndRunSmokeTests(outputDir, injectedFiles);
-      this.logger.log(`[冒烟测试] ${smokeResult.passed ? '✅' : '⚠️'} (${smokeResult.testCount} 用例)${smokeResult.error ? ': ' + smokeResult.error : ''}`);
-
-      // 创建 Build 记录
-      const latestBuild = await this.prisma.build.findFirst({
-        where: { projectId }, orderBy: { version: 'desc' }, select: { version: true },
-      });
-      const build = await this.prisma.build.create({
-        data: {
-          projectId,
-          version: (latestBuild?.version || 0) + 1,
-          status: 'success',
-          sourceZipUrl: `/api/deploy/${projectId}/delivery/${deliveryId}`,
-        },
-      });
-
-      // ═══ 一键部署: docker build → run → URL ═══
-      let productionUrl = '';
-      let deployStatus = 'not_deployed';
+      // ═══ 一键部署: docker build → run → health（这一步才真把后端起起来）═══
+      let deployedUrl = '';
+      let deployStatus: DeployResultStatus = 'not_deployed';
       try {
         this.logger.log(`[一键部署] 开始部署交付产物 ${deliveryId}...`);
         const deployResult = await this.deployPipeline.deploy(deliveryId, projectId);
         if (deployResult.status === 'deployed' && deployResult.url) {
-          productionUrl = deployResult.url;
+          deployedUrl = deployResult.url;
           deployStatus = 'deployed';
-          this.logger.log(`[一键部署] ✅ 成功: ${productionUrl}`);
+          this.logger.log(`[一键部署] ✅ 成功: ${deployedUrl}`);
         } else if (deployResult.status === 'static_only') {
           deployStatus = 'static_only';
-          this.logger.warn(`[一键部署] ⚠️ Docker不可用，降级为静态模式`);
+          this.logger.warn(`[一键部署] ⚠️ Docker不可用，降级为静态模式（仅预览，非上线）`);
         } else {
           deployStatus = 'deploy_failed';
           this.logger.warn(`[一键部署] ❌ 失败: ${deployResult.error}`);
@@ -281,23 +267,52 @@ export class DeliveryEvaluationService {
         deployStatus = 'deploy_failed';
       }
 
-      // Docker 部署失败时降级为 API 静态托管
-      if (!productionUrl) {
-        const baseUrl = process.env['APP_BASE_URL'] || 'http://localhost:3001';
-        productionUrl = `${baseUrl}/api/deploy/${projectId}`;
-        this.logger.log(`[一键部署] 降级为 API 静态托管: ${productionUrl}`);
+      // ═══ 冒烟测试（ADR-0009）：只在后端真起来(deployed)后、打真实部署 URL；否则未验证、不作数 ═══
+      let smokePassed: boolean | undefined;
+      if (deployStatus === 'deployed' && deployedUrl) {
+        const smoke = await this.generateAndRunSmokeTests(outputDir, injectedFiles, deployedUrl);
+        smokePassed = smoke.passed;
+        this.logger.log(`[冒烟测试] ${smoke.passed ? '✅ 通过' : '❌ 未通过'} (${smoke.testCount} 用例，打真实 URL ${deployedUrl})`);
+      } else {
+        this.logger.log(`[冒烟测试] 跳过——后端未真起(deployStatus=${deployStatus})，本次冒烟不作数(未验证)`);
       }
 
-      await this.prisma.project.update({
-        where: { id: projectId },
+      // ═══ 上线门（ADR-0009 确定性二值合取）：编译 ∧ 运行时真证据(部署健康/后端就绪) ∧ 冒烟不为假 → completed ═══
+      const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true, dataModel: true, demoHtml: true } });
+      const backendReady = (proj?.backendRuntime as any)?.status === 'ready'; // 若依后端真就绪=路-若依的"真起来+真探活"证据
+      // D3 契约门：交付前端 appData 调的资源 ⊆ 后端真契约（越界=上线必404）。无 schema服务/模型/demo → 不可查、不拦
+      let contractConformant: boolean | undefined;
+      if (this.schema && proj?.dataModel && proj?.demoHtml) {
+        try {
+          const contract = buildDataContract(this.schema.parseAndValidate(proj.dataModel));
+          const conf = checkContractConformance(proj.demoHtml, contract);
+          contractConformant = conf.ok;
+          if (!conf.ok) this.logger.warn(`[契约门] 越界资源(上线必404): ${conf.unknownResources.join('、')}`);
+        } catch (e) { this.logger.warn(`[契约门] 校验异常(不拦): ${e}`); }
+      }
+      const staticUrl = `${process.env['APP_BASE_URL'] || 'http://localhost:3001'}/api/deploy/${projectId}`;
+      const outcome = decideDeliveryOutcome({ compilationPassed, contractConformant, deployStatus, deployedUrl: deployedUrl || undefined, smokePassed, backendReady, staticUrl });
+
+      // Build 记录据实写（编译过没），不再恒 success
+      const latestBuild = await this.prisma.build.findFirst({ where: { projectId }, orderBy: { version: 'desc' }, select: { version: true } });
+      const build = await this.prisma.build.create({
         data: {
-          status: 'completed',
-          productionUrl: productionUrl || null,
-          latestBuildId: build.id,
+          projectId,
+          version: (latestBuild?.version || 0) + 1,
+          status: compilationPassed ? 'success' : 'failed',
+          sourceZipUrl: `/api/deploy/${projectId}/delivery/${deliveryId}`,
         },
       });
 
-      this.logger.log(`交付完成: ${injectedFiles.length} 文件 → ${outputDir}`);
+      // 状态诚实：只有四门全过才 completed(=真上线)；否则如实置失败/仅预览态，绝不冒充"已上线"
+      const labelMap: Record<string, string> = {
+        completed: '已上线', preview_only: '仅预览·未上线', build_failed: '编译失败', contract_violation: '前端契约越界', smoke_failed: '冒烟未通过', deploy_failed: '部署失败',
+      };
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { status: outcome.status, publicStatusLabel: labelMap[outcome.status] ?? outcome.status, productionUrl: outcome.productionUrl, latestBuildId: build.id },
+      });
+      this.logger.log(`[上线门] ${outcome.status}: ${outcome.reason}${outcome.productionUrl ? ' → ' + outcome.productionUrl : ''}`);
     } catch (e) {
       this.logger.error(`全栈生成失败: ${e}`);
     }
@@ -851,6 +866,7 @@ ${fileList ? `已有代码参考:\n${fileList}\n\n` : ''}
   private async generateAndRunSmokeTests(
     outputDir: string,
     files: Array<{ path: string; content: string }>,
+    testUrl?: string,
   ): Promise<{ passed: boolean; testCount: number; error?: string }> {
     const path = require('path');
     const fs = require('fs');
@@ -964,8 +980,10 @@ main().catch(err => { console.error(err); process.exit(1); });
     // 尝试运行测试（需要后端服务运行中）
     try {
       const { execSync } = require('child_process');
+      // ADR-0009：打**真起来的交付后端**（部署后的真实 URL）；没传 testUrl=未起后端、本次冒烟不作数
       const result = execSync(`node "${testPath}" 2>&1`, {
         timeout: 15_000, stdio: 'pipe', encoding: 'utf-8', cwd: outputDir,
+        env: testUrl ? { ...process.env, TEST_URL: testUrl } : process.env,
       });
       const passMatch = result.match(/(\d+) 通过/);
       const testCount = passMatch ? parseInt(passMatch[1]) : endpoints.length;
