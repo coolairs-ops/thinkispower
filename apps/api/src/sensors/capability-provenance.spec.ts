@@ -89,3 +89,29 @@ describe('inferFulfillment（能力来源分类 · ADR-0008 D1）', () => {
     expect(byBucket.filter((b) => b === 'self')).toHaveLength(7);
   });
 });
+
+describe('生成器缺口（self 但缺 block，maturity=red · ADR-0008 D6）', () => {
+  it.each([
+    ['多步向导填报', 'PLG-wizard'],
+    ['销售趋势图表', 'PLG-chart'],
+    ['任务拖拽看板', 'PLG-kanban'],
+    ['审批流程图可视化', 'PLG-flow'],
+  ])('%s → self + red + %s', (c, capId) => {
+    const v = inferFulfillment(c);
+    expect(v.fulfilledBy).toBe('self'); // 仍是前端 UI（self），不是 external
+    expect(v.maturity).toBe('red'); // 但生成器产不出 → 缺口
+    expect(v.capId).toBe(capId);
+  });
+
+  it('问答/聊天已补第 7 块 qa → PLG-chat-qa 翻 green（自迭代能闭合）', () => {
+    const v = inferFulfillment('售前自动回复');
+    expect(v.fulfilledBy).toBe('self');
+    expect(v.capId).toBe('PLG-chat-qa');
+    expect(v.maturity).toBe('green'); // 🔴→🟢：生成器现已能产
+  });
+
+  it('生成器能产的 self 仍是 green（录入/列表/看板）', () => {
+    expect(inferFulfillment('录入产品信息').maturity).toBe('green');
+    expect(inferFulfillment('数据看板展示').maturity).toBe('green');
+  });
+});

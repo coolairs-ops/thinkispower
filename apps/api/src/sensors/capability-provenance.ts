@@ -8,7 +8,7 @@
  * 推断只是默认值，规格阶段人可显式覆盖 `fulfilledBy`。
  */
 
-import { matchCapability, OUT_OF_SCOPE } from './capability-registry';
+import { matchCapability, OUT_OF_SCOPE, type Maturity } from './capability-registry';
 
 export type Fulfillment = 'self' | 'backend' | 'external' | 'deferred';
 
@@ -30,6 +30,8 @@ export interface ProvenanceVerdict {
   protocol?: ExternalProtocol;
   /** 命中的能力 id（命中注册表时有），供台账/缺口工单(gap_workflow)回指 */
   capId?: string;
+  /** 命中能力的成熟度（命中注册表时有）：green 能产 / yellow 半成 / red 缺口。D6 处置据此分流 */
+  maturity?: Maturity;
   /** 命中的判定信号（供台账/排查透明可溯，不参与逻辑） */
   reason: string;
 }
@@ -61,7 +63,7 @@ export function inferFulfillment(criterion: string): ProvenanceVerdict {
   // 3) 查能力注册表（权威）→ 用条目的 fulfillment + maturity
   const cap = matchCapability(text);
   if (cap) {
-    return { fulfilledBy: cap.fulfillment, protocol: cap.protocol, capId: cap.capId, reason: `命中能力「${cap.name}」(${cap.maturity})` };
+    return { fulfilledBy: cap.fulfillment, protocol: cap.protocol, capId: cap.capId, maturity: cap.maturity, reason: `命中能力「${cap.name}」(${cap.maturity})` };
   }
 
   // 4) 注册表未命中 → 保守关键词兜底（后端信号 → backend）

@@ -45,12 +45,28 @@ export const CAPABILITY_REGISTRY: CapabilityEntry[] = [
   // ── 🟢 通用业务骨架（前端可现，self）──
   { capId: 'PLG-crud', name: '对象列表/详情/录入/台账', category: '通用业务', maturity: 'green', fulfillment: 'self',
     match: /(列表|详情|录入|台账|表单|增删改查|登记表|明细)/u },
-  { capId: 'PLG-portrait', name: '对象画像/看板', category: '通用业务', maturity: 'green', fulfillment: 'self',
-    match: /(画像|看板|仪表盘|大屏展示)/u },
+  { capId: 'PLG-portrait', name: '对象画像/数据看板', category: '通用业务', maturity: 'green', fulfillment: 'self',
+    match: /(画像|数据看板|数据大屏|仪表盘|大屏展示)/u },
   { capId: 'PLG-score', name: '评分/分级/规则引擎', category: '规则引擎', maturity: 'green', fulfillment: 'self',
     match: /(评分|分级|打分|指标计算|风险指数|信用分|规则触发)/u },
   { capId: 'PLG-knowledge', name: '知识库/溯源/问答', category: '可信底座', maturity: 'green', fulfillment: 'self',
     match: /(知识库|溯源|证据链|问答检索)/u },
+
+  // ── 🔴 生成器缺口：是 self（前端 UI）但当前 6 块（kpi/table/detail/form/generate/richtext）产不出 →
+  //    走 gap_workflow「扩生成器词汇」补 block，而非让自迭代空转撞墙（ADR-0008 D6 实测 91df174a 印证）。
+  // PLG-chat-qa：2026-06-24 补了第 7 块 qa（block-renderer.qaBlock）→ maturity 🔴→🟢，生成器现已能产问答/聊天界面。
+  { capId: 'PLG-chat-qa', name: '问答/聊天交互界面', category: '通用业务', maturity: 'green', fulfillment: 'self',
+    match: /(聊天|对话界面|在线客服|智能客服|客服问答|智能问答|在线问答|问答界面|问答交互|消息气泡|自动回复)/u },
+  { capId: 'PLG-wizard', name: '多步向导/分步表单', category: '生成器缺口', maturity: 'red', fulfillment: 'self',
+    match: /(分步向导|多步向导|多步表单|步骤引导|向导式|wizard)/u },
+  { capId: 'PLG-chart', name: '图表/可视化钻取', category: '生成器缺口', maturity: 'red', fulfillment: 'self',
+    match: /(图表|趋势图|柱状图|折线图|饼图|可视化钻取|数据钻取)/u },
+  { capId: 'PLG-kanban', name: '拖拽看板/任务流转', category: '生成器缺口', maturity: 'red', fulfillment: 'self',
+    match: /(拖拽看板|看板拖拽|任务流转|kanban|拖拽排序)/u },
+  { capId: 'PLG-calendar', name: '日历/排期/甘特', category: '生成器缺口', maturity: 'red', fulfillment: 'self',
+    match: /(日历视图|排期表|甘特图|日程安排)/u },
+  { capId: 'PLG-flow', name: '流程图/审批流可视化', category: '生成器缺口', maturity: 'red', fulfillment: 'self',
+    match: /(流程图|审批流程图|流程编排|可视化流程)/u },
 
   // ── 🟢 后端底座能力（HTML 看不见，backend；若依 data_scope）──
   { capId: 'PLG-rbac', name: '登录/认证/权限/数据隔离', category: '后端底座', maturity: 'green', fulfillment: 'backend',
