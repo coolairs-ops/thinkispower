@@ -82,6 +82,23 @@ describe('renderSchema (Schema 驱动 S1 确定性块渲染器)', () => {
     expect(renderBlock({ type: 'form', bind: { resource: 'r', fields: ['a'] } }, 'i')).toContain('appData.create');
   });
 
+  // 批注钩子回归修复：schema 渲染器补回 data-module-key/data-element-path + 批注点击脚本
+  it('每块挂 data-module-key/data-element-path + 注入批注点击脚本（修 L1 批注覆盖率为 0 + 恢复批注）', () => {
+    const html = renderSchema(schema);
+    const mkCount = (html.match(/data-module-key=/g) || []).length;
+    const epCount = (html.match(/data-element-path=/g) || []).length;
+    // 4 个块各挂 1 对（dashboard 的 kpi/generate/table + login 的 form）；脚本里的字符串字面量另计入几个
+    expect(mkCount).toBeGreaterThanOrEqual(4); // L1「批注标注」passed 需 ≥2，远超
+    expect(epCount).toBeGreaterThanOrEqual(4); // ep/mk 高(实尺度~95%)→L1 批注标注 score 接近满
+    // 批注交互脚本（与 demo/page 契约一致）
+    expect(html).toContain("type:'element-click'");
+    expect(html).toContain('data-module-key');
+    expect(html).toContain('annotation-highlight');
+    expect(html).toContain("d.type==='highlight-element'");
+    // 侧栏导航不挂 data-module-key（不拦截切页）
+    expect(html).not.toMatch(/class="nav"[^>]*data-module-key/);
+  });
+
   // 第 7 块 qa（ADR-0008 D6 生成器词汇生长）：问答/聊天界面
   it('qa 块产出聊天界面：输入+发送+ask 自动回复+上报 create', () => {
     const html = renderBlock({ type: 'qa', bind: { resource: 'consult' }, props: { title: '在线咨询', escalateLabel: '上报管理员' } }, 'qa1');
