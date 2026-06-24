@@ -59,8 +59,10 @@ export class SensorService {
       const { demoHtml } = await this.loadProjectDemo(projectId);
       const project = await this.prisma.project.findUnique({
         where: { id: projectId },
-        select: { planSummary: true, structuredRequirement: true },
+        select: { planSummary: true, structuredRequirement: true, backendRuntime: true },
       });
+      // ADR-0008：后端底座（若依）已置备 → backend 类需求按置备信用、不拿 HTML 判
+      const backendReady = (project?.backendRuntime as any)?.status === 'ready';
       if (demoHtml) {
         try {
           reports.push(await this.crossValidator.validate(
@@ -72,6 +74,7 @@ export class SensorService {
         try {
           reports.push(await this.traceValidator.validate(
             projectId, demoHtml, project?.planSummary, project?.structuredRequirement,
+            { backendReady },
           ));
         } catch (e) { this.logger.warn(`TraceabilityValidator 失败: ${e}`); }
       }

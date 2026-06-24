@@ -4,6 +4,7 @@ import { SensorService } from '../../sensors/sensor.service';
 import { LlmGatewayService } from '../../integrations/llm/llm-gateway.service';
 import { FusedReport } from '../../sensors/sensor-report.interface';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
+import { inferFulfillment, Fulfillment } from '../../sensors/capability-provenance';
 
 export type ScenarioStatus = 'pass' | 'fail' | 'manual';
 
@@ -18,6 +19,8 @@ export interface ScenarioVerification {
   coverage: string[];
   /** 来源资料(provenance)，从场景沿用 */
   provenance: string[];
+  /** 能力来源(ADR-0008)：self 判 HTML / backend 认置备 / external·deferred 受控放行不计分 */
+  fulfilledBy?: Fulfillment;
   status: ScenarioStatus;
   /** 逐条检查证据（语义判定 + 命中的传感器检查） */
   checks: Array<{ source: string; name: string; passed: boolean; detail?: string }>;
@@ -84,11 +87,37 @@ export class AcceptanceVerificationService {
         return null;
       });
 
+    // ADR-0008 D5：后端底座(若依)已置备 → backend 类场景按置备信用、不拿 HTML 判
+    const backendReady = (project.backendRuntime as any)?.status === 'ready';
+
     const verifiedAt = new Date().toISOString();
     const results: ScenarioVerification[] = scenarios.map((s, i) => {
+      const fulfilledBy = inferFulfillment(`${s.name} ${s.then}`).fulfilledBy;
       const v = verdicts?.[i];
-      const status: ScenarioStatus = v?.status ?? 'manual';
-      const checks = this.collectChecks(s, fused, v?.evidence);
+      let status: ScenarioStatus;
+      let evidence: string;
+      if (fulfilledBy === 'backend') {
+        // 后端底座能力：HTML 看不见 → 按置备信用，未置备记待人工（不假阳性）
+        status = backendReady ? 'pass' : 'manual';
+        evidence = backendReady ? '后端底座能力（若依已置备），按置备信用、不以 HTML 判' : '后端底座能力，待后端置备（HTML 不该判此项）';
+      } else if (fulfilledBy === 'external') {
+        // 外部能力：受控放行、非未实现，不计入通过率分母
+        const protocol = inferFulfillment(`${s.name} ${s.then}`).protocol ?? 'generic';
+        status = 'manual';
+        evidence = `外部能力待对接（${protocol}）—— 受控放行、留标准端口+备忘录，非未实现，不计入通过率`;
+      } else if (fulfilledBy === 'deferred') {
+        status = 'manual';
+        evidence = '本期不做 / 品类外，移出验收通过率分母';
+      } else {
+        // self：判 demo HTML（LLM 语义判定）
+        status = v?.status ?? 'manual';
+        evidence = v?.evidence
+          ? v.evidence
+          : verdicts
+            ? '语义判定未给出明确结论，需人工确认'
+            : '验收判定服务暂不可用，需人工确认';
+      }
+      const checks = this.collectChecks(s, fused, fulfilledBy === 'self' ? v?.evidence : evidence);
       return {
         scenarioName: s.name,
         given: s.given,
@@ -97,13 +126,10 @@ export class AcceptanceVerificationService {
         priority: s.priority,
         coverage: s.coverage,
         provenance: s.provenance,
+        fulfilledBy,
         status,
         checks,
-        evidence: v?.evidence
-          ? v.evidence
-          : verdicts
-            ? '语义判定未给出明确结论，需人工确认'
-            : '验收判定服务暂不可用，需人工确认',
+        evidence,
         verifiedAt,
       };
     });
@@ -195,7 +221,7 @@ export class AcceptanceVerificationService {
   private async load(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, orgId: true, demoHtml: true, description: true },
+      select: { id: true, userId: true, orgId: true, demoHtml: true, description: true, backendRuntime: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     assertResourceAccess(project, userId, orgId);
@@ -301,10 +327,17 @@ export class AcceptanceVerificationService {
     return checks;
   }
 
+  /**
+   * 通过率（ADR-0008 D5）：只对 self + backend 计分；external/deferred 受控放行、移出分母。
+   * 旧数据无 fulfilledBy → 视为 self（向后兼容，口径与改造前一致）。
+   * 全是 external/deferred（无可阻断项）→ 视为达标 1。
+   */
   private computePassRate(results: ScenarioVerification[]): number {
     if (results.length === 0) return 0;
-    const passed = results.filter((r) => r.status === 'pass').length;
-    return Math.round((passed / results.length) * 1000) / 1000;
+    const scored = results.filter((r) => (r.fulfilledBy ?? 'self') === 'self' || r.fulfilledBy === 'backend');
+    if (scored.length === 0) return 1;
+    const passed = scored.filter((r) => r.status === 'pass').length;
+    return Math.round((passed / scored.length) * 1000) / 1000;
   }
 
   private async persist(

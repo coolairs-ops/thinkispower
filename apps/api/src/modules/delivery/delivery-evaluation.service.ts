@@ -95,8 +95,9 @@ export class DeliveryEvaluationService {
     if (!gate.allowed) {
       const pct = Math.round((gate.passRate ?? 0) * 100);
       const need = Math.round(gate.threshold * 100);
+      // 只列真正阻断交付的 self/backend 场景；external/deferred 受控放行、不算阻断（ADR-0008 D5）
       const blockers = gate.report.scenarios
-        .filter((s) => s.status !== 'pass')
+        .filter((s) => s.status !== 'pass' && ((s.fulfilledBy ?? 'self') === 'self' || s.fulfilledBy === 'backend'))
         .slice(0, 5)
         .map((s) => `「${s.scenarioName}」${s.status === 'fail' ? '未通过' : '待人工'}`)
         .join('、');
