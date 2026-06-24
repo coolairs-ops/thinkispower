@@ -5,6 +5,7 @@ import { LlmGatewayService } from '../../integrations/llm/llm-gateway.service';
 import { FusedReport } from '../../sensors/sensor-report.interface';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { inferFulfillment, Fulfillment } from '../../sensors/capability-provenance';
+import { condenseHtmlForJudge } from '../../sensors/html-condense';
 
 export type ScenarioStatus = 'pass' | 'fail' | 'manual';
 
@@ -248,6 +249,15 @@ export class AcceptanceVerificationService {
       }));
   }
 
+  /**
+   * 把 demo HTML 压成"可判定语义"再喂 LLM——去掉 `<style>` 主题/CSS 噪声（对'功能是否实现'判定无意义、白占预算），
+   * 上限放宽到 36000：原 12000 会把靠后的页整段截掉 → 后半页(如多页 demo 的聊天/咨询页)被假判未实现/待人工。
+   * 保留 HTML 结构 + `<script>`（appData 绑定是"接口存在"的证据）。
+   */
+  private condenseForJudge(html: string): string {
+    return condenseHtmlForJudge(html);
+  }
+
   /** 批量语义判定：返回与入参等长的 [{status, evidence}]；无法解析则返回 null(全部待人工) */
   private async judge(
     scenarios: Array<{ name: string; given: string; when: string; then: string }>,
@@ -269,7 +279,7 @@ export class AcceptanceVerificationService {
 
     const raw = await this.llm.chat(
       'text-validator',
-      { system, user: `验收场景：\n${list}\n\n产品实现(HTML，可能截断)：\n${demoHtml.slice(0, 12000)}\n\n项目描述：${description.slice(0, 1000)}` },
+      { system, user: `验收场景：\n${list}\n\n产品实现(HTML，可能截断)：\n${this.condenseForJudge(demoHtml)}\n\n项目描述：${description.slice(0, 1000)}` },
       { temperature: 0.1, maxTokens: 2048 },
     );
 

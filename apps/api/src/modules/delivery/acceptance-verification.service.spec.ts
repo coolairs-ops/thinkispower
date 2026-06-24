@@ -171,4 +171,16 @@ describe('AcceptanceVerificationService', () => {
     const r = await service.verify('u1', null, 'p1');
     expect(r.passRate).toBe(0.5);
   });
+
+  it('condenseForJudge：去 <style> 噪声 + 覆盖 12000 字之后的内容（修长 demo 后半页假判）', async () => {
+    const lateMarker = 'LATE_CHAT_MARKER_在线咨询';
+    const html = '<!DOCTYPE html><style>' + 'z'.repeat(6000) + '</style><body>' + 'A'.repeat(13000) + '<section>' + lateMarker + '</section></body>';
+    prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'u1', demoHtml: html, description: '', backendRuntime: null });
+    llm.chat.mockResolvedValue(JSON.stringify({ verdicts: [{ index: 1, status: 'pass', evidence: 'ok' }, { index: 2, status: 'pass', evidence: 'ok' }] }));
+
+    await service.verify('u1', null, 'p1');
+    const userMsg: string = llm.chat.mock.calls[0][1].user;
+    expect(userMsg).not.toContain('zzzzz'); // <style> CSS 噪声被剥
+    expect(userMsg).toContain(lateMarker); // 12000 字后的内容仍进判定（原 slice(0,12000) 会丢）
+  });
 });
