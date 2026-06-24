@@ -27,6 +27,7 @@ export function renderBlock(block: Block, id: string): string {
     case 'detail': return detailBlock(block, id);
     case 'form': return formBlock(block, id);
     case 'generate': return generateBlock(block, id);
+    case 'qa': return qaBlock(block, id);
     case 'richtext': return richtextBlock(block);
     default: return '';
   }
@@ -84,6 +85,31 @@ function generateBlock(b: Extract<Block, { type: 'generate' }>, id: string): str
     + `<div style="margin-top:12px"><button class="btn" id="${id}-gen"><i class="ti ti-wand"></i> ${button}</button></div>`
     + `<div id="${id}-out" class="card" style="margin-top:14px;display:none"></div></div>`
     + `<script>(function(){var C=${C},btn=document.getElementById('${id}-gen');if(!btn)return;btn.addEventListener('click',function(){if(!window.appData)return;var inp=document.getElementById('${id}-in'),out=document.getElementById('${id}-out'),d={};d[C.field]=inp?inp.value:'';btn.disabled=true;window.appData.create(C.resource,d).then(function(){btn.disabled=false;if(out){out.style.display='block';out.textContent='已生成并保存。';}}).catch(function(){btn.disabled=false;if(out){out.style.display='block';out.textContent='生成失败，请重试。';}});});})();</script>`;
+}
+
+/**
+ * 第 7 块（ADR-0008 D6 生成器词汇生长）：问答/聊天交互界面。
+ * 自动回复：发送 → appData.ask(q) 渲染答案；未知问题：点「上报」→ appData.create(resource,{question,status:'escalated'}) 落库转人工。
+ * 知识库为空时优雅降级（提示未找到、引导上报），不报错。
+ */
+function qaBlock(b: Extract<Block, { type: 'qa' }>, id: string): string {
+  const C = jcfg({ resource: b.bind.resource });
+  const title = b.props?.title ? `<div class="h1">${esc(b.props.title)}</div>` : '';
+  const placeholder = esc(b.props?.placeholder ?? '请输入你的问题…');
+  const escLabel = esc(b.props?.escalateLabel ?? '上报人工');
+  return title + `<div class="card" style="display:flex;flex-direction:column;height:420px">`
+    + `<div id="${id}-log" style="flex:1;overflow-y:auto;padding:4px 2px;display:flex;flex-direction:column;gap:10px"></div>`
+    + `<div style="display:flex;gap:8px;margin-top:10px">`
+    + `<input id="${id}-q" placeholder="${placeholder}" style="flex:1;height:38px;padding:0 12px;border:.5px solid var(--t-card-border);border-radius:20px;background:var(--t-card);color:var(--t-text)"/>`
+    + `<button class="btn" id="${id}-send">发送</button>`
+    + `<button class="btn" id="${id}-esc" style="background:var(--t-card);color:var(--t-text);border:.5px solid var(--t-card-border)">${escLabel}</button>`
+    + `</div></div>`
+    + `<script>(function(){var C=${C};var log=document.getElementById('${id}-log'),q=document.getElementById('${id}-q'),send=document.getElementById('${id}-send'),escb=document.getElementById('${id}-esc');if(!log||!q)return;`
+    + `function bubble(t,who){var d=document.createElement('div');d.style.cssText='max-width:78%;padding:8px 12px;border-radius:12px;font-size:13px;'+(who==='me'?'align-self:flex-end;background:var(--t-primary);color:#fff':'align-self:flex-start;background:var(--t-card);border:.5px solid var(--t-card-border);color:var(--t-text)');d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight;}`
+    + `function ask(){var text=(q.value||'').trim();if(!text||!window.appData)return;bubble(text,'me');q.value='';var p=window.appData.ask?window.appData.ask(text):Promise.resolve(null);Promise.resolve(p).then(function(r){var a=r&&(r.answer||r.text||r.reply);bubble(a?a:'未在知识库找到答案，可点「${escLabel}」上报人工。','bot');}).catch(function(){bubble('暂时无法回答，请稍后重试或上报。','bot');});}`
+    + `send&&send.addEventListener('click',ask);q.addEventListener('keydown',function(e){if(e.key==='Enter')ask();});`
+    + `escb&&escb.addEventListener('click',function(){var text=(q.value||'').trim()||'用户未知问题';if(!window.appData||!window.appData.create)return;window.appData.create(C.resource,{question:text,status:'escalated'}).then(function(){bubble('已上报人工处理，我们会尽快回复。','bot');}).catch(function(){bubble('上报失败，请重试。','bot');});});`
+    + `})();</script>`;
 }
 
 function richtextBlock(b: Extract<Block, { type: 'richtext' }>): string {

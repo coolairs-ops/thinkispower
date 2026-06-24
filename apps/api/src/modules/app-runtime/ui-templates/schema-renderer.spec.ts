@@ -81,4 +81,16 @@ describe('renderSchema (Schema 驱动 S1 确定性块渲染器)', () => {
     expect(renderBlock({ type: 'detail', bind: { resource: 'r', fields: ['a'] } }, 'i')).toContain('appData.list');
     expect(renderBlock({ type: 'form', bind: { resource: 'r', fields: ['a'] } }, 'i')).toContain('appData.create');
   });
+
+  // 第 7 块 qa（ADR-0008 D6 生成器词汇生长）：问答/聊天界面
+  it('qa 块产出聊天界面：输入+发送+ask 自动回复+上报 create', () => {
+    const html = renderBlock({ type: 'qa', bind: { resource: 'consult' }, props: { title: '在线咨询', escalateLabel: '上报管理员' } }, 'qa1');
+    expect(html).toContain('在线咨询');
+    expect(html).toContain('qa1-send'); // 发送按钮
+    expect(html).toContain('qa1-q'); // 输入框
+    expect(html).toContain('appData.ask'); // 自动回复（知识库问答）
+    expect(html).toContain("appData.create"); // 未知问题上报落库
+    expect(html).toContain('上报管理员');
+    expect(html).toContain("status:'escalated'");
+  });
 });

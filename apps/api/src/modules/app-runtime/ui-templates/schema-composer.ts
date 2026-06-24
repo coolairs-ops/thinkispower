@@ -9,7 +9,7 @@ import { DataContract, contractPromptBlock } from '../app-contract';
  * / 契约外字段）确定性丢弃；产物全废则退回 fallbackSchema（从契约确定性推默认页）。
  */
 
-const BLOCK_TYPES: BlockType[] = ['kpi', 'table', 'detail', 'form', 'generate', 'richtext'];
+const BLOCK_TYPES: BlockType[] = ['kpi', 'table', 'detail', 'form', 'generate', 'qa', 'richtext'];
 const GENERIC_TABLES = new Set(['user', 'users', 'account', 'accounts', 'auth', 'role', 'roles', 'permission', 'permissions', 'sysuser', 'session']);
 
 const slug = (s: string, i: number): string =>
@@ -39,6 +39,7 @@ function coerceProps(type: BlockType, props: Record<string, unknown>, fields: st
     case 'detail': return clean({ title });
     case 'form': return clean({ title, mode: props.mode === 'edit' ? 'edit' : undefined, submitLabel: s(props.submitLabel) });
     case 'generate': return clean({ title, inputField: s(props.inputField), inputLabel: s(props.inputLabel), button: s(props.button) });
+    case 'qa': return clean({ title, placeholder: s(props.placeholder), escalateLabel: s(props.escalateLabel) });
     default: return undefined;
   }
 }
@@ -68,6 +69,8 @@ function coerceBlock(b: unknown, idx: Map<string, { name: string; fields: string
   }
 
   if (type === 'kpi') return { type, bind: { resource: res.name }, props: { label: String((props.label as string) || `${res.name} 总数`) } };
+  // qa（问答/聊天）只绑资源（落上报、不需字段列表）
+  if (type === 'qa') return { type, bind: { resource: res.name }, props: coerceProps('qa', props, fields) } as Block;
   return { type, bind: { resource: res.name, fields }, props: coerceProps(type, props, fields) } as Block;
 }
 
@@ -148,6 +151,7 @@ const BLOCK_LIBRARY = [
   '- detail：单条详情。{ "type":"detail", "bind":{"resource","fields"}, "props":{"title"} }',
   '- form：录入/编辑表单。{ "type":"form", "bind":{"resource","fields"}, "props":{"title","submitLabel"} }',
   '- generate：输入→生成并保存。{ "type":"generate", "bind":{"resource","fields"}, "props":{"title","inputLabel","button"} }',
+  '- qa：问答/聊天交互界面（客服咨询/智能问答/自动回复场景用）。发送→自动回复，未知问题可上报人工。{ "type":"qa", "bind":{"resource"}, "props":{"title","placeholder","escalateLabel"} } —— resource 取存放咨询/上报记录的资源。',
   '- richtext：说明性 HTML。{ "type":"richtext", "props":{"html"} }',
   '硬约束：bind.resource 只能取数据契约里的资源名；fields 只能取该资源列出的字段。禁止臆造资源/字段。',
   'tabler 图标名填 nav.icon（如 layout-dashboard/users/login/books）。每页 2~5 个块，贴合该页职责。',

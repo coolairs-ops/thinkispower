@@ -19,6 +19,9 @@ export type Block =
   | { type: 'detail'; bind: Bind; props?: { title?: string } }
   | { type: 'form'; bind: Bind; props?: { title?: string; mode?: 'create' | 'edit'; submitLabel?: string } }
   | { type: 'generate'; bind: Bind; props?: { title?: string; inputField?: string; inputLabel?: string; button?: string } }
+  // 第 7 块（ADR-0008 D6 生成器词汇生长）：问答/聊天交互界面。
+  // 自动回复走 appData.ask；未知问题点「上报」→ appData.create(resource) 落库给人工。
+  | { type: 'qa'; bind: { resource: string }; props?: { title?: string; placeholder?: string; escalateLabel?: string } }
   | { type: 'richtext'; props: { html: string } };
 
 export type BlockType = Block['type'];

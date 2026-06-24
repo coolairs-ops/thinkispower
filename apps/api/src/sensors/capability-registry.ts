@@ -54,7 +54,8 @@ export const CAPABILITY_REGISTRY: CapabilityEntry[] = [
 
   // ── 🔴 生成器缺口：是 self（前端 UI）但当前 6 块（kpi/table/detail/form/generate/richtext）产不出 →
   //    走 gap_workflow「扩生成器词汇」补 block，而非让自迭代空转撞墙（ADR-0008 D6 实测 91df174a 印证）。
-  { capId: 'PLG-chat-qa', name: '问答/聊天交互界面', category: '生成器缺口', maturity: 'red', fulfillment: 'self',
+  // PLG-chat-qa：2026-06-24 补了第 7 块 qa（block-renderer.qaBlock）→ maturity 🔴→🟢，生成器现已能产问答/聊天界面。
+  { capId: 'PLG-chat-qa', name: '问答/聊天交互界面', category: '通用业务', maturity: 'green', fulfillment: 'self',
     match: /(聊天|对话界面|在线客服|智能客服|客服问答|智能问答|在线问答|问答界面|问答交互|消息气泡|自动回复)/u },
   { capId: 'PLG-wizard', name: '多步向导/分步表单', category: '生成器缺口', maturity: 'red', fulfillment: 'self',
     match: /(分步向导|多步向导|多步表单|步骤引导|向导式|wizard)/u },

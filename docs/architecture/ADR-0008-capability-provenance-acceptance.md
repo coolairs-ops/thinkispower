@@ -125,7 +125,12 @@ interface IndustryRulePack { evaluate(facts): Promise<{ verdict: string; evidenc
 1. [x] **（S1，已落）** 能力来源分类器 `capability-provenance.ts`（`inferFulfillment`）+ 权威源 `capability-registry.ts`（catalog+maturity，由 `platform-capability-overview.md` 形式化；注册表优先/关键词兜底）。
 2. [x] **（S2，已落）** `TraceabilityValidator.validate` 按 `fulfilledBy` 分流：self→HTML、backend→认置备(`backendRuntime.status==='ready'`)、external→待对接移出分母、deferred→移出分母。
 3. [x] **（S3，已落）** `acceptance-verification.verify` 按 `fulfilledBy` 分流（self 判 HTML / backend 认 `backendRuntime.status==='ready'` / external·deferred 受控放行）；`computePassRate` 把 external·deferred 移出分母 → `gate()` 自然成三态分桶（旧数据无 fulfilledBy 视为 self、向后兼容）；`productionDeliver` 阻断清单也排除 external·deferred。
-4. [ ] **（D6 近期·客户自助化）** 缺口处置策略接线：`self`+must 的 manual → 自动触发自迭代（带 N 轮刹车，卡住才升级人工）；`external` → 不进迭代、转工单；`data` → 引导上传；前端"客户视图"把 manual/未实现按 `fulfilledBy` 渲成动作卡（一键补建/上传材料/已登记待对接），不暴露 pass/manual/裁定术语。
+4. [x] **（D6 Step1+2，已落）** catalog 补"生成器缺口"条目（`capability-registry` 加 self+maturity=red 的 chat-qa/wizard/chart/kanban/calendar/flow——是前端 UI 但当前 6 块产不出）；`ProvenanceVerdict` 加 `maturity`；`gap-disposition.ts` 的 `disposeGap` 路由：self+green→auto-iterate / self+red→extend-generator（不进自迭代）/ external→external-adapter / backend→backend-provision / deferred→out-of-scope。
+5. [x] **（D6 Step3 生成器词汇生长·首例，已落）** 加第 7 块 `qa`（问答/聊天交互界面）：`page-schema.types`+`block-renderer.qaBlock`（发送→`appData.ask` 自动回复、未知→`appData.create` 上报）+`schema-composer`（BLOCK_TYPES/coerce/prompt）。`PLG-chat-qa` maturity 🔴→🟢——印证"补一块 block、所有客服类项目永久受益"的复利路径。
+6. [ ] **（D6 近期·客户自助化接线）** `self`+must 的 manual → 自动触发自迭代（带 N 轮刹车）；`external`/`self-red` → 转 gap_workflow 工单（不进迭代）；`data` → 引导上传；前端"客户视图"把缺口按 `disposeGap` 渲成动作卡（一键补建/上传/已登记），不暴露内部术语。
+7. [ ] **（近期）** 规格物化时把 `fulfilledBy` 落到 `acceptanceScenarios[i]`（现为评估时即时推断，落库后人可覆盖）。
+8. [ ] **（中期）** 继续生成器词汇生长（按 gap_workflow 投票补 wizard/chart/kanban…）；Capability Port 接口族 + `NotConfiguredAdapter`（D3）；Gap Workflow 工单 + needed_by_count 聚合 + 《集成对接清单》（D4）。
+9. [ ] **（远期）** 各端口真适配器随客户对接逐个插；端口调用接 ADR-0004 计量；行业规则包多行业化；private-deploy 联邦注册表节点。
 5. [ ] **（近期）** 规格物化时把 `fulfilledBy` 落到 `acceptanceScenarios[i]`（现为评估时即时推断，落库后人可覆盖）。
 6. [ ] **（中期）** Capability Port 接口族 + `NotConfiguredAdapter`（speech/ocr/oa/rulepack），生成器在对应 UI 调端口、未配置优雅降级（D3）。
 7. [ ] **（中期）** Gap Workflow 缺口工单 + needed_by_count 聚合 + 《集成对接清单》渲染（D4）。
