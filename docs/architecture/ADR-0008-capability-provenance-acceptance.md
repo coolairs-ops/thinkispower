@@ -81,6 +81,25 @@ interface IndustryRulePack { evaluate(facts): Promise<{ verdict: string; evidenc
 
 呼应此前"90→100"的裁定：不在模糊融合分上追满分，换**确定性分桶门——每桶各自达标**，整体即"可交付"。综合评分(71)继续作内部迭代信号，不再充当交付闸。
 
+### D6｜缺口处置策略：确认必须→自迭代、provenance 分流、迭代带刹车、客户只接判断题
+验收/迭代发现"某条没做全"时，**默认不要把决定权丢给客户**——先按"该不该惊动人"分流。原则：**已确认的"必须"功能，客户早在规格阶段拍过板了，再问一遍是打扰**；"待人工/让客户判断"只留给**真正的判断题**（模糊、可选、"这样行不行"），不是所有 manual 都往那扔。
+
+**处置决策（验收得出 manual/未实现 → 怎么办）：**
+
+| 缺口类型（按 D1 provenance） | 处置 | 是否惊动客户 |
+|---|---|---|
+| `self` + 规格 must（如"售后问答界面"） | **静默自迭代到通过**（执行规格、非决策） | 否 |
+| `backend`（如"权限控制"） | 若依已置备 → 直接信用，不该冒出来 | 否 |
+| `external`（OCR/语音/实时客服 IM…） | 迭代**物理上做不出来** → 不空转，直接转 gap_workflow 工单 + 人工对接 | 仅告知 |
+| `data` 依赖（"自动回复"要知识库 FAQ） | 引导客户**上传材料**（出厂空结构铁律）——是"给料"非"做决策" | 是（给料） |
+| 真模糊/可选/判断题 | 才 `manual` 交人/客户裁定 | 是（判断） |
+
+**两条不变量：**
+1. **自迭代必须带刹车**：LLM 迭代会收敛不动（实测综合分卡 71 不升）。所以是"**自迭代 → 重验 → 过了静默完成；卡住 N 轮(建议 3)不过 → 升级到人工**"，**绝不无限循环**（否则闷头烧钱空转、客户以为在动）。external 类**根本不进自迭代循环**（迭代做不出来），直接走工单。
+2. **"建"不需许可、"判通过"需证据**（守住 ADR-0002 可信）：自动**构建**一个已确认的必须功能=只是执行规格、无需客户许可；但自动**判通过**仍要验证器看到真实证据——迭代完验证器确认到界面/行为才 pass，看不到就仍挂起。两件事分开：建可以闷头做，pass 不能瞎给。
+
+**收口**："待人工"从"啥都往这扔"收敛成"只接真正要人拍板的"；客户上线后看到的是**按 provenance 翻译好的下一步动作**（一键补建 / 上传材料 / 已登记待对接），而非内部的 pass/manual/fail 与裁定术语。这是运营层/客户自助化的策略基线（前端"客户视图"接线见 Action Items）。
+
 ---
 
 ## 边界（这条纪律管什么、不管什么）
@@ -106,10 +125,11 @@ interface IndustryRulePack { evaluate(facts): Promise<{ verdict: string; evidenc
 1. [x] **（S1，已落）** 能力来源分类器 `capability-provenance.ts`（`inferFulfillment`）+ 权威源 `capability-registry.ts`（catalog+maturity，由 `platform-capability-overview.md` 形式化；注册表优先/关键词兜底）。
 2. [x] **（S2，已落）** `TraceabilityValidator.validate` 按 `fulfilledBy` 分流：self→HTML、backend→认置备(`backendRuntime.status==='ready'`)、external→待对接移出分母、deferred→移出分母。
 3. [x] **（S3，已落）** `acceptance-verification.verify` 按 `fulfilledBy` 分流（self 判 HTML / backend 认 `backendRuntime.status==='ready'` / external·deferred 受控放行）；`computePassRate` 把 external·deferred 移出分母 → `gate()` 自然成三态分桶（旧数据无 fulfilledBy 视为 self、向后兼容）；`productionDeliver` 阻断清单也排除 external·deferred。
-4. [ ] **（近期）** 规格物化时把 `fulfilledBy` 落到 `acceptanceScenarios[i]`（现为评估时即时推断，落库后人可覆盖）。
-5. [ ] **（中期）** Capability Port 接口族 + `NotConfiguredAdapter`（speech/ocr/oa/rulepack），生成器在对应 UI 调端口、未配置优雅降级（D3）。
-6. [ ] **（中期）** Gap Workflow 缺口工单 + needed_by_count 聚合 + 《集成对接清单》渲染（D4）。
-7. [ ] **（远期）** 各端口真适配器随客户对接逐个插；端口调用接 ADR-0004 计量；行业规则包多行业化；private-deploy 联邦注册表节点。
+4. [ ] **（D6 近期·客户自助化）** 缺口处置策略接线：`self`+must 的 manual → 自动触发自迭代（带 N 轮刹车，卡住才升级人工）；`external` → 不进迭代、转工单；`data` → 引导上传；前端"客户视图"把 manual/未实现按 `fulfilledBy` 渲成动作卡（一键补建/上传材料/已登记待对接），不暴露 pass/manual/裁定术语。
+5. [ ] **（近期）** 规格物化时把 `fulfilledBy` 落到 `acceptanceScenarios[i]`（现为评估时即时推断，落库后人可覆盖）。
+6. [ ] **（中期）** Capability Port 接口族 + `NotConfiguredAdapter`（speech/ocr/oa/rulepack），生成器在对应 UI 调端口、未配置优雅降级（D3）。
+7. [ ] **（中期）** Gap Workflow 缺口工单 + needed_by_count 聚合 + 《集成对接清单》渲染（D4）。
+8. [ ] **（远期）** 各端口真适配器随客户对接逐个插；端口调用接 ADR-0004 计量；行业规则包多行业化；private-deploy 联邦注册表节点。
 
 ---
 
