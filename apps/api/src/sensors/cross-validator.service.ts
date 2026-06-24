@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QwenClient } from './qwen-client.service';
 import { SensorReport, SensorCheck } from './sensor-report.interface';
+import { condenseHtmlForJudge } from './html-condense';
 
 const CROSS_VALIDATE_PROMPT = `你是一个独立的软件质量评估专家。另一名 AI 工程师生成了以下代码/HTML。请从以下维度独立评估其质量，给出客观评分。
 
@@ -63,7 +64,7 @@ export class CrossValidator {
             planSummary.slice(0, 4000),
             ``,
             `## Demo HTML（前 12000 字符）`,
-            demoHtml.slice(0, 12000),
+            condenseHtmlForJudge(demoHtml),
           ].join('\n'),
         },
       ], { temperature: 0.2, maxTokens: 2048 });

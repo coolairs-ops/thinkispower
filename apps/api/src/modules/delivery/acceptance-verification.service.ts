@@ -5,6 +5,7 @@ import { LlmGatewayService } from '../../integrations/llm/llm-gateway.service';
 import { FusedReport } from '../../sensors/sensor-report.interface';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { inferFulfillment, Fulfillment } from '../../sensors/capability-provenance';
+import { condenseHtmlForJudge } from '../../sensors/html-condense';
 
 export type ScenarioStatus = 'pass' | 'fail' | 'manual';
 
@@ -254,7 +255,7 @@ export class AcceptanceVerificationService {
    * 保留 HTML 结构 + `<script>`（appData 绑定是"接口存在"的证据）。
    */
   private condenseForJudge(html: string): string {
-    return html.replace(/<style[\s\S]*?<\/style>/gi, '').slice(0, 36000);
+    return condenseHtmlForJudge(html);
   }
 
   /** 批量语义判定：返回与入参等长的 [{status, evidence}]；无法解析则返回 null(全部待人工) */

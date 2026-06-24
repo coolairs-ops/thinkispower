@@ -3,6 +3,7 @@ import { DeepseekService } from '../services/deepseek.service';
 import { QwenClient } from './qwen-client.service';
 import { SensorReport, SensorCheck } from './sensor-report.interface';
 import { inferFulfillment, Fulfillment } from './capability-provenance';
+import { condenseHtmlForJudge } from './html-condense';
 
 const TRACEABILITY_PROMPT = `你是一个需求追踪专家。检查以下 Demo HTML 是否完整实现了所有需求。
 
@@ -181,7 +182,7 @@ export class TraceabilityValidator {
       criteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n'),
       ``,
       `## Demo HTML（前 15000 字符）`,
-      demoHtml.slice(0, 15000),
+      condenseHtmlForJudge(demoHtml),
     ].join('\n');
 
     const response = await (evaluator as any).chat(
