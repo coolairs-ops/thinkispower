@@ -7,12 +7,14 @@
  * 纯函数、确定性、零副作用——决策逻辑可单测，与"真起后端/真探活"的副作用执行解耦。
  */
 
-export type DeliveryStatus = 'completed' | 'build_failed' | 'smoke_failed' | 'deploy_failed' | 'preview_only';
+export type DeliveryStatus = 'completed' | 'build_failed' | 'contract_violation' | 'smoke_failed' | 'deploy_failed' | 'preview_only';
 export type DeployResultStatus = 'deployed' | 'static_only' | 'deploy_failed' | 'not_deployed';
 
 export interface DeliveryGateInput {
   /** D2：交付代码真编译过没（npx tsc） */
   compilationPassed: boolean;
+  /** D3：契约一致——前端 appData 调的资源 ⊆ 后端真契约。false=越界(上线必 404)；undefined=无契约可查、不拦 */
+  contractConformant?: boolean;
   /** D4：部署结果——deployed=容器真起来并健康；static_only=Docker不可用降级；其余=失败 */
   deployStatus: DeployResultStatus;
   /** deployStatus==='deployed' 时的真实可访问 URL */
@@ -39,6 +41,11 @@ export function decideDeliveryOutcome(i: DeliveryGateInput): DeliveryOutcome {
   // ── D2 编译门：编译不过，绝不上线 ──
   if (!i.compilationPassed) {
     return { status: 'build_failed', productionUrl: null, reason: '编译未通过，不予上线' };
+  }
+
+  // ── D3 契约门：前端调了后端不存在的资源 → 上线必 404，不予上线 ──
+  if (i.contractConformant === false) {
+    return { status: 'contract_violation', productionUrl: null, reason: '前端 appData 调用越界后端真契约（上线必 404）' };
   }
 
   // ── 运行时真证据①：容器真部署起来并健康 ──

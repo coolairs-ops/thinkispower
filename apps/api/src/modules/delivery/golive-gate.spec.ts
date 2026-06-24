@@ -9,6 +9,17 @@ describe('decideDeliveryOutcome（上线门确定性二值合取 · ADR-0009）'
     expect(r.productionUrl).toBeNull();
   });
 
+  it('编译过但契约越界(contractConformant=false) → contract_violation，不上线', () => {
+    const r = decideDeliveryOutcome({ ...base, deployStatus: 'deployed', deployedUrl: 'http://live', smokePassed: true, contractConformant: false });
+    expect(r.status).toBe('contract_violation');
+    expect(r.productionUrl).toBeNull();
+  });
+
+  it('契约未提供(undefined)→不拦，按其它门走 → completed', () => {
+    const r = decideDeliveryOutcome({ ...base, deployStatus: 'deployed', deployedUrl: 'http://live' });
+    expect(r.status).toBe('completed');
+  });
+
   it('编译过 + 部署健康 + 冒烟通过 → completed（真上线 URL）', () => {
     const r = decideDeliveryOutcome({ ...base, deployStatus: 'deployed', deployedUrl: 'http://live', smokePassed: true });
     expect(r.status).toBe('completed');
@@ -47,6 +58,7 @@ describe('decideDeliveryOutcome（上线门确定性二值合取 · ADR-0009）'
   it('核心红线：跑不起来的任何情形都不会得到 completed', () => {
     const notRunnable = [
       decideDeliveryOutcome({ ...base, compilationPassed: false }),
+      decideDeliveryOutcome({ ...base, deployStatus: 'deployed', deployedUrl: 'http://x', contractConformant: false }),
       decideDeliveryOutcome({ ...base, deployStatus: 'static_only' }),
       decideDeliveryOutcome({ ...base, deployStatus: 'deploy_failed' }),
       decideDeliveryOutcome({ ...base, deployStatus: 'deployed', deployedUrl: 'http://x', smokePassed: false }),

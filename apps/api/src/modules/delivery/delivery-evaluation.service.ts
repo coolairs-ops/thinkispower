@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
@@ -15,6 +15,8 @@ import { AcceptanceVerificationService } from './acceptance-verification.service
 import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { decideDeliveryOutcome, DeployResultStatus } from './golive-gate';
+import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
+import { buildDataContract, checkContractConformance } from '../app-runtime/app-contract';
 
 @Injectable()
 export class DeliveryEvaluationService {
@@ -32,6 +34,7 @@ export class DeliveryEvaluationService {
     private acceptance: AcceptanceVerificationService,
     private ruoyiProvision: RuoyiProvisionService,
     @InjectQueue(DELIVERY_QUEUE) private deliveryQueue: Queue,
+    @Optional() private schema?: SchemaMigrationService,
   ) {}
 
   /** 请求评估 — 只分析不交付，返回风险+修复建议 */
@@ -275,10 +278,20 @@ export class DeliveryEvaluationService {
       }
 
       // ═══ 上线门（ADR-0009 确定性二值合取）：编译 ∧ 运行时真证据(部署健康/后端就绪) ∧ 冒烟不为假 → completed ═══
-      const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+      const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true, dataModel: true, demoHtml: true } });
       const backendReady = (proj?.backendRuntime as any)?.status === 'ready'; // 若依后端真就绪=路-若依的"真起来+真探活"证据
+      // D3 契约门：交付前端 appData 调的资源 ⊆ 后端真契约（越界=上线必404）。无 schema服务/模型/demo → 不可查、不拦
+      let contractConformant: boolean | undefined;
+      if (this.schema && proj?.dataModel && proj?.demoHtml) {
+        try {
+          const contract = buildDataContract(this.schema.parseAndValidate(proj.dataModel));
+          const conf = checkContractConformance(proj.demoHtml, contract);
+          contractConformant = conf.ok;
+          if (!conf.ok) this.logger.warn(`[契约门] 越界资源(上线必404): ${conf.unknownResources.join('、')}`);
+        } catch (e) { this.logger.warn(`[契约门] 校验异常(不拦): ${e}`); }
+      }
       const staticUrl = `${process.env['APP_BASE_URL'] || 'http://localhost:3001'}/api/deploy/${projectId}`;
-      const outcome = decideDeliveryOutcome({ compilationPassed, deployStatus, deployedUrl: deployedUrl || undefined, smokePassed, backendReady, staticUrl });
+      const outcome = decideDeliveryOutcome({ compilationPassed, contractConformant, deployStatus, deployedUrl: deployedUrl || undefined, smokePassed, backendReady, staticUrl });
 
       // Build 记录据实写（编译过没），不再恒 success
       const latestBuild = await this.prisma.build.findFirst({ where: { projectId }, orderBy: { version: 'desc' }, select: { version: true } });
@@ -293,7 +306,7 @@ export class DeliveryEvaluationService {
 
       // 状态诚实：只有四门全过才 completed(=真上线)；否则如实置失败/仅预览态，绝不冒充"已上线"
       const labelMap: Record<string, string> = {
-        completed: '已上线', preview_only: '仅预览·未上线', build_failed: '编译失败', smoke_failed: '冒烟未通过', deploy_failed: '部署失败',
+        completed: '已上线', preview_only: '仅预览·未上线', build_failed: '编译失败', contract_violation: '前端契约越界', smoke_failed: '冒烟未通过', deploy_failed: '部署失败',
       };
       await this.prisma.project.update({
         where: { id: projectId },
