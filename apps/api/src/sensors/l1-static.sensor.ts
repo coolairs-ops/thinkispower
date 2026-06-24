@@ -13,15 +13,19 @@ export class L1StaticSensor {
 
     // 1. HTML 结构完整性
     const struct = await this.qualityGate.runAllChecks(projectId, demoHtml);
+    // 修：质量门里这条叫 'HTML结构完整性'，原来查 'HTML结构' 永远 find 不到 → 恒判 0（误报"页面结构需要优化"）。
+    const htmlStruct = struct.checks.find(c => c.name === 'HTML结构完整性');
     checks.push({
       name: 'HTML结构',
-      passed: struct.checks.find(c => c.name === 'HTML结构')?.passed ?? false,
-      score: struct.checks.find(c => c.name === 'HTML结构')?.passed ? 100 : 0,
-      weight: 20,
-      detail: struct.checks.find(c => c.name === 'HTML结构')?.detail,
+      passed: htmlStruct?.passed ?? false,
+      score: htmlStruct?.passed ? 100 : 0,
+      weight: 25,
+      detail: htmlStruct?.detail,
     });
 
     // 2. 批注标注覆盖率
+    // 注意：这条算的是"批注挂载点(data-module-key 钩子)是否由生成器发出"，**不是用户批注活动**。
+    // 钩子在 ≠ 质量高，只是代理指标 → 降权(原 20)：批注 + 模块覆盖率合计从 30% 降到 10%，权重还给真信号(结构/交互/无占位)。
     const annotationCount = (demoHtml.match(/data-module-key=/g) || []).length;
     const elementCount = (demoHtml.match(/data-element-path=/g) || []).length;
     const annotationScore = Math.min(100, Math.round((elementCount / Math.max(annotationCount, 1)) * 100));
@@ -29,7 +33,7 @@ export class L1StaticSensor {
       name: '批注标注',
       passed: annotationCount >= 2,
       score: annotationScore,
-      weight: 20,
+      weight: 5,
       detail: `${annotationCount}个模块, ${elementCount}个元素路径标注`,
     });
 
@@ -38,7 +42,7 @@ export class L1StaticSensor {
       name: '导航交互',
       passed: struct.checks.find(c => c.name === '导航交互')?.passed ?? false,
       score: struct.checks.find(c => c.name === '导航交互')?.passed ? 100 : 0,
-      weight: 15,
+      weight: 20,
     });
 
     // 4. 待办内容检查
@@ -47,7 +51,7 @@ export class L1StaticSensor {
       name: '无残留待办',
       passed: placeholderCheck?.passed ?? true,
       score: placeholderCheck?.passed ? 100 : 0,
-      weight: 15,
+      weight: 20,
       detail: placeholderCheck?.detail,
     });
 
@@ -68,7 +72,7 @@ export class L1StaticSensor {
       name: '脚本完整性',
       passed: !unclosedScripts,
       score: unclosedScripts ? 0 : 100,
-      weight: 10,
+      weight: 15,
       detail: unclosedScripts ? 'script 标签数量不匹配（有未闭合标签）' : '正常',
     });
 
@@ -80,7 +84,7 @@ export class L1StaticSensor {
       name: '模块覆盖率',
       passed: coveragePassed,
       score: sectionCount > 0 ? Math.min(100, Math.round((annotationCount / sectionCount) * 100)) : 100,
-      weight: 10,
+      weight: 5,
       detail: `${annotationCount}个标注 / ${sectionCount}个语义块`,
     });
 

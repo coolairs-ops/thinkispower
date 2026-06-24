@@ -123,7 +123,8 @@ export class QualityGateService {
   }
 
   private checkNavigation(html: string): QualityCheck {
-    const has = /navigate\(|onclick.*nav|showPage|router\.push|window\.location/i.test(html);
+    // 补 Schema 渲染器的导航signature：<section data-page> SPA 切页 + <a href="#key"> 侧栏锚点（原模式只认老 onclick/router 写法，误判 schema demo 无导航）。
+    const has = /navigate\(|onclick.*nav|showPage|router\.push|window\.location|data-page\s*=|href\s*=\s*["']#/i.test(html);
     return {
       name: '导航交互', category: 'structure', passed: has,
       score: has ? 100 : 0,
