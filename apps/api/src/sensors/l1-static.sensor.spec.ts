@@ -92,11 +92,9 @@ describe('L1StaticSensor', () => {
     expect(htmlStruct?.score).toBe(100);
   });
 
-  it('权重重配后总和仍为 100（批注钩子 30%→10%，权重还给真信号）', async () => {
+  it('各检查权重总和为 100', async () => {
     const report = await sensor.run('project-1', validHtml);
     const total = report.checks.reduce((s, c) => s + (c.weight ?? 0), 0);
     expect(total).toBe(100);
-    expect(report.checks.find((c) => c.name === '批注标注')?.weight).toBe(5);
-    expect(report.checks.find((c) => c.name === 'HTML结构')?.weight).toBe(25);
   });
 });

@@ -19,13 +19,11 @@ export class L1StaticSensor {
       name: 'HTML结构',
       passed: htmlStruct?.passed ?? false,
       score: htmlStruct?.passed ? 100 : 0,
-      weight: 25,
+      weight: 20,
       detail: htmlStruct?.detail,
     });
 
-    // 2. 批注标注覆盖率
-    // 注意：这条算的是"批注挂载点(data-module-key 钩子)是否由生成器发出"，**不是用户批注活动**。
-    // 钩子在 ≠ 质量高，只是代理指标 → 降权(原 20)：批注 + 模块覆盖率合计从 30% 降到 10%，权重还给真信号(结构/交互/无占位)。
+    // 2. 批注标注覆盖率（注：算的是"批注挂载点 data-module-key 是否由生成器发出"，非用户批注活动）
     const annotationCount = (demoHtml.match(/data-module-key=/g) || []).length;
     const elementCount = (demoHtml.match(/data-element-path=/g) || []).length;
     const annotationScore = Math.min(100, Math.round((elementCount / Math.max(annotationCount, 1)) * 100));
@@ -33,7 +31,7 @@ export class L1StaticSensor {
       name: '批注标注',
       passed: annotationCount >= 2,
       score: annotationScore,
-      weight: 5,
+      weight: 20,
       detail: `${annotationCount}个模块, ${elementCount}个元素路径标注`,
     });
 
@@ -42,7 +40,7 @@ export class L1StaticSensor {
       name: '导航交互',
       passed: struct.checks.find(c => c.name === '导航交互')?.passed ?? false,
       score: struct.checks.find(c => c.name === '导航交互')?.passed ? 100 : 0,
-      weight: 20,
+      weight: 15,
     });
 
     // 4. 待办内容检查
@@ -51,7 +49,7 @@ export class L1StaticSensor {
       name: '无残留待办',
       passed: placeholderCheck?.passed ?? true,
       score: placeholderCheck?.passed ? 100 : 0,
-      weight: 20,
+      weight: 15,
       detail: placeholderCheck?.detail,
     });
 
@@ -72,7 +70,7 @@ export class L1StaticSensor {
       name: '脚本完整性',
       passed: !unclosedScripts,
       score: unclosedScripts ? 0 : 100,
-      weight: 15,
+      weight: 10,
       detail: unclosedScripts ? 'script 标签数量不匹配（有未闭合标签）' : '正常',
     });
 
@@ -84,7 +82,7 @@ export class L1StaticSensor {
       name: '模块覆盖率',
       passed: coveragePassed,
       score: sectionCount > 0 ? Math.min(100, Math.round((annotationCount / sectionCount) * 100)) : 100,
-      weight: 5,
+      weight: 10,
       detail: `${annotationCount}个标注 / ${sectionCount}个语义块`,
     });
 
