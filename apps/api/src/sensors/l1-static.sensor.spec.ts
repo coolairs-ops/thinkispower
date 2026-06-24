@@ -36,7 +36,7 @@ describe('L1StaticSensor', () => {
       passed: true,
       score: 100,
       checks: [
-        { name: 'HTML结构', passed: true, detail: '完整' },
+        { name: 'HTML结构完整性', passed: true, detail: '完整' }, // 真名（L1 sensor 原来错查 'HTML结构' → 恒 0 的 bug 已修）
         { name: '批注标注', passed: true, detail: '2个' },
         { name: '导航交互', passed: true, detail: '有' },
         { name: '无残留待办内容', passed: true, detail: '已清理' },
@@ -83,5 +83,18 @@ describe('L1StaticSensor', () => {
     const report = await sensor.run('project-1', validHtml);
 
     expect(report.score).toBeGreaterThanOrEqual(70);
+  });
+
+  it('HTML结构 检查解析正确（修名字 bug：质量门 HTML结构完整性 passed → L1 此项 passed/100）', async () => {
+    const report = await sensor.run('project-1', validHtml);
+    const htmlStruct = report.checks.find((c) => c.name === 'HTML结构');
+    expect(htmlStruct?.passed).toBe(true); // 原来恒 false（查错名）
+    expect(htmlStruct?.score).toBe(100);
+  });
+
+  it('各检查权重总和为 100', async () => {
+    const report = await sensor.run('project-1', validHtml);
+    const total = report.checks.reduce((s, c) => s + (c.weight ?? 0), 0);
+    expect(total).toBe(100);
   });
 });

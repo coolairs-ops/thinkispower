@@ -13,15 +13,17 @@ export class L1StaticSensor {
 
     // 1. HTML 结构完整性
     const struct = await this.qualityGate.runAllChecks(projectId, demoHtml);
+    // 修：质量门里这条叫 'HTML结构完整性'，原来查 'HTML结构' 永远 find 不到 → 恒判 0（误报"页面结构需要优化"）。
+    const htmlStruct = struct.checks.find(c => c.name === 'HTML结构完整性');
     checks.push({
       name: 'HTML结构',
-      passed: struct.checks.find(c => c.name === 'HTML结构')?.passed ?? false,
-      score: struct.checks.find(c => c.name === 'HTML结构')?.passed ? 100 : 0,
+      passed: htmlStruct?.passed ?? false,
+      score: htmlStruct?.passed ? 100 : 0,
       weight: 20,
-      detail: struct.checks.find(c => c.name === 'HTML结构')?.detail,
+      detail: htmlStruct?.detail,
     });
 
-    // 2. 批注标注覆盖率
+    // 2. 批注标注覆盖率（注：算的是"批注挂载点 data-module-key 是否由生成器发出"，非用户批注活动）
     const annotationCount = (demoHtml.match(/data-module-key=/g) || []).length;
     const elementCount = (demoHtml.match(/data-element-path=/g) || []).length;
     const annotationScore = Math.min(100, Math.round((elementCount / Math.max(annotationCount, 1)) * 100));
