@@ -5,7 +5,7 @@
 **关联:** 承接 [ADR-0003 强制底座=若依]、[ADR-0010]/[ADR-0011] 的"先确定性、后生成型"排序；用 [ADR-0009] 上线门 + 本轮修复（goLiveStatus / backend-smoke / 契约门 / 守护 liveness）做验证工具。
 
 > **本次修订（2026-06-25）相对旧版的两处关键变化：**
-> 1. **底座从 codegen/路B 改为若依实例置备（路C，走若依底座，非 codegen）。** 理由：codegen 的"生成完整性"硬伤（Prisma schema 被 maxTokens 截断、缺 model）是生成路才有的不确定性；改走若依 `importTable` 从 dataModel 置备，等于从源头消掉这一类不确定性，符合 ADR-0003 强制底座与"确定性优先"。
+> 1. **底座从 codegen/路B 改为若依底座置备（`ruoyi` 适配器，ADR-0003，非 codegen）。** 注意术语：按 `backend-runtime.interface.ts` 权威定义，`crud`=固定运行时(路B)、`generated`=生成代码容器(路C，预留)、`ruoyi`=若依底座(ADR-0003)——**若依是独立的第三种 BackendRuntime 适配器，不是路C**。理由：codegen 的"生成完整性"硬伤（Prisma schema 被 maxTokens 截断、缺 model）是生成路才有的不确定性；改走若依 `importTable` 从 dataModel 置备，从源头消掉这一类不确定性，符合 ADR-0003 强制底座与"确定性优先"。
 > 2. **第一阻塞点前移到"若依实例环境"。** 现实核查发现：若依本地根本没起（无若依容器、8080 CLOSED），且 `RUOYI_BASE_URL`/`RUOYI_SRC_ROOT` 未配 → `loadRuoyiInstanceConfig.enabled=false`，上次交付正因此回落 codegen。所以第一关是环境，不是生成质量。
 
 ---
@@ -19,7 +19,7 @@
 ## 为什么是这条路
 
 - **确定性优先**（变量最少）：走若依底座置备，不依赖 LLM 生成完整后端，消掉生成完整性这一类不确定性。
-- **若依是 ADR-0003 强制底座**：政企信创主力（RuoYi-Vue-Plus，MIT + 信创适配 + 完整 RBAC + 数据权限）。
+- **若依是 ADR-0003 强制底座**：政企信创主力（若依-Plus，信创适配 + 完整 RBAC + 数据权限；具体版本/许可证以官方为准，不在此断言）。
 - **客户系统是真实候选里唯一干净的**：客户分级 + 项目关联跟踪 + 客户/项目关系 + 多用户角色 = 全是 CRUD+关系+鉴权，只有一个"数据看板"碰图表缺口（v1 降级）。最通用的 CRM 范式，跑通它≈跑通大半 B2B 后台。（药店巡店=地图+视觉+语音+看板 4 缺口；客服平台=对话+IM 双缺口，均排除。）
 
 项目：`客户系统`（`id=ed541b1e-e258-4d3f-bdef-7be91875033e`，demo_ready，dataModel 已有，backend_kind=crud）。
@@ -88,7 +88,7 @@
 ### Phase 2 · 置备链对客户系统 dataModel 跑通（核心，最可能要修/要建）
 
 - 走 `ruoyi-provision` 全链：建表 → `importTable` 生成 CRUD → 写工程 → 单模块编译 → 重启 → seed RBAC。修途中断点。
-- **预期校准**：按能力清单，provision 全链可能尚未完全串通（路C"本周收尾中"）。若跑到某段是空的，那是**正常的、是这条路真正要攻的核心**（若依 `importTable` 自动化对任意业务 dataModel 的可靠性），是"建链"而非只是"修链"，不是退步。
+- **预期校准（已据代码核实）**：`ruoyi-provision.service` 已实现全链（建表→importTable→写工程→单模块编译→重启→seed RBAC），ADR-0003 亦称"步骤 2-4 已实测打通"；**但** `backend-runtime.interface.ts` 仍把 `ruoyi` 适配器标为"预留 M3 实现"——即对**任意业务 dataModel** 端到端跑通可能需要补接/修链。若跑到某段是空的或断的，那是**正常的、是这条路真正要攻的核心**（若依 `importTable` 自动化对任意 dataModel 的可靠性），是"建链/接链"而非退步。
 
 **退出判据：** `backendRuntime.kind=ruoyi, status=ready`；客户/项目表 + CRUD 模块在若依实例里真存在（后台菜单/列表能看到）。
 
