@@ -47,8 +47,8 @@ export class SensorService {
     }
 
     if (projectId) {
-      // 后端连通探活（L2 运行时层）；排在 L2RuntimeSensor 之后入队——失败 check 会进
-      // recommendations 让自迭代看见后端问题（fuse 取本层首个 report 计分，故不改总分语义）。
+      // 后端连通探活（L2 运行时层，测交付后端本身）：fuse 优先用它作 L2 运行时分(修 #1)，
+      // 失败 check 同时进 recommendations 让自迭代看见后端问题。
       try { reports.push(await this.backendSensor.run(projectId)); }
       catch (e) { this.logger.warn(`后端连通传感器失败: ${e}`); }
 
@@ -128,7 +128,13 @@ export class SensorService {
     const HAS_L3 = reports.some(r => r.layer === 3);
 
     const l1Score = reports.find(r => r.layer === 1)?.score ?? 0;
-    const l2Score = reports.find(r => r.layer === 2)?.score ?? 0;
+    // L2 运行时分(修 #1)：当项目有真数据后端时，用"交付后端真探活"(L2-后端连通)作运行时分——
+    // 它测的是交付程序本身、不可达即据实给低分；无数据后端(探活 skip)则回退平台 L2(L2-运行时状态)。
+    // 不再用恒高的平台健康冒充"这个项目可运行"。
+    const backendReport = reports.find(r => r.layer === 2 && r.sensorName === 'L2-后端连通');
+    const platformL2 = reports.find(r => r.layer === 2 && r.sensorName !== 'L2-后端连通');
+    const backendMeasured = !!backendReport?.checks.some(c => c.name.startsWith('数据资源'));
+    const l2Score = (backendMeasured ? backendReport : platformL2)?.score ?? backendReport?.score ?? 0;
     const l3Score = reports.find(r => r.layer === 3)?.score ?? 0;
 
     // 动态权重：只在不存在的层之间均匀分配

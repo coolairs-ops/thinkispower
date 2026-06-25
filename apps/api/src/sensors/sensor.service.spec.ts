@@ -115,9 +115,9 @@ describe('SensorService', () => {
     expect(mockL2.run).toHaveBeenCalledWith();
   });
 
-  it('后端不可达 → 失败 check 进 recommendations（闭环看见后端），不改总分语义', async () => {
+  it('有真后端且不可达 → L2 运行时分据实取交付后端探活分(修 #1)，并进 recommendations', async () => {
     mockL1.run.mockResolvedValue(mockReport(1, 80, true));
-    mockL2.run.mockResolvedValue(mockReport(2, 90, true));
+    mockL2.run.mockResolvedValue(mockReport(2, 90, true)); // 平台 L2 恒高，不应再冒充项目运行时
     mockL3.run.mockResolvedValue(mockReport(3, 70, true));
     mockBackendSensor.run.mockResolvedValue({
       sensorName: 'L2-后端连通', layer: 2, passed: false, score: 0,
@@ -126,10 +126,21 @@ describe('SensorService', () => {
 
     const report = await service.runAll('project-1');
 
-    // 总分仍由 L2RuntimeSensor 决定（后端 report 排其后，fuse 取本层首个）
-    expect(report.layer2Score).toBe(90);
-    // 但后端失败进 recommendations，自迭代能看见
+    // 有真后端探活结果(数据资源 check)→ L2 分取交付后端的真分(0)，不再用平台 L2 的 90 冒充
+    expect(report.layer2Score).toBe(0);
+    // 后端失败同时进 recommendations，自迭代能看见
     expect(report.recommendations.some(r => r.includes('数据资源 todo'))).toBe(true);
+  });
+
+  it('无数据后端(探活 skip) → L2 分回退平台 L2，不被 skip 的 100 顶替', async () => {
+    mockL1.run.mockResolvedValue(mockReport(1, 80, true));
+    mockL2.run.mockResolvedValue(mockReport(2, 90, true));
+    mockL3.run.mockResolvedValue(mockReport(3, 70, true));
+    // beforeEach 默认 backend-smoke = 无数据后端 skip(score 100, 无"数据资源"check)
+
+    const report = await service.runAll('project-1');
+
+    expect(report.layer2Score).toBe(90); // 回退平台 L2，而非 skip 的 100
   });
 
   it('无 projectId 时不跑后端传感器', async () => {
