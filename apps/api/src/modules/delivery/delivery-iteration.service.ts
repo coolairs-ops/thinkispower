@@ -166,12 +166,18 @@ export class DeliveryIterationService {
 
   /** 用户决策后继续迭代 */
   async decideAutoIterate(projectId: string, decision: 'accept' | 'continue' | 'view_demo'): Promise<any> {
-    if (decision === 'accept' || decision === 'view_demo') {
+    // 采纳=推进生命周期到 completed(已采纳/软件已准备好)。注意：这只是生命周期态，
+    // 不代表"已上线"——上线由 goLiveStatus(ADR-0009 上线门)单独裁定，采纳不能伪造上线。
+    if (decision === 'accept') {
       await this.prisma.project.update({
         where: { id: projectId },
         data: { status: 'completed' },
       });
-      return { decision, message: decision === 'accept' ? '已采纳当前结果' : '查看 Demo' };
+      return { decision, message: '已采纳当前结果' };
+    }
+    // 仅查看 Demo：不改生命周期状态（看一眼不等于采纳/完成）。
+    if (decision === 'view_demo') {
+      return { decision, message: '查看 Demo' };
     }
     return { decision, message: '继续迭代，请重新启动' };
   }
