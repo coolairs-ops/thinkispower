@@ -63,6 +63,13 @@ export class SensorService {
       });
       // ADR-0008：后端底座（若依）已置备 → backend 类需求按置备信用、不拿 HTML 判
       const backendReady = (project?.backendRuntime as any)?.status === 'ready';
+      // ADR-0009 ③-b：把 backend-smoke 实测可达的资源作为"运行后端真实证据"喂给追溯判定器，
+      // 让 self 类需求不因"静态 HTML 看不到运行时"误判未实现（与 acceptance ③-c 同源证据）。
+      const beReport = reports.find((r) => r.sensorName === 'L2-后端连通');
+      const beReach = (beReport?.checks ?? []).filter((c) => c.passed && c.name.startsWith('数据资源')).map((c) => c.name.replace('数据资源 ', ''));
+      const backendEvidence = backendReady && beReach.length
+        ? `运行时实测(若依后端已就绪)：资源 ${beReach.join('/')} 真实可达、数据接口(前端 appData → /api/app → 若依)真通；前端已按契约接入这些资源的读写。`
+        : '';
       if (demoHtml) {
         try {
           reports.push(await this.crossValidator.validate(
@@ -74,7 +81,7 @@ export class SensorService {
         try {
           reports.push(await this.traceValidator.validate(
             projectId, demoHtml, project?.planSummary, project?.structuredRequirement,
-            { backendReady },
+            { backendReady, backendEvidence },
           ));
         } catch (e) { this.logger.warn(`TraceabilityValidator 失败: ${e}`); }
       }

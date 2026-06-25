@@ -46,7 +46,7 @@ export class TraceabilityValidator {
     demoHtml: string,
     planSummary: any,
     structuredRequirement: any,
-    opts: { backendReady?: boolean } = {},
+    opts: { backendReady?: boolean; backendEvidence?: string } = {},
   ): Promise<SensorReport> {
     const backendReady = opts.backendReady ?? false;
 
@@ -78,7 +78,7 @@ export class TraceabilityValidator {
     let selfImpl = 0;
     if (selfC.length > 0) {
       try {
-        const r = await this.judgeAgainstHtml(selfC.map((c) => c.text), demoHtml);
+        const r = await this.judgeAgainstHtml(selfC.map((c) => c.text), demoHtml, opts.backendEvidence ?? '');
         for (const item of r.traceability) {
           checks.push({
             name: `需求: ${String(item.requirement).slice(0, 60)}`,
@@ -175,6 +175,7 @@ export class TraceabilityValidator {
   private async judgeAgainstHtml(
     criteria: string[],
     demoHtml: string,
+    backendEvidence = '',
   ): Promise<{ traceability: Array<{ requirement: string; found: boolean; score?: number; evidence?: string }>; coverage: number; missing: string[] }> {
     const evaluator = this.qwen.available ? this.qwen : this.deepseek;
     const userMessage = [
@@ -183,6 +184,10 @@ export class TraceabilityValidator {
       ``,
       `## Demo HTML（前 15000 字符）`,
       condenseHtmlForJudge(demoHtml),
+      ...(backendEvidence
+        ? ['', '## 运行时后端证据（重要）', backendEvidence,
+          '说明：后端真实在跑、所列资源数据接口已实测真通、前端已按契约接入。对依赖后端读写/列表/详情的需求，不要因「静态 HTML 看不到运行时」判未实现；据 UI 是否接入该能力 + 此证据综合判。但聚合看板/引导流程/级联删除/关联展示/数据权限等若 UI 未实现仍据实判未实现。']
+        : []),
     ].join('\n');
 
     const response = await (evaluator as any).chat(

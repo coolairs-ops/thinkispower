@@ -80,15 +80,17 @@
 
 ### Phase 1 · 把客户系统接上若依路（不走 codegen）
 
-- 让客户系统的后端走若依底座：`ensureProvisioned` 对它触发 `kind=ruoyi`。
+- **先 designate（不可省）**：客户系统当前 `backend_kind=crud`，而 `ensureProvisioned` 有硬门 `if (be.kind !== 'ruoyi') return 'not-ruoyi'`——不会自动转若依。必须先调 `RuoyiProvisionService.designate(projectId, true)`（= 方案页"用若依底座"开关），把 `backendRuntime` 置成 `{kind:'ruoyi', status:'pending'}`，之后交付时 `ensureProvisioned` 才会入队置备。
+- 让客户系统的后端走若依底座：designate 后，交付触发 `ensureProvisioned` → `kind=ruoyi` 置备入队。
 - v1 范围：客户/项目 CRUD + 关系 + 分级字段 + 角色登录；看板降级计数卡。
 
-**退出判据：** 触发交付后，日志/状态显示走若依置备链，**不落 `stepwiseGenerate` codegen**。
+**退出判据：** ① `designate` 后 `backendRuntime.kind=ruoyi, status=pending` 已落库；② 触发交付后，日志/状态显示走若依置备链，**不落 `stepwiseGenerate` codegen**。
 
 ### Phase 2 · 置备链对客户系统 dataModel 跑通（核心，最可能要修/要建）
 
 - 走 `ruoyi-provision` 全链：建表 → `importTable` 生成 CRUD → 写工程 → 单模块编译 → 重启 → seed RBAC。修途中断点。
-- **预期校准（已据代码核实）**：`ruoyi-provision.service` 已实现全链（建表→importTable→写工程→单模块编译→重启→seed RBAC），ADR-0003 亦称"步骤 2-4 已实测打通"；**但** `backend-runtime.interface.ts` 仍把 `ruoyi` 适配器标为"预留 M3 实现"——即对**任意业务 dataModel** 端到端跑通可能需要补接/修链。若跑到某段是空的或断的，那是**正常的、是这条路真正要攻的核心**（若依 `importTable` 自动化对任意 dataModel 的可靠性），是"建链/接链"而非退步。
+- **预期校准（已据代码核实，精确定位风险面）**：编排**已串通、非半成**——`RuoyiRuntime.provisionApp` 完整编排（建表→deploySources→waitReady→seed），`RuoyiProvisionService` 用 BullMQ 队列 + processor + **断点续跑**（相位 none→ddl→deployed→ready→seeded）包住，真 infra 驱动 `RuoyiMysqlDdlDriver` / `RuoyiLocalDeployer` 都在，代码注释明示这些是"端到端已手工证通的步骤的代码化"。（`provision(projectId, dataModel)` 那个 `throw` 是**故意的窄签名守卫**——"用 provisionApp"，非未实现 stub；interface 上的"预留 M3"是**过时保守注释**，不是真缺口。）
+- **真正没被证过的只有一处**：代码注释直言 `单测用 mock infra，生产接真实现`——即**编排被 mock 单测覆盖，但两个真 infra 驱动从未在活若依实例上、对任意 dataModel 跑过**：`RuoyiMysqlDdlDriver` 对真 MySQL 建表、`RuoyiLocalDeployer` 真做 importTable+下载源码+写工程+单模块 mvn compile+重启、`waitReady` 真探活。**Phase 2 不是建编排，是验/修这两个 infra 驱动 × 任意 dataModel 对活实例的可靠性。** Claude Code 攻坚时直奔这两个 driver + `waitReady`，不要重写编排。若某段对真实例跑不通，那正是本路线要攻的核心，是"验/修驱动"而非退步。
 
 **退出判据：** `backendRuntime.kind=ruoyi, status=ready`；客户/项目表 + CRUD 模块在若依实例里真存在（后台菜单/列表能看到）。
 

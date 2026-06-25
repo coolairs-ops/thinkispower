@@ -81,15 +81,26 @@ export class AcceptanceVerificationService {
       this.logger.warn(`传感器运行失败，验收转语义+人工: ${e}`);
     }
 
+    // ADR-0008 D5：后端底座(若依)已置备 → backend 类场景按置备信用、不拿 HTML 判
+    const backendReady = (project.backendRuntime as any)?.status === 'ready';
+
+    // ADR-0009 ③-c：若依项目把"运行后端真实证据"（backend-smoke 实测可达的资源）喂给判定器，
+    // 让 self 类场景据"后端真在跑+前端契约已接"判 UI 完整度，而非因"静态 HTML 看不到运行时"误判 manual。
+    let backendEvidence = '';
+    if (backendReady) {
+      const beReport = fused?.reports?.find((r) => r.sensorName === 'L2-后端连通');
+      const reach = (beReport?.checks ?? []).filter((c) => c.name.startsWith('数据资源') && c.passed).map((c) => c.name.replace('数据资源 ', ''));
+      if (reach.length) {
+        backendEvidence = `运行时实测(若依后端已就绪)：资源 ${reach.join('/')} 真实可达、数据接口(前端 appData → /api/app → 若依)真通；前端已按契约接入这些资源的读写。`;
+      }
+    }
+
     // 2. 逐条语义判定（批量一次 LLM；失败 → 全部待人工）
-    const verdicts = await this.judge(scenarios, project.demoHtml ?? '', project.description ?? '')
+    const verdicts = await this.judge(scenarios, project.demoHtml ?? '', project.description ?? '', backendEvidence)
       .catch((e) => {
         this.logger.warn(`验收语义判定失败，场景降级待人工: ${e}`);
         return null;
       });
-
-    // ADR-0008 D5：后端底座(若依)已置备 → backend 类场景按置备信用、不拿 HTML 判
-    const backendReady = (project.backendRuntime as any)?.status === 'ready';
 
     const verifiedAt = new Date().toISOString();
     const results: ScenarioVerification[] = scenarios.map((s, i) => {
@@ -263,6 +274,7 @@ export class AcceptanceVerificationService {
     scenarios: Array<{ name: string; given: string; when: string; then: string }>,
     demoHtml: string,
     description: string,
+    backendEvidence = '',
   ): Promise<Array<{ status: ScenarioStatus; evidence: string }> | null> {
     if (!demoHtml.trim()) return null; // 没有实现产物可判定 → 全部待人工
 
@@ -275,11 +287,17 @@ export class AcceptanceVerificationService {
       '只输出一个 JSON 对象，不要解释或 markdown：\n' +
       '{"verdicts":[{"index":1,"status":"pass|fail|manual","evidence":"判定依据(指出实现中支持/缺失的具体证据)"}]}\n' +
       '判定标准：实现中能找到满足 Then 的明确证据→pass；明显缺失或与预期相悖→fail；' +
-      '无法仅凭当前实现判断(需运行时/数据/人工核对)→manual。index 必须与场景编号一一对应、全部覆盖。';
+      '无法仅凭当前实现判断(需运行时/数据/人工核对)→manual。index 必须与场景编号一一对应、全部覆盖。' +
+      (backendEvidence
+        ? '\n重要：下方提供了「运行时后端证据」——后端真实在跑、所列资源的数据接口已实测真通、前端已按契约接入。'
+        + '对依赖后端读写/列表/详情的场景，不要再因「静态 HTML 看不到运行时」判 manual；'
+        + '请据「前端 UI 是否接入了该能力(有无对应表单/列表/详情)」+ 该后端证据综合判 pass/fail。'
+        + '注意：后端证据只覆盖基础增删改查；聚合看板、引导流程、级联删除、跨实体关联展示、数据权限隔离等若 UI 未实现，仍应据实判 fail/manual，不可因后端在跑就放过。'
+        : '');
 
     const raw = await this.llm.chat(
       'text-validator',
-      { system, user: `验收场景：\n${list}\n\n产品实现(HTML，可能截断)：\n${this.condenseForJudge(demoHtml)}\n\n项目描述：${description.slice(0, 1000)}` },
+      { system, user: `验收场景：\n${list}\n\n产品实现(HTML，可能截断)：\n${this.condenseForJudge(demoHtml)}${backendEvidence ? '\n\n运行时后端证据：\n' + backendEvidence : ''}\n\n项目描述：${description.slice(0, 1000)}` },
       { temperature: 0.1, maxTokens: 2048 },
     );
 
