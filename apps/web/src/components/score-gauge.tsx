@@ -25,10 +25,12 @@ export default function ScoreGauge({
 
   return (
     <div className="mb-6 bg-white rounded-xl p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-medium text-gray-600">综合评分</span>
         <span className={`text-2xl font-bold ${color}`}>{score}</span>
       </div>
+      {/* ADR-0009 D5：融合分只是迭代打磨进度信号，不作上线判据；能否上线由「交付」页的确定性二值门决定 */}
+      <p className="text-[11px] text-gray-400 mb-3">迭代打磨进度 · 不作上线判据（上线由交付页的确定性门裁定）</p>
       <div className="flex gap-1 h-6 rounded-full overflow-hidden">
         <div className="bg-blue-400 transition-all duration-500 flex items-center justify-center text-[10px] text-gray-900 font-medium"
           style={{ width: `${l1Score ?? 33}%` }}>

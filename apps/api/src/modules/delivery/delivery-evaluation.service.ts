@@ -169,7 +169,7 @@ export class DeliveryEvaluationService {
       if (!files || files.length === 0) {
         await this.prisma.project.update({
           where: { id: projectId },
-          data: { status: 'build_failed', publicStatusLabel: '代码生成失败' },
+          data: { goLiveStatus: 'build_failed', publicStatusLabel: '代码生成失败' },
         });
         this.logger.warn(`全栈生成失败: 无生成文件`);
         return;
@@ -304,13 +304,20 @@ export class DeliveryEvaluationService {
         },
       });
 
-      // 状态诚实：只有四门全过才 completed(=真上线)；否则如实置失败/仅预览态，绝不冒充"已上线"
+      // 状态诚实：上线门结局写独立的 goLiveStatus(ADR-0009)，不再覆盖生命周期 status——
+      // 失败/降级态绝不污染状态机；仅真上线(completed)才推进生命周期到 completed。
       const labelMap: Record<string, string> = {
         completed: '已上线', preview_only: '仅预览·未上线', build_failed: '编译失败', contract_violation: '前端契约越界', smoke_failed: '冒烟未通过', deploy_failed: '部署失败',
       };
       await this.prisma.project.update({
         where: { id: projectId },
-        data: { status: outcome.status, publicStatusLabel: labelMap[outcome.status] ?? outcome.status, productionUrl: outcome.productionUrl, latestBuildId: build.id },
+        data: {
+          goLiveStatus: outcome.status,
+          ...(outcome.status === 'completed' ? { status: 'completed' } : {}),
+          publicStatusLabel: labelMap[outcome.status] ?? outcome.status,
+          productionUrl: outcome.productionUrl,
+          latestBuildId: build.id,
+        },
       });
       this.logger.log(`[上线门] ${outcome.status}: ${outcome.reason}${outcome.productionUrl ? ' → ' + outcome.productionUrl : ''}`);
     } catch (e) {

@@ -42,6 +42,7 @@ export class DeliveryService {
     return {
       productionUrl: project.productionUrl,
       status: project.status,
+      goLiveStatus: project.goLiveStatus,
       publicStatusLabel: project.publicStatusLabel,
       isPro: project.user.plan === 'pro' || project.user.plan === 'enterprise',
       deliveryAnalysis,

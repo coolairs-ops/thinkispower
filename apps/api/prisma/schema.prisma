@@ -69,7 +69,8 @@ model Project {
   name                   String
   description            String?
   appType                String?  @map("app_type")
-  status                 String   @default("needs_input") // 内部状态
+  status                 String   @default("needs_input") // 内部状态（项目生命周期状态机：needs_input…demo_ready…completed）
+  goLiveStatus           String?  @map("go_live_status") // 上线门结局(ADR-0009)：null=未交付 | completed | preview_only | build_failed | contract_violation | smoke_failed | deploy_failed。与生命周期 status 分离，避免门结局污染状态机
   publicStatusLabel      String?  @map("public_status_label") // 用户可见状态
   structuredRequirement  Json?    @map("structured_requirement")
   planSummary            Json?    @map("plan_summary")
