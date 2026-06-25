@@ -27,7 +27,6 @@ import { PlanGuard } from './common/guards/plan.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { HealthController } from './modules/health/health.controller';
 import { SanitizeInterceptor } from './common/interceptors/sanitize.interceptor';
-import { DeliveryOrchestrator } from './services/delivery-orchestrator.service';
 import { SharedCoreModule } from './shared/shared-core.module';
 import { QueueModule } from './queue/queue.module';
 import { ProfessionalImportModule } from './modules/professional-import/professional-import.module';
@@ -73,7 +72,6 @@ import { BuildModule } from './modules/build/build.module';
   ],
   controllers: [HealthController],
   providers: [
-    DeliveryOrchestrator,
     { provide: APP_INTERCEPTOR, useClass: SanitizeInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     PlanGuard,

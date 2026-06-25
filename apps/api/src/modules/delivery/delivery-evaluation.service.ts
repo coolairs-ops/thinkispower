@@ -169,7 +169,7 @@ export class DeliveryEvaluationService {
       if (!files || files.length === 0) {
         await this.prisma.project.update({
           where: { id: projectId },
-          data: { status: 'build_failed', publicStatusLabel: '代码生成失败' },
+          data: { goLiveStatus: 'build_failed', publicStatusLabel: '代码生成失败' },
         });
         this.logger.warn(`全栈生成失败: 无生成文件`);
         return;
@@ -289,6 +289,11 @@ export class DeliveryEvaluationService {
           contractConformant = conf.ok;
           if (!conf.ok) this.logger.warn(`[契约门] 越界资源(上线必404): ${conf.unknownResources.join('、')}`);
         } catch (e) { this.logger.warn(`[契约门] 校验异常(不拦): ${e}`); }
+      } else {
+        // 不静默放行(修 #8)：契约未验证就如实记录原因，避免"看起来过了契约门"的假象。
+        // 仍不阻断——无数据模型可能是纯前端(路A)的合法情形；区分"应有schema却缺失"留待后续。
+        const why = !this.schema ? 'schema 服务未注入' : !proj?.dataModel ? '无数据模型(纯前端或未生成)' : '无 demo';
+        this.logger.log(`[契约门] 未验证(不拦)：${why}`);
       }
       const staticUrl = `${process.env['APP_BASE_URL'] || 'http://localhost:3001'}/api/deploy/${projectId}`;
       const outcome = decideDeliveryOutcome({ compilationPassed, contractConformant, deployStatus, deployedUrl: deployedUrl || undefined, smokePassed, backendReady, staticUrl });
@@ -304,13 +309,20 @@ export class DeliveryEvaluationService {
         },
       });
 
-      // 状态诚实：只有四门全过才 completed(=真上线)；否则如实置失败/仅预览态，绝不冒充"已上线"
+      // 状态诚实：上线门结局写独立的 goLiveStatus(ADR-0009)，不再覆盖生命周期 status——
+      // 失败/降级态绝不污染状态机；仅真上线(completed)才推进生命周期到 completed。
       const labelMap: Record<string, string> = {
         completed: '已上线', preview_only: '仅预览·未上线', build_failed: '编译失败', contract_violation: '前端契约越界', smoke_failed: '冒烟未通过', deploy_failed: '部署失败',
       };
       await this.prisma.project.update({
         where: { id: projectId },
-        data: { status: outcome.status, publicStatusLabel: labelMap[outcome.status] ?? outcome.status, productionUrl: outcome.productionUrl, latestBuildId: build.id },
+        data: {
+          goLiveStatus: outcome.status,
+          ...(outcome.status === 'completed' ? { status: 'completed' } : {}),
+          publicStatusLabel: labelMap[outcome.status] ?? outcome.status,
+          productionUrl: outcome.productionUrl,
+          latestBuildId: build.id,
+        },
       });
       this.logger.log(`[上线门] ${outcome.status}: ${outcome.reason}${outcome.productionUrl ? ' → ' + outcome.productionUrl : ''}`);
     } catch (e) {

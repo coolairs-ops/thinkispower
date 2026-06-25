@@ -27,6 +27,11 @@ const DELIVERY_STEPS = [
   { id: 'deploy',  label: '部署上线',        icon: '🚀' },
 ];
 
+// 上线门失败态（ADR-0009 D5）：均非"已上线"，前端据实显示卡在哪门
+const GATE_FAIL_STATUSES = ['build_failed', 'contract_violation', 'smoke_failed', 'deploy_failed'];
+// 任一终态都应停止本次交付的进度动画（含成功/降级/失败）
+const TERMINAL_STATUSES = ['completed', 'preview_only', ...GATE_FAIL_STATUSES];
+
 export default function DeliveryPage() {
   const params = useParams();
   const router = useRouter();
@@ -43,6 +48,7 @@ export default function DeliveryPage() {
   const [elapsed, setElapsed] = useState(0);
   const [currentStep, setCurrentStep] = useState(0);
   const genTimer = useRef<ReturnType<typeof setInterval>>();
+  const deliveringRef = useRef(false);
 
   // Load delivery data
   useEffect(() => {
@@ -65,12 +71,9 @@ export default function DeliveryPage() {
       api.get(`/api/projects/${projectId}/delivery`).then((d) => {
         setDelivery(d);
         if (d.generatedFiles) setGenFiles(d.generatedFiles);
-        // Check if delivery completed
-        if (d.status === 'completed' && (d.latestBuild || d.generatedFiles?.length)) {
-          setActiveDeliveryId(null);
-          if (genTimer.current) clearInterval(genTimer.current);
-        }
-        if (d.status === 'build_failed') {
+        // 本次交付跑到任一上线门终态(成功/降级/失败)即停进度动画——诚实置态由状态卡呈现(ADR-0009 D5)
+        if (deliveringRef.current && TERMINAL_STATUSES.includes(d.goLiveStatus)) {
+          deliveringRef.current = false;
           setActiveDeliveryId(null);
           if (genTimer.current) clearInterval(genTimer.current);
         }
@@ -91,6 +94,7 @@ export default function DeliveryPage() {
         projectName, planSummary: proj.planSummary, demoHtml: proj.demoHtml,
       });
       if (r.deliveryId) {
+        deliveringRef.current = true;
         setActiveDeliveryId(r.deliveryId);
         setElapsed(0);
         setCurrentStep(0);
@@ -116,10 +120,12 @@ export default function DeliveryPage() {
   if (isLoading) return null;
   if (loading) return <div className="p-8 text-gray-500">加载中...</div>;
 
-  const status = delivery?.status;
-  const isCompleted = status === 'completed' && !activeDeliveryId;
-  const isFailed = status === 'build_failed';
+  const status = delivery?.goLiveStatus;  // 上线门结局(ADR-0009)，与生命周期 status 分离；null=未交付
   const isGenerating = !!activeDeliveryId || starting;
+  const isCompleted = status === 'completed' && !isGenerating;       // 真上线（过全部门）
+  const isPreviewOnly = status === 'preview_only' && !isGenerating;  // 仅预览·未上线（降级）
+  const isFailed = GATE_FAIL_STATUSES.includes(status) && !isGenerating;
+  const needsRedeliver = isCompleted || isPreviewOnly || isFailed;
   const hasBuild = !!delivery?.latestBuild;
   const hasFiles = genFiles.length > 0;
   const sourceZipUrl = delivery?.latestBuild?.sourceZipUrl;
@@ -136,8 +142,7 @@ export default function DeliveryPage() {
           {/* ═══ 状态卡片 ═══ */}
           <DeliveryStatusCard
             isGenerating={isGenerating}
-            isFailed={isFailed}
-            isCompleted={isCompleted}
+            status={status}
             hasFiles={hasFiles}
             elapsed={elapsed}
             currentStep={currentStep}
@@ -151,9 +156,10 @@ export default function DeliveryPage() {
                 isGenerating ? 'bg-indigo-400 text-white cursor-wait animate-pulse' :
                 isCompleted ? 'bg-blue-600 text-white hover:bg-blue-700' :
                 isFailed ? 'bg-red-600 text-white hover:bg-red-700' :
+                isPreviewOnly ? 'bg-amber-600 text-white hover:bg-amber-700' :
                 'bg-indigo-600 text-white hover:bg-indigo-700'
               } disabled:opacity-50`}>
-              {isGenerating ? '生成中...' : starting ? '启动中...' : isCompleted ? '重新交付' : isFailed ? '重新交付' : '开始交付'}
+              {isGenerating ? '生成中...' : starting ? '启动中...' : needsRedeliver ? '重新交付' : '开始交付'}
             </button>
             <button onClick={() => router.push(`/projects/${projectId}/demo`)}
               className="rounded-lg border px-5 py-2.5 text-sm text-gray-700 hover:bg-gray-50">查看 Demo</button>
@@ -181,14 +187,14 @@ export default function DeliveryPage() {
                 <p className="text-xs text-gray-300 mt-1">点击「开始交付」生成</p>
               </>}
             />
-            <ServiceCard icon="🚀" title="在线部署" available={!!productionUrl}
+            <ServiceCard icon="🚀" title="在线部署" available={isCompleted}
               availableContent={<>
                 <p className="text-xs text-green-600 mb-2">已部署到生产环境</p>
                 <a href={productionUrl} target="_blank" rel="noopener noreferrer"
                   className="rounded bg-green-600 px-3 py-1.5 text-xs text-white hover:bg-green-700">打开应用</a>
               </>}
               unavailableContent={<>
-                <p className="text-xs text-gray-400">需 Docker 环境支持</p>
+                <p className="text-xs text-gray-400">{isPreviewOnly ? '仅静态预览·未真正上线' : '需 Docker / 后端就绪'}</p>
                 <p className="text-xs text-gray-300 mt-1">或使用「一键云部署」服务</p>
               </>}
             />

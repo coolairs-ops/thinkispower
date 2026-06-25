@@ -1,20 +1,31 @@
 'use client';
 
 /**
- * 交付状态卡片 — 三态（准备/进行中/已完成/失败）
+ * 交付状态卡片 — 据实呈现上线门结局（ADR-0009 D5：状态诚实，绝不把跑不起来的标成已上线）。
+ *
+ * 生成中 → 进度动画；否则按服务端 gate status 分态：
+ *   completed=已上线 / preview_only=仅预览·未上线 / 四类门失败=卡在哪门 + 怎么补。
  */
+
+// 失败/降级态：卡在哪门 + 怎么补（D5/D6 + ADR-0008 D6 处置）
+const GATE_INFO: Record<string, { title: string; gate: string; tone: 'fail' | 'preview'; how: string }> = {
+  build_failed:       { title: '编译失败',       gate: 'D2 编译门',       tone: 'fail',    how: '交付代码 3 轮自动修复后仍未通过编译。可查看生成文件/源码定位 TS 错误，或重新交付让 AI 再修；持续失败请提交工单。' },
+  contract_violation: { title: '前端契约越界',   gate: 'D3 契约门',       tone: 'fail',    how: '前端调用了后端不存在的资源（上线必 404）。回 Demo/规格收敛数据调用，或补齐后端契约后重新交付。' },
+  smoke_failed:       { title: '冒烟未通过',     gate: 'D4 冒烟门',       tone: 'fail',    how: '已部署但真实端点冒烟未通过。检查后端运行日志/接口实现，修复后重新交付。' },
+  deploy_failed:      { title: '部署失败',       gate: 'D4 部署健康门',   tone: 'fail',    how: '容器未成功起来或健康检查未通过。确认 Docker/运行环境，或用「一键云部署」服务，修复后重新交付。' },
+  preview_only:       { title: '仅预览·未上线', gate: '未过运行时门（降级）', tone: 'preview', how: 'Docker 不可用，只有静态前端、没有在跑的后端，未真正上线。请在支持 Docker 的环境重试，或购买「一键云部署」获得真实上线。' },
+};
+
 export default function DeliveryStatusCard({
   isGenerating,
-  isFailed,
-  isCompleted,
+  status,
   hasFiles,
   elapsed,
   currentStep,
   steps,
 }: {
   isGenerating: boolean;
-  isFailed: boolean;
-  isCompleted: boolean;
+  status?: string;
   hasFiles: boolean;
   elapsed: number;
   currentStep: number;
@@ -55,22 +66,37 @@ export default function DeliveryStatusCard({
     );
   }
 
-  if (isFailed) {
+  if (status === 'completed') {
     return (
-      <section className="mb-6 rounded-xl bg-red-50 p-5 border border-red-200">
-        <h2 className="text-base font-semibold text-red-800">交付失败</h2>
-        <p className="text-sm text-red-600 mt-1">AI 代码生成未成功，请重试或联系平台。</p>
+      <section className="mb-6 rounded-xl bg-green-50 p-5 border border-green-200">
+        <h2 className="text-base font-semibold text-green-800">已上线</h2>
+        <p className="text-sm text-green-600 mt-1">
+          通过全部上线门（编译 + 部署健康/后端就绪 + 契约一致 + 冒烟）。{hasFiles ? '可下载源码或在线访问。' : '产物如下。'}
+        </p>
       </section>
     );
   }
 
-  if (isCompleted) {
+  // 失败 / 降级态：据实显示卡在哪门 + 怎么补
+  const info = status ? GATE_INFO[status] : undefined;
+  if (info) {
+    const isPreview = info.tone === 'preview';
+    const wrap = isPreview ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200';
+    const titleColor = isPreview ? 'text-amber-800' : 'text-red-800';
+    const bodyColor = isPreview ? 'text-amber-700' : 'text-red-700';
+    const chip = isPreview ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
     return (
-      <section className="mb-6 rounded-xl bg-green-50 p-5 border border-green-200">
-        <h2 className="text-base font-semibold text-green-800">已交付</h2>
-        <p className="text-sm text-green-600 mt-1">
-          {hasFiles ? `代码已生成，可下载源码或在线访问。` : '交付完成，产物如下'}
+      <section className={`mb-6 rounded-xl p-5 border ${wrap}`}>
+        <div className="flex items-center gap-2">
+          <h2 className={`text-base font-semibold ${titleColor}`}>{info.title}</h2>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${chip}`}>卡在 {info.gate}</span>
+        </div>
+        <p className={`text-sm mt-2 ${bodyColor}`}>
+          <span className="font-medium">怎么补：</span>{info.how}
         </p>
+        {!isPreview && (
+          <p className="text-xs text-gray-400 mt-1">上线门为确定性二值闸：跑不起来不会标"已上线"。</p>
+        )}
       </section>
     );
   }

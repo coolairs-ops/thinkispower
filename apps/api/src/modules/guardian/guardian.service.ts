@@ -60,11 +60,11 @@ export class GuardianService implements OnModuleInit {
     return projects.map((p) => p.id);
   }
 
-  /** 对单个项目跑一次巡检：复用验收引擎(以 owner 身份)，落 GuardianCheck */
+  /** 对单个项目跑一次巡检：复用验收引擎(以 owner 身份) + 线上 liveness 真探活，落 GuardianCheck */
   async runCheck(projectId: string, trigger: 'scheduled' | 'manual' = 'scheduled') {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, orgId: true },
+      select: { id: true, userId: true, orgId: true, productionUrl: true },
     });
     if (!project) {
       this.logger.warn(`Guardian 巡检跳过：项目 ${projectId} 不存在`);
@@ -78,8 +78,15 @@ export class GuardianService implements OnModuleInit {
       this.logger.warn(`Guardian 巡检验收失败 ${projectId}: ${e}`);
     }
 
-    const { healthScore, status } = report ? this.computeHealth(report) : { healthScore: 0, status: 'unknown' };
-    const check = await this.record(project, trigger, healthScore, status, report);
+    // 线上 liveness 真探活(修 #2)：守护必须打用户实际访问的 productionUrl，
+    // 而非只看库存 demoHtml + 平台健康。线上挂了即 critical，静态判定无法掩盖。
+    const liveness = project.productionUrl ? await this.probeLiveness(project.productionUrl) : null;
+    if (liveness && !liveness.reachable) {
+      this.logger.warn(`Guardian liveness 不可达 ${projectId}: ${project.productionUrl} → ${liveness.detail}`);
+    }
+
+    const { healthScore, status } = this.computeHealth(report, liveness);
+    const check = await this.record(project, trigger, healthScore, status, report, liveness);
 
     // 分级修复：按风险定级并留痕（pending）；auto 级当场自动应用（带快照/重验/回滚兜底），
     // 其余级别等人工触发。失败不影响巡检落库。
@@ -129,18 +136,39 @@ export class GuardianService implements OnModuleInit {
     assertResourceAccess(project, userId, orgId);
   }
 
-  /** 健康分：有验收场景 → 通过率(0.7)+传感器分(0.3)；否则退到传感器分；都无 → unknown */
-  computeHealth(report: AcceptanceReport): { healthScore: number; status: string } {
+  /**
+   * 健康分：有验收场景 → 通过率(0.7)+传感器分(0.3)；否则退到传感器分；都无 → unknown。
+   * 线上 liveness 是硬信号(修 #2)：用户访问的 productionUrl 不可达 → 直接 critical(0)，
+   * 静态验收/平台健康再高也不能掩盖"线上真挂了"。
+   */
+  computeHealth(
+    report: AcceptanceReport | null,
+    liveness?: { reachable: boolean; detail?: string } | null,
+  ): { healthScore: number; status: string } {
+    if (liveness && !liveness.reachable) {
+      return { healthScore: 0, status: 'critical' };
+    }
     let base: number | null = null;
-    if (report.hasScenarios && report.passRate != null) {
+    if (report?.hasScenarios && report.passRate != null) {
       const pass = report.passRate * 100;
       base = report.overallScore != null ? Math.round(pass * 0.7 + report.overallScore * 0.3) : Math.round(pass);
-    } else if (report.overallScore != null) {
+    } else if (report?.overallScore != null) {
       base = report.overallScore;
     }
     if (base == null) return { healthScore: 0, status: 'unknown' };
     const status = base >= HEALTHY_MIN ? 'healthy' : base >= DEGRADED_MIN ? 'degraded' : 'critical';
     return { healthScore: base, status };
+  }
+
+  /** 线上 liveness 探活：GET productionUrl，5xx/网络错误=不可达 */
+  private async probeLiveness(url: string): Promise<{ reachable: boolean; statusCode?: number; detail: string }> {
+    try {
+      const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(10000) });
+      const reachable = res.status < 500;
+      return { reachable, statusCode: res.status, detail: `HTTP ${res.status}` };
+    } catch (e) {
+      return { reachable: false, detail: `不可达: ${e instanceof Error ? e.message : e}` };
+    }
   }
 
   private async record(
@@ -149,11 +177,15 @@ export class GuardianService implements OnModuleInit {
     healthScore: number,
     status: string,
     report: AcceptanceReport | null,
+    liveness?: { reachable: boolean; statusCode?: number; detail: string } | null,
   ) {
     const failedScenarios = (report?.scenarios ?? [])
       .filter((s) => s.status !== 'pass')
       .map((s) => `${s.scenarioName}(${s.status})`)
       .slice(0, 10);
+    const detail: Record<string, unknown> = {};
+    if (failedScenarios.length) detail.failedScenarios = failedScenarios;
+    if (liveness) detail.liveness = liveness;
     return this.prisma.guardianCheck.create({
       data: {
         projectId: project.id,
@@ -167,7 +199,7 @@ export class GuardianService implements OnModuleInit {
         passed: report?.passed ?? 0,
         failed: report?.failed ?? 0,
         manual: report?.manual ?? 0,
-        detail: failedScenarios.length ? { failedScenarios } : undefined,
+        detail: Object.keys(detail).length ? (detail as any) : undefined,
       },
     });
   }
