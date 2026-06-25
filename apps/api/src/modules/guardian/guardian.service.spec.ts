@@ -59,6 +59,16 @@ describe('GuardianService', () => {
       expect(service.computeHealth(report({ passRate: 0.7, overallScore: null })).status).toBe('degraded');
       expect(service.computeHealth(report({ passRate: 0.69, overallScore: null })).status).toBe('critical');
     });
+
+    it('线上不可达 → 直接 critical(0)，覆盖高静态分(修 #2)', () => {
+      expect(service.computeHealth(report({ passRate: 1, overallScore: 100 }), { reachable: false, detail: '不可达' }))
+        .toEqual({ healthScore: 0, status: 'critical' });
+    });
+
+    it('线上可达 → 不改变正常评分', () => {
+      expect(service.computeHealth(report({ passRate: 1, overallScore: 80 }), { reachable: true, detail: 'HTTP 200' }).status)
+        .toBe('healthy');
+    });
   });
 
   describe('runCheck', () => {
@@ -85,6 +95,21 @@ describe('GuardianService', () => {
       const rec = await service.runCheck('p1');
       expect(rec!.status).toBe('unknown');
       expect(rec!.healthScore).toBe(0);
+    });
+
+    it('线上探活失败 → critical 落库，detail 记 liveness(修 #2)', async () => {
+      prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: null, productionUrl: 'http://live/app' });
+      acceptance.verify.mockResolvedValue(report({ passRate: 1, overallScore: 95 }));
+      const origFetch = global.fetch;
+      global.fetch = jest.fn().mockRejectedValue(new Error('ECONNREFUSED')) as any;
+      try {
+        const rec = await service.runCheck('p1');
+        expect(rec!.status).toBe('critical');
+        expect(rec!.healthScore).toBe(0);
+        expect((rec!.detail as any).liveness.reachable).toBe(false);
+      } finally {
+        global.fetch = origFetch;
+      }
     });
 
     it('落库时摘要未通过场景', async () => {
