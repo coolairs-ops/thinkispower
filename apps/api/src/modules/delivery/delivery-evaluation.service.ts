@@ -289,6 +289,11 @@ export class DeliveryEvaluationService {
           contractConformant = conf.ok;
           if (!conf.ok) this.logger.warn(`[契约门] 越界资源(上线必404): ${conf.unknownResources.join('、')}`);
         } catch (e) { this.logger.warn(`[契约门] 校验异常(不拦): ${e}`); }
+      } else {
+        // 不静默放行(修 #8)：契约未验证就如实记录原因，避免"看起来过了契约门"的假象。
+        // 仍不阻断——无数据模型可能是纯前端(路A)的合法情形；区分"应有schema却缺失"留待后续。
+        const why = !this.schema ? 'schema 服务未注入' : !proj?.dataModel ? '无数据模型(纯前端或未生成)' : '无 demo';
+        this.logger.log(`[契约门] 未验证(不拦)：${why}`);
       }
       const staticUrl = `${process.env['APP_BASE_URL'] || 'http://localhost:3001'}/api/deploy/${projectId}`;
       const outcome = decideDeliveryOutcome({ compilationPassed, contractConformant, deployStatus, deployedUrl: deployedUrl || undefined, smokePassed, backendReady, staticUrl });

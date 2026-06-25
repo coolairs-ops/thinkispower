@@ -99,3 +99,30 @@
 ---
 
 > 触发实证：2026-06-25 排查 demo 综合分卡 71，查实 `runProductionDelivery` 的 compile/smoke/deploy 只 log 不拦、契约不进交付门、部署不健康仍置 completed → "通过验收 ≠ 能跑"。相关 [[project_followup_spec_gaps]]、[[project_roadmap_status]]、[[project_guardian_center]]、[[project_path_b_progress]]。
+
+---
+
+## Update（2026-06-25）：工程控制论全链路体检 + 修复路线图
+
+上线门焊实后做了一次全链路体检（追踪 DeepSeek 生成 → 测量 → 比较 → 修复 → 守护 → 控制器六环节，逐一取证）。核心结论：**纵向出口（生成→编译→部署→上线门→输出）已实打实、completed 已诚实；但横向反馈环（测量/修复/守护/控制器）此前都在「设计态(demo HTML/schema)」打转，没对准「运行态(真部署的程序)」。** 上线门是当时唯一真测运行态的环。
+
+### 八项隐患与修复状态
+
+| # | 隐患 | 修复 |
+|---|---|---|
+| 3 | `Project.status` 一个字段被生命周期与上线门结局共用：legacy completed 假"已上线"；门失败态污染状态机致孤儿态/Demo brick | **Slice A 已修**：新增 `Project.goLiveStatus` 独立字段；上线门只写它、不覆盖生命周期 `status`；前端读 `goLiveStatus`；迁移回填。 |
+| 4 | `decide('accept'/'view_demo')` 直接置 `status='completed'` 旁路上线门 | **Slice B 已修**：safety 部分由 Slice A 字段分离消解（completed 不再等于上线）；`view_demo` 不再改状态。 |
+| 7 | `delivery-orchestrator` 死代码（监听无 emitter 事件）与主交付竞争写 `status` | **Slice B 已修**：删除 orchestrator + spec + 注册。 |
+| 1 | 融合分 L2 取平台 DB 健康（恒高），真探活交付后端的 backend-smoke 被排除在总分外 | **Slice C 已修**：有真后端时 L2 分取 backend-smoke 真探活；无后端回退平台 L2。 |
+| 2 | 守护从不打线上 `productionUrl`，只验库存 demoHtml + 平台健康 | **Slice D 已修**：守护增加 liveness 真探活，线上不可达即 critical。 |
+| 8 | D3 契约门无 schema/dataModel 时静默放行 | **Slice E 已修**：未验证如实记录原因（仍不阻断纯前端的合法情形）。 |
+| 5 | 自迭代修复回路只改设计态(demoHtml/schema)，不碰运行态代码 | **边界（见下，刻意不强行重写）** |
+| 6 | 生成的运行骨架（CRUD server.js/Dockerfile/中间件）是注入的硬编码模板，非模型产物 | **边界（见下，刻意权衡）** |
+
+### 明确边界（刻意不做，避免过度工程）
+
+- **#5 自迭代 = 设计态打磨回路**：自迭代在 demoHtml/appSchema（设计态）内测→修→重测自洽收敛，是真闭环、分数真因修复而动；但它**不修复运行态全栈代码**。运行态的可运行性由上线门（D2 编译/D3 契约/D4 部署冒烟）在交付出口把关，不依赖自迭代。两者分工明确，不应让自迭代去"修后端代码"——那是另一套能力，当前刻意不建。
+- **#6 生成骨架 = 模板托底（刻意权衡）**：交付产物的运行骨架（Express CRUD `server.js`、标准化 Dockerfile、安全/可观测中间件）由 `injectEnterprisePack` 注入硬编码模板覆盖 AI 产物——这是为"稳定能跑"刻意做的托底（AI 生成的基础设施不稳定）。代价是"能跑"部分靠模板而非模型本身。保留此权衡；AI 产物质量由 Qwen 审查 + 编译门兜底。
+- **重复实现**：`sensor-fusion.service.ts` 是另一份未被 `runAll` 使用的融合实现；活路径是 `SensorService.fuse()`（已在 Slice C 修）。重复件应择机清理/标注，避免误改死路径。
+
+> 体检与修复：2026-06-25，分支 `feat/cybernetic-loop-fix`。Slice A–E 已落地并各自单测/构建验证；Slice A 浏览器实测过六态 + legacy completed 不再假已上线 + 门失败态不污染生命周期。
