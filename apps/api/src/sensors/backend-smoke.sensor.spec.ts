@@ -12,7 +12,7 @@ describe('BackendSmokeSensor', () => {
   beforeEach(() => {
     prisma = { project: { findUnique: jest.fn() } };
     backend = { health: jest.fn() };
-    sensor = new BackendSmokeSensor(prisma as never, backend as never);
+    sensor = new BackendSmokeSensor(prisma as never, backend as never, { health: jest.fn() } as never);
   });
 
   it('无数据后端 → 跳过，满分通过，不调 health', async () => {

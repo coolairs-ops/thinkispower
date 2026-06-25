@@ -80,7 +80,12 @@ describe('SchemaComposerService.compose', () => {
     const svc = new SchemaComposerService(mkSchema() as any, deepseek as any);
     const r = await svc.compose({ appName: '短剧', dataModel: 'x' });
     expect(r.source).toBe('llm');
-    expect(r.schema.pages).toHaveLength(1);
+    // 原 LLM 出 1 页(表格)，ensureCreateForm 确定性补 1 个"新增"表单页 → 2 页
+    expect(r.schema.pages).toHaveLength(2);
+    const formPage = r.schema.pages.find((p) => p.blocks.some((b) => b.type === 'form'));
+    expect(formPage).toBeTruthy();
+    const formBlk = formPage!.blocks.find((b) => b.type === 'form') as { bind: { resource: string } };
+    expect(formBlk.bind.resource).toBe('project');
   });
 
   it('LLM 抛错 → 退回确定性兜底', async () => {

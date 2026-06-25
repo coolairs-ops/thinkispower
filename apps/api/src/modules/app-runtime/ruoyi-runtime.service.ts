@@ -6,6 +6,7 @@ import { toMysqlCreateTable } from './ruoyi-ddl';
 import { ensureFkColumns, genTableMeta, synthesizeJoinEntities, RuoyiGenTableMeta } from './ruoyi-relations';
 import { ParsedModel } from './data-model.types';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
+import { loadRuoyiInstanceConfig } from './ruoyi-provision.config';
 
 /**
  * provision 的两个基础设施驱动端口（M3c-remaining 端到端已手工证通的步骤的代码化）。
@@ -154,8 +155,30 @@ export class RuoyiRuntime implements BackendRuntime {
     throw new Error('RuoyiRuntime.provision 窄签名无法驱动若依（缺角色/菜单/实例配）；用 provisionApp(spec,cfg,infra)');
   }
 
-  async health(_projectId: string, _descriptor: BackendRuntimeDescriptor): Promise<BackendHealth> {
-    throw new Error('RuoyiRuntime.health 待 M3c：探活若依实例 + 各资源可达');
+  /**
+   * 若依实例健康探活（ADR-0009 ③：上线门/传感器对若依分流——验运行的若依后端，不套路B schema 规则）。
+   * 实例可达(HTTP 监听，401/200/302 皆算在跑) + 资源已置备(status=ready) → 资源可达。
+   * 不用 schemaName 做 Postgres schema 校验（若依靠 tenant_id 隔离，schemaName=租户号数字开头）。
+   */
+  async health(_projectId: string, descriptor: BackendRuntimeDescriptor): Promise<BackendHealth> {
+    const cfg = loadRuoyiInstanceConfig();
+    const resources = descriptor.resources ?? [];
+    if (!cfg.enabled) {
+      return { healthy: false, resources: resources.map((r) => ({ name: r, reachable: false, detail: '未接入若依实例（缺 RUOYI_BASE_URL/RUOYI_SRC_ROOT）' })) };
+    }
+    let up = false;
+    let detail = '';
+    try {
+      const res = await fetch(cfg.client.baseUrl, { signal: AbortSignal.timeout(5000) });
+      up = res.status < 500; // 200/401/302 等都表示实例在监听
+      detail = up ? `若依实例可达 (HTTP ${res.status})` : `若依实例异常 (HTTP ${res.status})`;
+    } catch (e) {
+      detail = `若依实例不可达: ${e instanceof Error ? e.message : e}`;
+    }
+    return {
+      healthy: up && resources.length > 0,
+      resources: resources.map((r) => ({ name: r, reachable: up, detail: up ? '若依模块已置备·实例可达' : detail })),
+    };
   }
 
   async teardown(_projectId: string, _descriptor: BackendRuntimeDescriptor): Promise<void> {

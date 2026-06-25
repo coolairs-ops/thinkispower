@@ -63,7 +63,7 @@ describe('TemplateAppService（模板出页接进 serve 链）', () => {
     const r = await svc.buildAndStore('p1', 'gov-blue');
     expect(r.resource).toBe('scene'); // 跳过 user → 业务实体
     expect(store.demoHtml).toContain('"primaryResource":"scene"');
-    expect(store.demoHtml).not.toContain('"password"'); // 工作台不再暴露 user 的 password 列
+    expect(store.demoHtml).not.toMatch(/"columns":\[[^\]]*"password"/); // 工作台 columns 不含 user 的 password 列（登录门 type="password" 不算）
   });
 
   it('planSummary 的签名功能(生成类)出功能段 + 导航项（方案C确定性底座，反映业务需求）', async () => {

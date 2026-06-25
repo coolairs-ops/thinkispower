@@ -39,7 +39,7 @@ describe('路 B 端到端验收 (集成, 需真 Postgres)', () => {
     migration = new SchemaMigrationService(prisma as never);
     runtime = new CrudRuntime(prisma as never, migration);
     crud = new CrudDataService(prisma as never);
-    sensor = new BackendSmokeSensor(prisma as never, runtime as never);
+    sensor = new BackendSmokeSensor(prisma as never, runtime as never, { health: jest.fn() } as never);
     deployment = new DeploymentService(prisma as never, { get: (_k: string, d: unknown) => d } as never, [], runtime as never);
   });
 

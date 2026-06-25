@@ -58,6 +58,6 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     SchemaComposerService,
     QaService,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService, TemplateAppService, SchemaComposerService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiRuntime, RuoyiProvisionService, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService, TemplateAppService, SchemaComposerService],
 })
 export class AppRuntimeModule {}

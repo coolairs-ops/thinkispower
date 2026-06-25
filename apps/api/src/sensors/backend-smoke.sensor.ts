@@ -6,6 +6,7 @@ import {
   BackendRuntime,
   BackendRuntimeDescriptor,
 } from '../modules/app-runtime/backend-runtime.interface';
+import { RuoyiRuntime } from '../modules/app-runtime/ruoyi-runtime.service';
 
 /**
  * 后端连通传感器（ADR-0001 / slice 6）。
@@ -25,6 +26,7 @@ export class BackendSmokeSensor {
   constructor(
     private prisma: PrismaService,
     @Inject(BACKEND_RUNTIME) private backend: BackendRuntime,
+    private ruoyi: RuoyiRuntime,
   ) {}
 
   async run(projectId: string): Promise<SensorReport> {
@@ -40,9 +42,11 @@ export class BackendSmokeSensor {
       ]);
     }
 
+    // 按底座分流（ADR-0009 ③）：若依项目走 RuoyiRuntime 探活，不套 CrudRuntime(路B) 的 schema-IDENT 规则
+    const runtime: BackendRuntime = d.kind === 'ruoyi' ? this.ruoyi : this.backend;
     let health;
     try {
-      health = await this.backend.health(projectId, d);
+      health = await runtime.health(projectId, d);
     } catch (e) {
       this.logger.warn(`后端健康检查失败 (project ${projectId}): ${e instanceof Error ? e.message : e}`);
       return this.report(false, 0, [

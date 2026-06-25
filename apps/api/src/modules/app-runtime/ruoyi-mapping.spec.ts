@@ -88,10 +88,13 @@ describe('ruoyi-mapping（IR → 若依 codegen 输入 · M2）', () => {
       expect(out.store['controller.java.vm']).toBe('class X{}');
     });
 
-    it('窄签名 provision 抛错指向 provisionApp；health/teardown 诚实抛 M3c 待实现', async () => {
+    it('窄签名 provision 抛错指向 provisionApp；teardown 待 M3c 抛；health 已实现(实例探活，ADR-0009 ③)', async () => {
       await expect(svc.provision('p1', 'model X{}')).rejects.toThrow('provisionApp');
-      await expect(svc.health('p1', {} as any)).rejects.toThrow('M3c');
       await expect(svc.teardown('p1', {} as any)).rejects.toThrow('M3c');
+      // health 不再抛：未配实例(测试环境无 RUOYI_BASE_URL)→ 诚实返回 healthy:false + 资源不可达，而非抛错
+      const h = await svc.health('p1', { resources: [] } as any);
+      expect(h).toHaveProperty('healthy');
+      expect(Array.isArray(h.resources)).toBe(true);
     });
   });
 });

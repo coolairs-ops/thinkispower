@@ -11,6 +11,8 @@ import { DataContract, contractPromptBlock } from '../app-contract';
 
 const BLOCK_TYPES: BlockType[] = ['kpi', 'table', 'detail', 'form', 'generate', 'qa', 'richtext'];
 const GENERIC_TABLES = new Set(['user', 'users', 'account', 'accounts', 'auth', 'role', 'roles', 'permission', 'permissions', 'sysuser', 'session']);
+/** 表单不录入的系统/审计字段（主键、时间戳、若依框架列）——写交互页自动剔除。 */
+const SYSTEM_FIELDS = new Set(['id', 'createdat', 'updatedat', 'created_at', 'updated_at', 'create_by', 'create_time', 'update_by', 'update_time', 'create_dept', 'update_dept', 'tenant_id', 'del_flag', 'version', 'remark']);
 
 const slug = (s: string, i: number): string =>
   String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `p${i}`;
@@ -132,6 +134,29 @@ export function fallbackSchema(appName: string, contract: DataContract): AppSche
   return { appName, pages };
 }
 
+/**
+ * 确定性保证：主业务实体至少有一个"新增"录入页（form 块）——原定路线"前端套模板生成可写交互"的兜底，
+ * 不依赖 LLM 是否编排了 form。已存在该资源的 form 块则不重复加（幂等）。
+ */
+export function ensureCreateForm(schema: AppSchema, contract: DataContract): AppSchema {
+  const biz = contract.resources.filter((r) => !GENERIC_TABLES.has(r.name.toLowerCase()));
+  const primary = biz[0] ?? contract.resources[0];
+  if (!primary) return schema;
+  const hasForm = schema.pages.some((p) =>
+    p.blocks.some((b) => b.type === 'form' && (b as Extract<Block, { type: 'form' }>).bind.resource.toLowerCase() === primary.name.toLowerCase()),
+  );
+  if (hasForm) return schema;
+  const writable = primary.fields.filter((f) => !SYSTEM_FIELDS.has(f.toLowerCase()));
+  const fields = (writable.length ? writable : primary.fields).slice(0, 8);
+  const page: Page = {
+    key: slug('new-' + primary.name, schema.pages.length),
+    title: ('新增' + primary.name).slice(0, 20),
+    nav: { icon: 'plus', label: '新增' + primary.name },
+    blocks: [{ type: 'form', bind: { resource: primary.name, fields }, props: { title: '新增' + primary.name, submitLabel: '保存' } }],
+  };
+  return { ...schema, pages: [...schema.pages, page] };
+}
+
 /** 从 LLM 回复抽 JSON（去 ```json 围栏；失败再截首尾大括号）。 */
 export function extractJson(text: string): unknown {
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -155,6 +180,7 @@ const BLOCK_LIBRARY = [
   '- richtext：说明性 HTML。{ "type":"richtext", "props":{"html"} }',
   '硬约束：bind.resource 只能取数据契约里的资源名；fields 只能取该资源列出的字段。禁止臆造资源/字段。',
   'tabler 图标名填 nav.icon（如 layout-dashboard/users/login/books）。每页 2~5 个块，贴合该页职责。',
+  '必须可写：对主要业务实体至少编排一个 form 录入页（新增），让用户能真正创建数据，而不只是只读列表。',
 ].join('\n');
 
 /** 组件库 + 数据契约 → LLM 编排 prompt（先验约束：块类型只能取库、bind 只能取契约）。 */

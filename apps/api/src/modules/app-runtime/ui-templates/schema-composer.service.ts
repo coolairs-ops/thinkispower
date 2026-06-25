@@ -3,7 +3,7 @@ import { SchemaMigrationService } from '../schema-migration.service';
 import { DeepseekService } from '../../../services/deepseek.service';
 import { buildDataContract, normalizeContractForRuntime, DataContract } from '../app-contract';
 import { AppSchema } from './page-schema.types';
-import { coerceSchema, fallbackSchema, extractJson, buildComposePrompt, buildRevisePrompt } from './schema-composer';
+import { coerceSchema, fallbackSchema, ensureCreateForm, extractJson, buildComposePrompt, buildRevisePrompt } from './schema-composer';
 
 /**
  * Schema 编排服务（Schema 驱动 S2）：需求/数据模型 → AppSchema。
@@ -31,7 +31,7 @@ export class SchemaComposerService {
     const contract = this.contractOf(input.dataModel, input.backendKind);
 
     if (!this.deepseek || !input.dataModel) {
-      return { schema: fallbackSchema(input.appName, contract), source: 'fallback', dropped: [] };
+      return { schema: ensureCreateForm(fallbackSchema(input.appName, contract), contract), source: 'fallback', dropped: [] };
     }
 
     try {
@@ -43,14 +43,15 @@ export class SchemaComposerService {
       const { schema, dropped } = coerceSchema(extractJson(resp || ''), contract);
       if (schema && schema.pages.length) {
         if (dropped.length) this.logger.warn(`schema 编排丢弃越界项 ${dropped.length}: ${dropped.slice(0, 5).join(' | ')}`);
-        this.logger.log(`schema 编排完成 (LLM): ${schema.pages.length} 页`);
-        return { schema, source: 'llm', dropped };
+        const withForm = ensureCreateForm(schema, contract);
+        this.logger.log(`schema 编排完成 (LLM): ${withForm.pages.length} 页`);
+        return { schema: withForm, source: 'llm', dropped };
       }
       this.logger.warn(`LLM schema 无合法页（${dropped.join('；') || '空'}），退回确定性兜底`);
     } catch (e) {
       this.logger.warn(`LLM schema 编排失败，退回兜底: ${e instanceof Error ? e.message : e}`);
     }
-    return { schema: fallbackSchema(input.appName, contract), source: 'fallback', dropped: [] };
+    return { schema: ensureCreateForm(fallbackSchema(input.appName, contract), contract), source: 'fallback', dropped: [] };
   }
 
   /**
