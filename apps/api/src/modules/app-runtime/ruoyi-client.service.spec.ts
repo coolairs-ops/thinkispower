@@ -138,6 +138,7 @@ describe('RuoyiClient（若依 codegen REST 客户端 · M3b）', () => {
       let putBody: any;
       global.fetch = jest.fn(async (url: string, opts: any) => {
         if (url.endsWith('/auth/login')) return jsonRes({ code: 200, data: { access_token: 'tok' } });
+        if (url.includes('/tool/gen/list')) return jsonRes({ rows: [{ tableId: 1, tableName: 'customer', moduleName: 'system', businessName: 'customer', functionName: '客户' }] });
         if (url.includes('/system/menu/list')) return jsonRes({ data: menus.map((m) => ({ ...m })) });
         if (url.endsWith('/system/menu') && opts.method === 'POST') {
           const b = JSON.parse(opts.body);

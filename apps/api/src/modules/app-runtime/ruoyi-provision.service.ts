@@ -106,7 +106,7 @@ export class RuoyiProvisionService {
     const deployer = new RuoyiLocalDeployer(this.client, this.cfg.deploy);
     const infra: RuoyiProvisionInfra = {
       applyDdl: (stmts) => new RuoyiMysqlDdlDriver(this.cfg.mysql).applyDdl(stmts),
-      deploySources: (rcfg, tables) => deployer.deploySources(rcfg, tables),
+      deploySources: (rcfg, tables, labels) => deployer.deploySources(rcfg, tables, labels),
       waitReady: () => deployer.waitReady(),
     };
     const checkpoint = this.makeCheckpoint(projectId);

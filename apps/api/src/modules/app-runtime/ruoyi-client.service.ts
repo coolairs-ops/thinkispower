@@ -53,6 +53,15 @@ export class RuoyiClient {
     return row.tableId;
   }
 
+  /** 取 gen_table 元信息：若依按 business_name/module_name(非原表名)生成 vue 路径/组件/权限，建菜单必须对齐。 */
+  async getGenMeta(cfg: RuoyiClientConfig, token: string, tableName: string): Promise<{ tableId: number; moduleName: string; businessName: string; functionName: string }> {
+    const data = await this.get(cfg, `/tool/gen/list?tableName=${encodeURIComponent(tableName)}`, token);
+    const rows = (data?.rows ?? data?.data ?? []) as Array<{ tableId: number; tableName: string; moduleName?: string; businessName?: string; functionName?: string }>;
+    const row = rows.find((r) => r.tableName === tableName) ?? rows[0];
+    if (!row?.tableId) throw new Error(`未找到 gen_table: ${tableName}`);
+    return { tableId: row.tableId, moduleName: row.moduleName || 'system', businessName: row.businessName || tableName, functionName: row.functionName || tableName };
+  }
+
   /** 预览生成代码：返回 { 文件名: 代码 }（内存，不落盘）。 */
   async previewCode(cfg: RuoyiClientConfig, token: string, tableId: number): Promise<Record<string, string>> {
     const data = await this.get(cfg, `/tool/gen/preview/${tableId}`, token);
@@ -281,28 +290,39 @@ export class RuoyiClient {
   ): Promise<{ menusCreated: number; rolesGranted: number }> {
     if (!resources.length || !roleKeys.length) return { menusCreated: 0, rolesGranted: 0 };
     const token = await this.login(cfg);
-    const moduleName = opts.module ?? 'system';
     const labels = opts.labels ?? {};
     const fActions = opts.actions ?? ['query', 'add', 'edit', 'remove', 'export']; // 'list' 由 C 页菜单承载
-    const listPerms = resources.map((r) => `${moduleName}:${r}:list`);
-    const fPerms = resources.flatMap((r) => fActions.map((a) => `${moduleName}:${r}:${a}`));
+    // 按 gen_table 元信息派生路径/权限：若依按 business_name/module_name(剥表前缀)而非原表名生成 vue/控制器/权限。
+    // function_name 已被 ① applyGenLabels 写成中文 → 直接作菜单名。
+    const metas: Array<{ resource: string; moduleName: string; businessName: string; name: string }> = [];
+    for (const r of resources) {
+      try {
+        const m = await this.getGenMeta(cfg, token, r);
+        metas.push({ resource: r, moduleName: m.moduleName, businessName: m.businessName, name: m.functionName || labels[r]?.functionName || m.businessName });
+      } catch (e) {
+        this.logger.warn(`seedMenusAndGrant: 取 gen 元信息失败(${r})，跳过该资源: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    if (!metas.length) return { menusCreated: 0, rolesGranted: 0 };
+    const listPerms = metas.map((m) => `${m.moduleName}:${m.businessName}:list`);
+    const fPerms = metas.flatMap((m) => fActions.map((a) => `${m.moduleName}:${m.businessName}:${a}`));
 
     let permMap = await this.listMenuPerms(cfg, token);
     let menusCreated = 0;
     // 业务一级目录（幂等）
     const dirId = await this.ensureBizDir(cfg, token);
-    // 每资源建 C 页菜单（承载 list 权限，让控制台可导航；菜单名优先用中文 functionName）
-    for (const r of resources) {
-      if (permMap.has(`${moduleName}:${r}:list`)) continue;
-      await this.createConsoleMenu(cfg, token, dirId, r, labels[r]?.functionName || r, moduleName);
+    // 每资源建 C 页菜单（承载 list 权限，让控制台可导航；component/path/perms 用 businessName，菜单名用中文 functionName）
+    for (const m of metas) {
+      if (permMap.has(`${m.moduleName}:${m.businessName}:list`)) continue;
+      await this.createConsoleMenu(cfg, token, dirId, m.businessName, m.name, m.moduleName);
       menusCreated++;
     }
     if (menusCreated) permMap = await this.listMenuPerms(cfg, token);
     // 每资源建 F 按钮权限点（挂在其 C 菜单下）
-    for (const r of resources) {
-      const cMenuId = permMap.get(`${moduleName}:${r}:list`) ?? 0;
+    for (const m of metas) {
+      const cMenuId = permMap.get(`${m.moduleName}:${m.businessName}:list`) ?? 0;
       for (const a of fActions) {
-        const p = `${moduleName}:${r}:${a}`;
+        const p = `${m.moduleName}:${m.businessName}:${a}`;
         if (permMap.has(p)) continue;
         await this.createPermMenu(cfg, token, p, cMenuId);
         menusCreated++;
