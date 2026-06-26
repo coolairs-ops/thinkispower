@@ -129,25 +129,23 @@ describe('RuoyiClient（若依 codegen REST 客户端 · M3b）', () => {
   });
 
   describe('seedMenusAndGrant（接口权限点 + 绑角色 · 坎1）', () => {
-    it('缺的 perms 才建；角色菜单取并集（保留原有），PUT 带 menuIds', async () => {
-      const created: string[] = [];
+    it('建业务目录 + C页菜单(承载list) + F权限点(挂C下) 并绑角色(并集保留原有)', async () => {
+      // 有状态 mock：菜单累积，/system/menu/list 返回当前全部
+      const menus: Array<{ menuId: number; perms?: string; menuName?: string; menuType?: string }> = [];
+      const createdPerms: string[] = [];
+      let dirCreated = false;
+      let nextId = 90000;
       let putBody: any;
-      let menuListCalls = 0;
       global.fetch = jest.fn(async (url: string, opts: any) => {
         if (url.endsWith('/auth/login')) return jsonRes({ code: 200, data: { access_token: 'tok' } });
-        if (url.includes('/system/menu/list')) {
-          menuListCalls++;
-          // 首列：customer:list 已存在(id 90001)；其余缺。二列(建完后)：全在。
-          const base = [{ menuId: 90001, perms: 'system:customer:list' }];
-          const rest = [
-            { menuId: 90002, perms: 'system:customer:query' },
-            { menuId: 90003, perms: 'system:customer:add' },
-            { menuId: 90004, perms: 'system:customer:edit' },
-            { menuId: 90005, perms: 'system:customer:remove' },
-          ];
-          return jsonRes({ data: menuListCalls === 1 ? base : [...base, ...rest] });
+        if (url.includes('/system/menu/list')) return jsonRes({ data: menus.map((m) => ({ ...m })) });
+        if (url.endsWith('/system/menu') && opts.method === 'POST') {
+          const b = JSON.parse(opts.body);
+          menus.push({ menuId: ++nextId, perms: b.perms, menuName: b.menuName, menuType: b.menuType });
+          if (b.menuType === 'M') dirCreated = true;
+          else if (b.perms) createdPerms.push(b.perms);
+          return jsonRes({ code: 200 });
         }
-        if (url.endsWith('/system/menu') && opts.method === 'POST') { created.push(JSON.parse(opts.body).perms); return jsonRes({ code: 200 }); }
         if (url.includes('/system/role/list')) return jsonRes({ rows: [{ roleId: '2068', roleKey: 'app_role_2' }] });
         if (url.includes('/system/menu/roleMenuTreeselect/2068')) return jsonRes({ data: { checkedKeys: [777] } }); // 角色原有菜单 777
         if (url.match(/\/system\/role\/2068$/) && opts.method === 'GET') return jsonRes({ code: 200, data: { roleId: '2068', roleKey: 'app_role_2', roleName: '普通', dataScope: '5', status: '0' } });
@@ -156,12 +154,17 @@ describe('RuoyiClient（若依 codegen REST 客户端 · M3b）', () => {
       }) as any;
 
       const r = await client.seedMenusAndGrant(cfg, ['customer'], ['app_role_2']);
-      expect(r.menusCreated).toBe(4); // list 已存在，其余 4 个新建
-      expect(created.sort()).toEqual(['system:customer:add', 'system:customer:edit', 'system:customer:query', 'system:customer:remove']);
+      expect(dirCreated).toBe(true); // 建了业务目录(menu_type=M)
+      // C 页菜单承载 list；F 五项 query/add/edit/remove/export
+      expect(createdPerms.sort()).toEqual([
+        'system:customer:add', 'system:customer:edit', 'system:customer:export',
+        'system:customer:list', 'system:customer:query', 'system:customer:remove',
+      ]);
+      expect(r.menusCreated).toBe(6); // 1 C + 5 F
       expect(r.rolesGranted).toBe(1);
-      // 并集：原有 777 + 5 个 customer 权限点；dataScope 不动
-      expect(putBody.menuIds.sort()).toEqual([777, 90001, 90002, 90003, 90004, 90005]);
-      expect(putBody.dataScope).toBe('5');
+      expect(putBody.dataScope).toBe('5'); // dataScope 不动
+      expect(putBody.menuIds).toContain(777); // 原有菜单保留(并集)
+      expect(putBody.menuIds.length).toBeGreaterThanOrEqual(7); // 777 + 目录 + C + 5F
     });
 
     it('无资源或无角色 → 直接返回零，不登录', async () => {

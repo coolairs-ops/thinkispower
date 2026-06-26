@@ -88,11 +88,31 @@ export class RuoyiClient {
   }
 
   /** 导表并下载 zip（部署驱动用）：登录→importTable→findTableId→downloadZip。 */
-  async importAndDownload(cfg: RuoyiClientConfig, tableName: string): Promise<Buffer> {
+  async importAndDownload(cfg: RuoyiClientConfig, tableName: string, labels?: { functionName?: string; columns?: Record<string, string> }): Promise<Buffer> {
     const token = await this.login(cfg);
     await this.importTable(cfg, token, tableName);
     const tableId = await this.findTableId(cfg, token, tableName);
+    if (labels) await this.applyGenLabels(cfg, token, tableId, labels); // 下载前把中文标签写进 gen → vue/弹窗/列头自动中文(ADR-0012 ①)
     return this.downloadZip(cfg, token, tableId);
+  }
+
+  /** 把中文标签写进 codegen 配置：GET /tool/gen/{id} → 改 functionName + 各列 columnComment → PUT。失败只 warn 不阻断(回退英文)。 */
+  async applyGenLabels(cfg: RuoyiClientConfig, token: string, tableId: number, labels: { functionName?: string; columns?: Record<string, string> }): Promise<void> {
+    try {
+      const data = await this.get(cfg, `/tool/gen/${tableId}`, token);
+      const info = data?.data?.info as { functionName?: string } | undefined;
+      const rows = data?.data?.rows as Array<{ columnName: string; columnComment?: string }> | undefined;
+      if (!info || !Array.isArray(rows)) { this.logger.warn(`applyGenLabels: gen ${tableId} 无 info/rows，跳过`); return; }
+      if (labels.functionName) info.functionName = labels.functionName;
+      for (const row of rows) {
+        const c = labels.columns?.[row.columnName];
+        if (c) row.columnComment = c;
+      }
+      const put = await this.put(cfg, '/tool/gen', { ...info, columns: rows }, token);
+      if (put?.code !== 200) this.logger.warn(`applyGenLabels PUT 非200(${tableId}): ${JSON.stringify(put).slice(0, 150)}`);
+    } catch (e) {
+      this.logger.warn(`applyGenLabels 失败(${tableId})，回退英文: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   // ─── RBAC 运行时配（混合管线：角色/数据权限走运行时 SQL，零重编译，见 ADR-0003 §4）───
@@ -212,10 +232,34 @@ export class RuoyiClient {
   }
 
   /** 建一个按钮权限点（menu_type=F，parentId=0）。perms 已存在应先经 listMenuPerms 去重避免重复建。 */
-  private async createPermMenu(cfg: RuoyiClientConfig, token: string, perms: string): Promise<void> {
-    const body = { menuName: perms.slice(0, 50), parentId: 0, menuType: 'F', perms, orderNum: 90, isFrame: '1', isCache: '0', visible: '1', status: '0', icon: '#' };
+  private async createPermMenu(cfg: RuoyiClientConfig, token: string, perms: string, parentId: string | number = 0): Promise<void> {
+    const body = { menuName: perms.slice(0, 50), parentId, menuType: 'F', perms, orderNum: 90, isFrame: '1', isCache: '0', visible: '1', status: '0', icon: '#' };
     const data = await this.post(cfg, '/system/menu', body, token);
     if (data?.code !== 200) throw new Error(`createMenu 失败(${perms}): ${JSON.stringify(data).slice(0, 200)}`);
+  }
+
+  /** 业务目录(menu_type=M, parent 0)；幂等：已存在同名目录返回其 id。生成的控制台页归到此一级目录。 */
+  private async ensureBizDir(cfg: RuoyiClientConfig, token: string, name = '业务模块'): Promise<string | number> {
+    const findDir = async (): Promise<string | number | undefined> => {
+      const list = await this.get(cfg, '/system/menu/list', token);
+      const arr = (list?.data ?? list?.rows ?? []) as Array<{ menuName?: string; menuType?: string; menuId?: string | number }>;
+      return arr.find((m) => m.menuName === name && m.menuType === 'M')?.menuId;
+    };
+    const existing = await findDir();
+    if (existing != null) return existing;
+    const body = { menuName: name, parentId: 0, menuType: 'M', orderNum: 50, path: 'biz', isFrame: '1', isCache: '0', visible: '1', status: '0', icon: 'tree-table' };
+    const data = await this.post(cfg, '/system/menu', body, token);
+    if (data?.code !== 200) throw new Error(`建业务目录失败: ${JSON.stringify(data).slice(0, 150)}`);
+    const id = await findDir();
+    if (id == null) throw new Error('建业务目录后取 id 失败');
+    return id;
+  }
+
+  /** 控制台页菜单(menu_type=C)：component=<module>/<resource>/index, perms=<module>:<resource>:list。让实体在若依控制台可导航。 */
+  private async createConsoleMenu(cfg: RuoyiClientConfig, token: string, parentId: string | number, resource: string, menuName: string, moduleName: string): Promise<void> {
+    const body = { menuName, parentId, menuType: 'C', path: resource, component: `${moduleName}/${resource}/index`, perms: `${moduleName}:${resource}:list`, orderNum: 1, isFrame: '1', isCache: '0', visible: '1', status: '0', icon: 'form' };
+    const data = await this.post(cfg, '/system/menu', body, token);
+    if (data?.code !== 200) throw new Error(`建控制台菜单失败(${resource}): ${JSON.stringify(data).slice(0, 200)}`);
   }
 
   /** 角色当前已绑菜单 id（roleMenuTreeselect.checkedKeys）。 */
@@ -233,24 +277,39 @@ export class RuoyiClient {
     cfg: RuoyiClientConfig,
     resources: string[],
     roleKeys: string[],
-    opts: { module?: string; actions?: string[] } = {},
+    opts: { module?: string; actions?: string[]; labels?: Record<string, { functionName?: string }> } = {},
   ): Promise<{ menusCreated: number; rolesGranted: number }> {
     if (!resources.length || !roleKeys.length) return { menusCreated: 0, rolesGranted: 0 };
     const token = await this.login(cfg);
     const moduleName = opts.module ?? 'system';
-    const actions = opts.actions ?? ['list', 'query', 'add', 'edit', 'remove'];
-    const wantPerms = resources.flatMap((r) => actions.map((a) => `${moduleName}:${r}:${a}`));
+    const labels = opts.labels ?? {};
+    const fActions = opts.actions ?? ['query', 'add', 'edit', 'remove', 'export']; // 'list' 由 C 页菜单承载
+    const listPerms = resources.map((r) => `${moduleName}:${r}:list`);
+    const fPerms = resources.flatMap((r) => fActions.map((a) => `${moduleName}:${r}:${a}`));
 
-    // ① 确保权限点存在（缺的才建）
     let permMap = await this.listMenuPerms(cfg, token);
     let menusCreated = 0;
-    for (const perms of wantPerms) {
-      if (permMap.has(perms)) continue;
-      await this.createPermMenu(cfg, token, perms);
+    // 业务一级目录（幂等）
+    const dirId = await this.ensureBizDir(cfg, token);
+    // 每资源建 C 页菜单（承载 list 权限，让控制台可导航；菜单名优先用中文 functionName）
+    for (const r of resources) {
+      if (permMap.has(`${moduleName}:${r}:list`)) continue;
+      await this.createConsoleMenu(cfg, token, dirId, r, labels[r]?.functionName || r, moduleName);
       menusCreated++;
     }
+    if (menusCreated) permMap = await this.listMenuPerms(cfg, token);
+    // 每资源建 F 按钮权限点（挂在其 C 菜单下）
+    for (const r of resources) {
+      const cMenuId = permMap.get(`${moduleName}:${r}:list`) ?? 0;
+      for (const a of fActions) {
+        const p = `${moduleName}:${r}:${a}`;
+        if (permMap.has(p)) continue;
+        await this.createPermMenu(cfg, token, p, cMenuId);
+        menusCreated++;
+      }
+    }
     if (menusCreated) permMap = await this.listMenuPerms(cfg, token); // 取新建的 menuId
-    const wantMenuIds = wantPerms.map((p) => permMap.get(p)).filter((x): x is string | number => x != null);
+    const wantMenuIds = [dirId, ...listPerms.map((p) => permMap.get(p)), ...fPerms.map((p) => permMap.get(p))].filter((x): x is string | number => x != null);
 
     // ② 绑给业务角色（并集；getRole 取全字段，PUT 带 menuIds，dataScope 不变）
     const roleMap = await this.listRoles(cfg, token);

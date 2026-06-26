@@ -6,6 +6,7 @@ import { dirname, join, posix } from 'node:path';
 import AdmZip from 'adm-zip';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
 import { injectDataPermission } from './ruoyi-data-permission';
+import type { ConsoleLabels } from './ruoyi-label-gen';
 
 const execAsync = promisify(exec);
 
@@ -56,11 +57,11 @@ export class RuoyiLocalDeployer {
    * 探活拆出（waitReady），让 provisionApp 在"编译重启完成"与"探活就绪"间打断点——
    * 探活超时重跑只需再 waitReady，不必重编译（编译/冷启是最贵的一段）。
    */
-  async deploySources(ruoyiCfg: RuoyiClientConfig, tables: string[]): Promise<void> {
+  async deploySources(ruoyiCfg: RuoyiClientConfig, tables: string[], labels?: ConsoleLabels): Promise<void> {
     if (!tables.length) return;
     let written = 0;
     for (const table of tables) {
-      const zip = await this.client.importAndDownload(ruoyiCfg, table);
+      const zip = await this.client.importAndDownload(ruoyiCfg, table, labels?.[table]);
       written += await this.writeBackendFiles(zip, table);
     }
     this.logger.log(`部署：${tables.length} 表 / ${written} 个后端文件落盘 → 编译 ${this.cfg.module}`);

@@ -29,7 +29,7 @@ describe('RuoyiProvisionService', () => {
     const { svc, prisma, runtime } = make(baseEnv);
     expect(svc.enabled).toBe(true);
     const res = await svc.provision('p1', spec);
-    expect(runtime.provisionApp).toHaveBeenCalledWith('p1', spec, expect.objectContaining({ baseUrl: 'http://127.0.0.1:8080' }), expect.anything(), expect.anything());
+    expect(runtime.provisionApp).toHaveBeenCalledWith('p1', spec, expect.objectContaining({ baseUrl: 'http://127.0.0.1:8080' }), expect.anything(), expect.anything(), expect.anything());
     expect(prisma.project.update).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { backendRuntime: res.descriptor } });
   });
 

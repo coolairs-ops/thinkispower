@@ -1,7 +1,9 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service';
+import { DeepseekService } from '../../services/deepseek.service';
+import { generateConsoleLabels } from './ruoyi-label-gen';
 import { AppSpec } from './app-spec.types';
 import { ProvisionResult, ProvisionPhase } from './backend-runtime.interface';
 import { RuoyiClient } from './ruoyi-client.service';
@@ -31,6 +33,7 @@ export class RuoyiProvisionService {
     private readonly runtime: RuoyiRuntime,
     private readonly assembler: AppSpecAssemblerService,
     @InjectQueue(RUOYI_PROVISION_QUEUE) private readonly queue: Queue,
+    @Optional() private readonly deepseek?: DeepseekService,
   ) {
     this.cfg = loadRuoyiInstanceConfig();
   }
@@ -108,7 +111,9 @@ export class RuoyiProvisionService {
     };
     const checkpoint = this.makeCheckpoint(projectId);
     this.logger.log(`若依 provision 开始 project=${projectId} 实体=${spec.entities.length} 角色=${spec.roles?.length ?? 0}`);
-    const result = await this.runtime.provisionApp(projectId, spec, this.cfg.client, infra, checkpoint);
+    // ADR-0012 ①：LLM 生成中文标签（functionName/字段注释）→ 喂 codegen，控制台页/弹窗/列头自动中文。失败回退英文。
+    const labels = await generateConsoleLabels(this.deepseek, spec.entities);
+    const result = await this.runtime.provisionApp(projectId, spec, this.cfg.client, infra, checkpoint, labels);
     await this.prisma.project.update({
       where: { id: projectId },
       data: { backendRuntime: result.descriptor as never }, // 终态 descriptor 不带 phase（清空续跑标记）

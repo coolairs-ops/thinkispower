@@ -7,6 +7,7 @@ import { ensureFkColumns, genTableMeta, synthesizeJoinEntities, RuoyiGenTableMet
 import { ParsedModel } from './data-model.types';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
 import { loadRuoyiInstanceConfig } from './ruoyi-provision.config';
+import type { ConsoleLabels } from './ruoyi-label-gen';
 
 /**
  * provision 的两个基础设施驱动端口（M3c-remaining 端到端已手工证通的步骤的代码化）。
@@ -19,8 +20,8 @@ import { loadRuoyiInstanceConfig } from './ruoyi-provision.config';
 export interface RuoyiProvisionInfra {
   /** 在若依 MySQL 执行建表 DDL（幂等）。RuoyiMysqlDdlDriver 实现。 */
   applyDdl(statements: string[]): Promise<void>;
-  /** 部署 codegen 源码并重启（importTable+下载→写工程→编译→重启，**不等就绪**）。RuoyiLocalDeployer.deploySources。 */
-  deploySources(cfg: RuoyiClientConfig, tables: string[]): Promise<void>;
+  /** 部署 codegen 源码并重启（importTable+[设中文标签]+下载→写工程→编译→重启，**不等就绪**）。RuoyiLocalDeployer.deploySources。 */
+  deploySources(cfg: RuoyiClientConfig, tables: string[], labels?: ConsoleLabels): Promise<void>;
   /** 探活：轮询直到实例真就绪（收到非 5xx）。RuoyiLocalDeployer.waitReady。 */
   waitReady(): Promise<void>;
 }
@@ -105,6 +106,7 @@ export class RuoyiRuntime implements BackendRuntime {
     cfg: RuoyiClientConfig,
     infra: RuoyiProvisionInfra,
     checkpoint: ProvisionCheckpoint = NOOP_CHECKPOINT,
+    labels: ConsoleLabels = {},
   ): Promise<ProvisionResult> {
     const entities = this.withRelations(spec);
     const tables = entities.map((e) => e.table);
@@ -118,7 +120,7 @@ export class RuoyiRuntime implements BackendRuntime {
     }
     // ② 部署源码→单模块编译→重启（一次性，含全部表；最贵，断点续跑的关键不重做点）
     if (!phaseReached(from, 'deployed')) {
-      await infra.deploySources(cfg, tables);
+      await infra.deploySources(cfg, tables, labels);
       await checkpoint.save('deployed');
     }
     // ②' 探活就绪（与部署分相位：探活超时重跑只等就绪、不重编译）
@@ -134,8 +136,9 @@ export class RuoyiRuntime implements BackendRuntime {
           cfg,
           spec.roles.map((r, i) => ({ roleName: r.name, roleKey: roleKeys[i], dataScope: r.dataScope })),
         );
-        // 坎1：种按钮权限点(sys_menu)并绑业务角色——否则终端用户调生成接口被 @SaCheckPermission 挡成 403
-        await this.client.seedMenusAndGrant(cfg, tables, roleKeys);
+        // 坎1：种控制台页菜单(C)+按钮权限点(F)并绑业务角色——否则控制台无导航/终端用户调接口被 @SaCheckPermission 挡 403。
+        // labels 传入：C 菜单名用中文 functionName（ADR-0012 ①③）。
+        await this.client.seedMenusAndGrant(cfg, tables, roleKeys, { labels });
       }
       await checkpoint.save('seeded');
     }
