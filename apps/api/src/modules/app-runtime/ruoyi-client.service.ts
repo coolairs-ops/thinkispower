@@ -274,7 +274,24 @@ export class RuoyiClient {
   /** 角色当前已绑菜单 id（roleMenuTreeselect.checkedKeys）。 */
   private async roleMenuCheckedKeys(cfg: RuoyiClientConfig, token: string, roleId: string | number): Promise<Array<string | number>> {
     const data = await this.get(cfg, `/system/menu/roleMenuTreeselect/${roleId}`, token);
-    return (data?.data?.checkedKeys ?? data?.checkedKeys ?? []) as Array<string | number>;
+    const checked = (data?.data?.checkedKeys ?? data?.checkedKeys ?? []) as Array<string | number>;
+    // checkedKeys 只含叶子（父级 C/M 算"半选"不返回）。增量授权时 union 后整表 PUT 会把已绑父菜单覆盖删掉
+    // （实测：分多次补单个资源时旧资源的 C 菜单消失）。用树的 parentId 把每个叶子的祖先补回，保证 union 不丢父级。
+    const menus = (data?.data?.menus ?? data?.menus ?? []) as Array<{ id: string | number; parentId?: string | number; children?: unknown[] }>;
+    const parentOf = new Map<string | number, string | number>();
+    const flatten = (nodes: typeof menus) => {
+      for (const n of nodes || []) {
+        if (n.parentId != null) parentOf.set(n.id, n.parentId);
+        if (Array.isArray(n.children) && n.children.length) flatten(n.children as typeof menus);
+      }
+    };
+    flatten(menus);
+    const full = new Set<string | number>(checked);
+    for (const k of checked) {
+      let p = parentOf.get(k);
+      while (p != null && p !== 0 && p !== '0' && !full.has(p)) { full.add(p); p = parentOf.get(p); }
+    }
+    return Array.from(full);
   }
 
   /**
