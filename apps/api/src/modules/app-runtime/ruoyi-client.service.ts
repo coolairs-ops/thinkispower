@@ -44,6 +44,15 @@ export class RuoyiClient {
     if (data?.code !== 200) throw new Error(`importTable 失败: ${JSON.stringify(data).slice(0, 200)}`);
   }
 
+  /** 删 gen_table 里所有同名表的旧行（②：保证 importTable 后只剩一条，下游按表名取唯一）。无则跳过。 */
+  private async clearGenTable(cfg: RuoyiClientConfig, token: string, tableName: string): Promise<void> {
+    const data = await this.get(cfg, `/tool/gen/list?tableName=${encodeURIComponent(tableName)}`, token);
+    const rows = (data?.rows ?? data?.data ?? []) as Array<{ tableId: number | string; tableName: string }>;
+    const ids = rows.filter((r) => r.tableName === tableName && r.tableId != null).map((r) => r.tableId);
+    if (!ids.length) return;
+    await this.del(cfg, `/tool/gen/${ids.join(',')}`, token);
+  }
+
   /** 按表名查 gen_table 的 tableId。 */
   async findTableId(cfg: RuoyiClientConfig, token: string, tableName: string): Promise<number> {
     const data = await this.get(cfg, `/tool/gen/list?tableName=${encodeURIComponent(tableName)}`, token);
@@ -99,6 +108,7 @@ export class RuoyiClient {
   /** 导表并下载 zip（部署驱动用）：登录→importTable→findTableId→downloadZip。 */
   async importAndDownload(cfg: RuoyiClientConfig, tableName: string, labels?: { functionName?: string; columns?: Record<string, string> }): Promise<Buffer> {
     const token = await this.login(cfg);
+    await this.clearGenTable(cfg, token, tableName); // ② 清同名旧 gen_table 行，防多次置备累积 dup(下游 findTableId/getGenMeta 只能"挑一条"兜底)
     await this.importTable(cfg, token, tableName);
     const tableId = await this.findTableId(cfg, token, tableName);
     if (labels) await this.applyGenLabels(cfg, token, tableId, labels); // 下载前把中文标签写进 gen → vue/弹窗/列头自动中文(ADR-0012 ①)

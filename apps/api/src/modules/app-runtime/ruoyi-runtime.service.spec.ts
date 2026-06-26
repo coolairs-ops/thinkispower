@@ -46,11 +46,11 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
     // 顺序：ddl → deploy → 探活 → seed角色 → 种权限点并绑角色
     expect(order).toEqual(['ddl:3', 'deploy:student,course,student_course', 'ready', 'seed', 'grant']);
     // 权限点种子按表名+角色 key 绑（解生成接口 403）
-    expect((client.seedMenusAndGrant as jest.Mock).mock.calls[0]).toEqual([cfg, ['student', 'course', 'student_course'], ['app_role_1', 'app_role_2'], { labels: {} }]);
-    // 角色映射：中文名取不出 ascii → app_role_N；dataScope 透传
+    expect((client.seedMenusAndGrant as jest.Mock).mock.calls[0]).toEqual([cfg, ['student', 'course', 'student_course'], ['p1_role_1', 'p1_role_2'], { labels: {} }]);
+    // 角色映射(ADR-0012 ④)：roleKey 带项目域前缀 `<scope>_`，roleName 带项目标签 `·<scope>`，防跨项目撞键/撞名；dataScope 透传
     expect((client.seedRoles as jest.Mock).mock.calls[0][1]).toEqual([
-      { roleName: '管理员', roleKey: 'app_role_1', dataScope: '1' },
-      { roleName: '店员', roleKey: 'app_role_2', dataScope: '5' },
+      { roleName: '管理员·p1', roleKey: 'p1_role_1', dataScope: '1' },
+      { roleName: '店员·p1', roleKey: 'p1_role_2', dataScope: '5' },
     ]);
     expect(res.descriptor).toMatchObject({ kind: 'ruoyi', status: 'ready', resources: expect.arrayContaining(['student_course']) });
   });

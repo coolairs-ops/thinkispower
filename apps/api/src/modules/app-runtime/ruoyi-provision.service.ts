@@ -113,7 +113,10 @@ export class RuoyiProvisionService {
     this.logger.log(`若依 provision 开始 project=${projectId} 实体=${spec.entities.length} 角色=${spec.roles?.length ?? 0}`);
     // ADR-0012 ①：LLM 生成中文标签（functionName/字段注释）→ 喂 codegen，控制台页/弹窗/列头自动中文。失败回退英文。
     const labels = await generateConsoleLabels(this.deepseek, spec.entities);
-    const result = await this.runtime.provisionApp(projectId, spec, this.cfg.client, infra, checkpoint, labels);
+    // ④ 角色按项目隔离：用项目名作可读标签，避免跨项目 roleName 撞（若依 role_name 租户内唯一、限长）。
+    const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { name: true } });
+    const roleLabel = (proj?.name || projectId).slice(0, 8);
+    const result = await this.runtime.provisionApp(projectId, spec, this.cfg.client, infra, checkpoint, labels, { roleLabel });
     await this.prisma.project.update({
       where: { id: projectId },
       data: { backendRuntime: result.descriptor as never }, // 终态 descriptor 不带 phase（清空续跑标记）

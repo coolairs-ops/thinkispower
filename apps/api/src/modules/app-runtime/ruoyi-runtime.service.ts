@@ -107,9 +107,13 @@ export class RuoyiRuntime implements BackendRuntime {
     infra: RuoyiProvisionInfra,
     checkpoint: ProvisionCheckpoint = NOOP_CHECKPOINT,
     labels: ConsoleLabels = {},
+    opts: { roleLabel?: string } = {},
   ): Promise<ProvisionResult> {
     const entities = this.withRelations(spec);
     const tables = entities.map((e) => e.table);
+    // ④ 角色项目隔离：scope 为项目唯一 ascii 域(roleKey 前缀，防跨项目撞键)；roleLabel 为 roleName 项目标签(租户内唯一+可读)。
+    const scopeKey = (projectId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'app').toLowerCase();
+    const roleLabel = opts.roleLabel || scopeKey;
     const from = await checkpoint.load();
     if (from !== 'none') this.logger.log(`provision 续跑 project=${projectId}：从相位 '${from}' 继续，跳过已完成步`);
 
@@ -131,10 +135,10 @@ export class RuoyiRuntime implements BackendRuntime {
     // ③ RBAC 运行时配：角色 + data_scope（'1'全部/'5'仅本人）+ 接口权限点（解生成 Controller 的 @SaCheckPermission 403）
     if (!phaseReached(from, 'seeded')) {
       if (spec.roles?.length) {
-        const roleKeys = spec.roles.map((r, i) => roleKey(r.name, i));
+        const roleKeys = spec.roles.map((r, i) => roleKey(r.name, i, scopeKey));
         await this.client.seedRoles(
           cfg,
-          spec.roles.map((r, i) => ({ roleName: r.name, roleKey: roleKeys[i], dataScope: r.dataScope })),
+          spec.roles.map((r, i) => ({ roleName: `${r.name}·${roleLabel}`, roleKey: roleKeys[i], dataScope: r.dataScope })),
         );
         // 坎1：种控制台页菜单(C)+按钮权限点(F)并绑业务角色——否则控制台无导航/终端用户调接口被 @SaCheckPermission 挡 403。
         // labels 传入：C 菜单名用中文 functionName（ADR-0012 ①③）。
@@ -189,8 +193,8 @@ export class RuoyiRuntime implements BackendRuntime {
   }
 }
 
-/** 角色名 → 若依 roleKey：取名字里的 ascii 字母数字小写；中文等取不出时退 `app_role_${序号}`。 */
-function roleKey(name: string, index: number): string {
+/** 角色名 → 若依 roleKey：`<项目域>_<名字ascii小写 | role_序号>`。项目域前缀让不同项目的角色不撞键（ADR-0012 ④）。 */
+function roleKey(name: string, index: number, scope: string): string {
   const slug = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  return slug || `app_role_${index + 1}`;
+  return `${scope}_${slug || `role_${index + 1}`}`; // 项目域前缀：防跨项目 roleKey 撞键复用(ADR-0012 ④)
 }
