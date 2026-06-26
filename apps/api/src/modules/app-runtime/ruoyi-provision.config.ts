@@ -44,6 +44,8 @@ export function loadRuoyiInstanceConfig(env: NodeJS.ProcessEnv = process.env): R
         `docker run --rm -v "${srcRoot}":/src -v ruoyi-m2:/root/.m2 -w /src maven:3.9-eclipse-temurin-17 mvn -o -q compile -pl ${module}`,
       restartCmd: env.RUOYI_RESTART_CMD || 'docker restart ruoyi-server',
       readyUrl: env.RUOYI_READY_URL || baseUrl || undefined,
+      // 设了才把 codegen vue 落进 plus-ui（ADR-0012 ②，让实体成若依控制台页）。未设=只落后端。
+      uiRoot: env.RUOYI_UI_ROOT || undefined,
     },
   };
 }

@@ -35,6 +35,12 @@ export interface RuoyiDeployConfig {
   readyUrl?: string;
   /** 探活超时（ms，默认 30min，覆盖 exploded 冷启 11~22min[历史到 37min]）。 */
   readyTimeoutMs?: number;
+  /**
+   * 若依前端工程根（plus-ui），如 D:\plus-ui。设了才把 codegen 的 `vue/**` 落进 `{uiRoot}/src/**`——
+   * 让生成的实体成为若依控制台真页面（ADR-0012 ②）。未设则只落后端、不落前端（旧行为）。
+   * dev 下 vite HMR 自动生效；正式交付需重新构建 plus-ui。
+   */
+  uiRoot?: string;
 }
 
 export class RuoyiLocalDeployer {
@@ -111,11 +117,20 @@ export class RuoyiLocalDeployer {
     const moduleSrc = join(this.cfg.srcRoot, this.cfg.module, 'src');
     const entries = new AdmZip(zipBuf).getEntries();
     let n = 0;
+    let vueN = 0;
     for (const e of entries) {
       if (e.isDirectory) continue;
       const name = e.entryName.replace(/\\/g, '/'); // 统一正斜杠
+      // 前端 vue 落 plus-ui（ADR-0012 ②：让实体成为若依控制台真页面）。zip `vue/**` → `{uiRoot}/src/**`
+      if (name.startsWith('vue/') && this.cfg.uiRoot) {
+        const vt = join(this.cfg.uiRoot, 'src', ...name.slice('vue/'.length).split('/'));
+        await mkdir(dirname(vt), { recursive: true });
+        await writeFile(vt, e.getData());
+        vueN++;
+        continue;
+      }
       const target = this.targetPath(name, moduleSrc);
-      if (!target) continue; // vue/、菜单 sql 等：本驱动不落
+      if (!target) continue; // 菜单 sql、未配 uiRoot 的 vue 等：本驱动不落
       await mkdir(dirname(target), { recursive: true });
       // Mapper.java 落盘前注入 @DataPermission（坎2：让 data_scope=仅本人 真过滤；codegen 默认不带）
       let data = e.getData();
@@ -127,6 +142,7 @@ export class RuoyiLocalDeployer {
       n++;
     }
     if (n === 0) throw new Error(`部署 ${table}：zip 内无 main/java|main/resources 文件（codegen 异常？）`);
+    if (this.cfg.uiRoot) this.logger.log(`${table}：前端 ${vueN} 个 vue/api 文件落进 ${this.cfg.uiRoot}/src`);
     return n;
   }
 
