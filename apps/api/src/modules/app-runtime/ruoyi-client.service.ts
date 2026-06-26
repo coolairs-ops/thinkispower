@@ -252,7 +252,7 @@ export class RuoyiClient {
 
   /** 建一个按钮权限点（menu_type=F，parentId=0）。perms 已存在应先经 listMenuPerms 去重避免重复建。 */
   private async createPermMenu(cfg: RuoyiClientConfig, token: string, perms: string, parentId: string | number = 0): Promise<void> {
-    const body = { menuName: perms.slice(0, 50), parentId, menuType: 'F', perms, orderNum: 90, isFrame: '1', isCache: '0', visible: '1', status: '0', icon: '#' };
+    const body = { menuName: perms.slice(0, 50), parentId, menuType: 'F', perms, orderNum: 90, isFrame: '1', isCache: '0', visible: '0', status: '0', icon: '#' };
     const data = await this.post(cfg, '/system/menu', body, token);
     if (data?.code !== 200) throw new Error(`createMenu 失败(${perms}): ${JSON.stringify(data).slice(0, 200)}`);
   }
@@ -266,7 +266,7 @@ export class RuoyiClient {
     };
     const existing = await findDir();
     if (existing != null) return existing;
-    const body = { menuName: name, parentId: 0, menuType: 'M', orderNum: 50, path: 'biz', isFrame: '1', isCache: '0', visible: '1', status: '0', icon: 'tree-table' };
+    const body = { menuName: name, parentId: 0, menuType: 'M', orderNum: 50, path: 'biz', isFrame: '1', isCache: '0', visible: '0', status: '0', icon: 'tree-table' };
     const data = await this.post(cfg, '/system/menu', body, token);
     if (data?.code !== 200) throw new Error(`建业务目录失败: ${JSON.stringify(data).slice(0, 150)}`);
     const id = await findDir();
@@ -276,7 +276,7 @@ export class RuoyiClient {
 
   /** 控制台页菜单(menu_type=C)：component=<module>/<resource>/index, perms=<module>:<resource>:list。让实体在若依控制台可导航。 */
   private async createConsoleMenu(cfg: RuoyiClientConfig, token: string, parentId: string | number, resource: string, menuName: string, moduleName: string): Promise<void> {
-    const body = { menuName, parentId, menuType: 'C', path: resource, component: `${moduleName}/${resource}/index`, perms: `${moduleName}:${resource}:list`, orderNum: 1, isFrame: '1', isCache: '0', visible: '1', status: '0', icon: 'form' };
+    const body = { menuName, parentId, menuType: 'C', path: resource, component: `${moduleName}/${resource}/index`, perms: `${moduleName}:${resource}:list`, orderNum: 1, isFrame: '1', isCache: '0', visible: '0', status: '0', icon: 'form' };
     const data = await this.post(cfg, '/system/menu', body, token);
     if (data?.code !== 200) throw new Error(`建控制台菜单失败(${resource}): ${JSON.stringify(data).slice(0, 200)}`);
   }
