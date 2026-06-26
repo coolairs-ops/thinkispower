@@ -1,8 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { promisify } from 'node:util';
 import { exec } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, posix } from 'node:path';
+import { mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
+import { basename, dirname, join, posix } from 'node:path';
 import AdmZip from 'adm-zip';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
 import { injectDataPermission } from './ruoyi-data-permission';
@@ -57,16 +57,72 @@ export class RuoyiLocalDeployer {
    * 探活拆出（waitReady），让 provisionApp 在"编译重启完成"与"探活就绪"间打断点——
    * 探活超时重跑只需再 waitReady，不必重编译（编译/冷启是最贵的一段）。
    */
-  async deploySources(ruoyiCfg: RuoyiClientConfig, tables: string[], labels?: ConsoleLabels): Promise<void> {
+  async deploySources(ruoyiCfg: RuoyiClientConfig, tables: string[], labels?: ConsoleLabels, projectId?: string): Promise<void> {
     if (!tables.length) return;
-    let written = 0;
+    // ① 置备前清掉本项目上次生成物（防 businessName 重名旧文件残留致 Spring Ambiguous mapping；③ 连带删旧 .class）
+    if (projectId) await this.cleanPriorArtifacts(projectId);
+    const written: string[] = [];
     for (const table of tables) {
       const zip = await this.client.importAndDownload(ruoyiCfg, table, labels?.[table]);
-      written += await this.writeBackendFiles(zip, table);
+      written.push(...(await this.writeBackendFiles(zip, table)));
     }
-    this.logger.log(`部署：${tables.length} 表 / ${written} 个后端文件落盘 → 编译 ${this.cfg.module}`);
+    if (projectId) await this.saveGenManifest(projectId, written); // 记本次生成清单，供下次置备清理
+    this.logger.log(`部署：${tables.length} 表 / ${written.length} 个文件落盘 → 编译 ${this.cfg.module}`);
     await this.run(this.cfg.compileCmd, '编译');
     await this.run(this.cfg.restartCmd, '重启');
+  }
+
+  /** 每项目生成清单落点（在若依工程根的 .platform-gen 下，不在任何模块 src 内，不被编译/cp）。 */
+  private genManifestPath(projectId: string): string {
+    return join(this.cfg.srcRoot, '.platform-gen', `${projectId}.json`);
+  }
+
+  private async saveGenManifest(projectId: string, paths: string[]): Promise<void> {
+    const p = this.genManifestPath(projectId);
+    await mkdir(dirname(p), { recursive: true });
+    await writeFile(p, JSON.stringify(paths), 'utf8');
+  }
+
+  /**
+   * 删本项目上次生成的全部产物（源文件 + 对应编译产物 .class + 前端 vue），按清单精准删。
+   * 解决：deploy 回路只写不删 → businessName 重名(如 demo_store→store 与 store)旧 Controller 残留，
+   * 与本次新文件都映射 /system/<biz> → Spring 启动 Ambiguous mapping 崩库（2026-06-26 以岭实测）。
+   * 无清单（首次置备/老实例）→ 跳过，不误删。
+   */
+  private async cleanPriorArtifacts(projectId: string): Promise<void> {
+    let prior: string[];
+    try {
+      prior = JSON.parse(await readFile(this.genManifestPath(projectId), 'utf8')) as string[];
+    } catch {
+      return; // 无清单：首次或老实例，不动
+    }
+    if (!Array.isArray(prior) || !prior.length) return;
+    const classesDir = join(this.cfg.srcRoot, this.cfg.module, 'target', 'classes');
+    let removed = 0;
+    for (const f of prior) {
+      try { await rm(f, { force: true }); removed++; } catch { /* 已不在，忽略 */ }
+      const norm = f.replace(/\\/g, '/');
+      // ③ 删对应 .class：src/main/java/X.java → target/classes/X.class + 同基名兄弟(内部类 $ / MapStruct ...To...Impl / __Javadoc.json)
+      const javaMark = '/src/main/java/';
+      const resMark = '/src/main/resources/';
+      if (norm.includes(javaMark) && norm.endsWith('.java')) {
+        const rel = norm.slice(norm.indexOf(javaMark) + javaMark.length);
+        const dir = join(classesDir, dirname(rel));
+        const base = basename(rel, '.java');
+        try {
+          for (const s of await readdir(dir)) {
+            if (s === `${base}.class` || s.startsWith(`${base}$`) || s.startsWith(`${base}To`) || s === `${base}__Javadoc.json`) {
+              await rm(join(dir, s), { force: true });
+            }
+          }
+        } catch { /* 目录不在，忽略 */ }
+      } else if (norm.includes(resMark)) {
+        const rel = norm.slice(norm.indexOf(resMark) + resMark.length);
+        try { await rm(join(classesDir, rel), { force: true }); } catch { /* 忽略 */ }
+      }
+      // vue 在 uiRoot（模块外），上面的 rm(f) 已删，无 .class
+    }
+    this.logger.log(`置备清理 project=${projectId}：删上次生成物 ${removed}/${prior.length} 个(防 businessName 重名撞 + 清旧 .class)`);
   }
 
   /** 部署源码→重启→探活就绪（便捷整合，脚本/单测用）。provisionApp 用拆开的 deploySources+waitReady 以支持断点续跑。 */
@@ -113,11 +169,11 @@ export class RuoyiLocalDeployer {
     throw new Error(`重启后探活超时：${url} 在 ${Math.round(timeoutMs / 1000)}s 内未返回非 5xx 响应（探活 ${attempt} 次）`);
   }
 
-  /** 解压 zip，把 main/java、main/resources 下文件写进模块源码。返回写入文件数。 */
-  private async writeBackendFiles(zipBuf: Buffer, table: string): Promise<number> {
+  /** 解压 zip，把 main/java、main/resources 下文件写进模块源码（vue 落 uiRoot）。返回写入文件的绝对路径（供生成清单）。 */
+  private async writeBackendFiles(zipBuf: Buffer, table: string): Promise<string[]> {
     const moduleSrc = join(this.cfg.srcRoot, this.cfg.module, 'src');
     const entries = new AdmZip(zipBuf).getEntries();
-    let n = 0;
+    const written: string[] = [];
     let vueN = 0;
     for (const e of entries) {
       if (e.isDirectory) continue;
@@ -127,6 +183,7 @@ export class RuoyiLocalDeployer {
         const vt = join(this.cfg.uiRoot, 'src', ...name.slice('vue/'.length).split('/'));
         await mkdir(dirname(vt), { recursive: true });
         await writeFile(vt, e.getData());
+        written.push(vt);
         vueN++;
         continue;
       }
@@ -140,11 +197,11 @@ export class RuoyiLocalDeployer {
         data = Buffer.from(patched, 'utf8');
       }
       await writeFile(target, data);
-      n++;
+      written.push(target);
     }
-    if (n === 0) throw new Error(`部署 ${table}：zip 内无 main/java|main/resources 文件（codegen 异常？）`);
+    if (written.length - vueN === 0) throw new Error(`部署 ${table}：zip 内无 main/java|main/resources 文件（codegen 异常？）`);
     if (this.cfg.uiRoot) this.logger.log(`${table}：前端 ${vueN} 个 vue/api 文件落进 ${this.cfg.uiRoot}/src`);
-    return n;
+    return written;
   }
 
   /** zip 内相对路径 → 模块源码绝对路径；非后端文件返回 null。 */
