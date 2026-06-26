@@ -92,10 +92,11 @@ export class AppSpecAssemblerService {
 /** 与若依内置 /system/* 业务名冲突的表名（生成 CRUD 会撞内置 Controller 映射→若依起不来）。 */
 const RUOYI_RESERVED = new Set(['user', 'role', 'menu', 'dept', 'dict', 'post', 'notice', 'config', 'profile', 'tenant', 'client', 'oss']);
 
-/** 清洗角色名：IR 里角色常是整句描述（"管理员：查看所有…"），取冒号/括号前的短名，截断到 30（若依 role_name 限长）。 */
+/** 清洗角色名：IR 里角色常是整句描述（"管理员：查看所有…" 或 "销售管理员 — 规划任务…"），按冒号/括号/破折号取短名；
+ *  截到 18，给项目标签拼接留余量（若依 role_name ≤30，置备时会拼 `·<项目标签>`）。 */
 export function cleanRoleName(full: string): string {
-  const head = (full || '').split(/[：:（(，,。]/)[0].trim();
-  return (head || full || '角色').slice(0, 30);
+  const head = (full || '').split(/\s*[：:（(，,。、—–-]\s*/)[0].trim();
+  return (head || full || '角色').slice(0, 18);
 }
 
 /** 角色名 → 若依 data_scope：管理员→全部，仅本人类→仅本人，部门类→本部门(及以下)，默认全部。 */

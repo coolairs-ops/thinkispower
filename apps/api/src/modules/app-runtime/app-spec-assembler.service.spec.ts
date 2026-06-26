@@ -86,8 +86,9 @@ describe('cleanRoleName', () => {
   it.each([
     ['管理员：查看所有数据', '管理员'],
     ['普通用户（业务员）：仅本人', '普通用户'],
+    ['销售管理员 — 查看所有门店与任务、规划任务', '销售管理员'], // planSummary 破折号描述 → 剥短名(本次修复)
     ['审计员', '审计员'],
-    ['x'.repeat(40), 'x'.repeat(30)],
+    ['x'.repeat(40), 'x'.repeat(18)],
   ])('%s → 短名', (full, expected) => {
     expect(cleanRoleName(full)).toBe(expected);
   });

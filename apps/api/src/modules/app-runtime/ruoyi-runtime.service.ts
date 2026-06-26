@@ -138,7 +138,7 @@ export class RuoyiRuntime implements BackendRuntime {
         const roleKeys = spec.roles.map((r, i) => roleKey(r.name, i, scopeKey));
         await this.client.seedRoles(
           cfg,
-          spec.roles.map((r, i) => ({ roleName: `${r.name}·${roleLabel}`, roleKey: roleKeys[i], dataScope: r.dataScope })),
+          spec.roles.map((r, i) => ({ roleName: `${r.name}·${roleLabel}`.slice(0, 30), roleKey: roleKeys[i], dataScope: r.dataScope })), // 兜底截 ≤30(若依 role_name 限长)
         );
         // 坎1：种控制台页菜单(C)+按钮权限点(F)并绑业务角色——否则控制台无导航/终端用户调接口被 @SaCheckPermission 挡 403。
         // labels 传入：C 菜单名用中文 functionName（ADR-0012 ①③）。
