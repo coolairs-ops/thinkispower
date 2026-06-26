@@ -63,6 +63,7 @@
 - [ ] **真部署起来**：若依实例 build/run 成功 + 健康检查 healthy（非降级 static_only）
 - [ ] `productionUrl` **真能打开**（守护 liveness 探活 reachable）
 - [ ] 客户/项目 **CRUD 真能用**：backend-smoke 对交付后端探活通过 + 契约门一致（前端调用 ⊆ 后端真契约）
+- [ ] **前端页真落地可见（别假设它在）**：codegen 的 `vue/**` 已落进 plus-ui（`uiRoot` 配通）+ 前端重建/重部署 → 控制台菜单**点进去是真 CRUD 页（列表/搜索/表单/分页），不是空页/404**
 - [ ] 角色登录真生效（管理员/普通用户可登录、数据权限隔离生效、鉴权拦截未登录）
 - [ ] 上线门据实 `goLiveStatus=completed`（编译∧部署健康∧契约∧冒烟全过）
 
