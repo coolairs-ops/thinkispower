@@ -44,6 +44,32 @@ export class RuoyiClient {
     if (data?.code !== 200) throw new Error(`importTable 失败: ${JSON.stringify(data).slice(0, 200)}`);
   }
 
+  /**
+   * importTable 前清掉同名旧 gen_table 行——每次置备 importTable 会**新增**一条，跨次置备同名表会累积多条 dup，
+   * 害得 findTableId/getGenMeta 只能在多条里"挑一条"兜底（可能挑到上次的旧 meta，菜单/权限/路径对错表）。
+   * 删干净后本次 importTable 重导一条干净的。best-effort：list/delete 失败只 warn 不阻断。返回清理行数。
+   */
+  async dedupGenTable(cfg: RuoyiClientConfig, token: string, tableName: string): Promise<number> {
+    let ids: number[] = [];
+    try {
+      const data = await this.get(cfg, `/tool/gen/list?tableName=${encodeURIComponent(tableName)}`, token);
+      const rows = (data?.rows ?? data?.data ?? []) as Array<{ tableId: number; tableName: string }>;
+      ids = rows.filter((r) => r.tableName === tableName && r.tableId != null).map((r) => r.tableId);
+    } catch (e) {
+      this.logger.warn(`dedupGenTable 列表失败(${tableName})，跳过去重: ${e instanceof Error ? e.message : e}`);
+      return 0;
+    }
+    if (!ids.length) return 0;
+    try {
+      const del = await this.del(cfg, `/tool/gen/${ids.join(',')}`, token);
+      if (del?.code != null && del.code !== 200) this.logger.warn(`dedupGenTable DELETE 非200(${tableName}): ${JSON.stringify(del).slice(0, 150)}`);
+      else this.logger.log(`dedupGenTable ${tableName}: 清理旧 gen_table ${ids.length} 行`);
+    } catch (e) {
+      this.logger.warn(`dedupGenTable 删除失败(${tableName})，本次仍续: ${e instanceof Error ? e.message : e}`);
+    }
+    return ids.length;
+  }
+
   /** 按表名查 gen_table 的 tableId。 */
   async findTableId(cfg: RuoyiClientConfig, token: string, tableName: string): Promise<number> {
     const data = await this.get(cfg, `/tool/gen/list?tableName=${encodeURIComponent(tableName)}`, token);
@@ -96,9 +122,10 @@ export class RuoyiClient {
     return buf;
   }
 
-  /** 导表并下载 zip（部署驱动用）：登录→importTable→findTableId→downloadZip。 */
+  /** 导表并下载 zip（部署驱动用）：登录→去重旧 gen_table→importTable→findTableId→downloadZip。 */
   async importAndDownload(cfg: RuoyiClientConfig, tableName: string, labels?: { functionName?: string; columns?: Record<string, string> }): Promise<Buffer> {
     const token = await this.login(cfg);
+    await this.dedupGenTable(cfg, token, tableName); // 清同名旧 gen_table 行，避免累积 dup 致 findTableId/getGenMeta 挑错行
     await this.importTable(cfg, token, tableName);
     const tableId = await this.findTableId(cfg, token, tableName);
     if (labels) await this.applyGenLabels(cfg, token, tableId, labels); // 下载前把中文标签写进 gen → vue/弹窗/列头自动中文(ADR-0012 ①)

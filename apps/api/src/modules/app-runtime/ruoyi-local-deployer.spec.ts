@@ -2,9 +2,15 @@ const mockExec = jest.fn();
 jest.mock('node:child_process', () => ({ exec: (cmd: unknown, opts: unknown, cb: unknown) => mockExec(cmd, opts, cb) }));
 
 const writes: Record<string, Buffer> = {};
+const removed: string[] = [];
+const mockReaddir = jest.fn(async (..._a: unknown[]): Promise<string[]> => { const e: NodeJS.ErrnoException = new Error('ENOENT'); e.code = 'ENOENT'; throw e; });
+const mockReadFile = jest.fn(async (..._a: unknown[]): Promise<string> => '');
 jest.mock('node:fs/promises', () => ({
   mkdir: jest.fn(async () => undefined),
   writeFile: jest.fn(async (p: string, data: Buffer) => { writes[p.replace(/\\/g, '/')] = data; }),
+  readdir: (...a: unknown[]) => mockReaddir(...(a as [])),
+  readFile: (...a: unknown[]) => mockReadFile(...(a as [])),
+  rm: jest.fn(async (p: string) => { removed.push(p.replace(/\\/g, '/')); }),
 }));
 
 import AdmZip from 'adm-zip';
@@ -39,6 +45,11 @@ describe('RuoyiLocalDeployer（私有化档部署驱动）', () => {
 
   beforeEach(() => {
     for (const k of Object.keys(writes)) delete writes[k];
+    removed.length = 0;
+    mockReaddir.mockReset();
+    mockReaddir.mockImplementation(async () => { const e: NodeJS.ErrnoException = new Error('ENOENT'); e.code = 'ENOENT'; throw e; });
+    mockReadFile.mockReset();
+    mockReadFile.mockResolvedValue('');
     mockExec.mockReset();
     execOk();
   });
@@ -115,6 +126,65 @@ describe('RuoyiLocalDeployer（私有化档部署驱动）', () => {
     expect(cmds).toEqual([cfg.compileCmd, cfg.restartCmd]); // 编译+重启
     expect(fetchSpy).not.toHaveBeenCalled(); // 不探活——waitReady 由 provisionApp 单独调
     fetchSpy.mockRestore();
+  });
+
+  describe('撞 @RequestMapping 旧生成物清理（跨次置备 businessName 重名防崩库）', () => {
+    // 本次表 store → StoreController，@RequestMapping("/system/store")。
+    function genZipStore(): Buffer {
+      const z = new AdmZip();
+      z.addFile('main/java/org/dromara/system/controller/StoreController.java', Buffer.from('@RestController\n@RequestMapping("/system/store")\npublic class StoreController {}'));
+      z.addFile('main/java/org/dromara/system/domain/Store.java', Buffer.from('class S{}'));
+      z.addFile('main/resources/mapper/system/StoreMapper.xml', Buffer.from('<xml/>'));
+      return z.toBuffer();
+    }
+    const base = '/ruoyi/ruoyi-modules/ruoyi-system';
+
+    it('旧 DemoStore* 与本次 Store 同 mapping → 删旧全家(java七件+xml)及对应 .class，新文件照写', async () => {
+      mockReaddir.mockResolvedValueOnce(['DemoStoreController.java', 'StoreController.java', 'OtherController.java']);
+      mockReadFile.mockImplementation(async (p: unknown) => {
+        const f = String(p).replace(/\\/g, '/');
+        if (f.endsWith('DemoStoreController.java')) return '@RequestMapping("/system/store")'; // 撞车
+        if (f.endsWith('OtherController.java')) return '@RequestMapping("/system/other")'; // 不撞
+        return '';
+      });
+      const client = { importAndDownload: jest.fn(async () => genZipStore()) };
+      await new RuoyiLocalDeployer(client as never, cfg).deployTables(ruoyiCfg, ['store']);
+
+      // 旧 DemoStore 全家 java（含 service/impl）+ mapper.xml 被删
+      for (const rel of [
+        'src/main/java/org/dromara/system/controller/DemoStoreController.java',
+        'src/main/java/org/dromara/system/domain/DemoStore.java',
+        'src/main/java/org/dromara/system/domain/bo/DemoStoreBo.java',
+        'src/main/java/org/dromara/system/domain/vo/DemoStoreVo.java',
+        'src/main/java/org/dromara/system/service/IDemoStoreService.java',
+        'src/main/java/org/dromara/system/service/impl/DemoStoreServiceImpl.java',
+        'src/main/java/org/dromara/system/mapper/DemoStoreMapper.java',
+        'src/main/resources/mapper/system/DemoStoreMapper.xml',
+      ]) expect(removed).toContain(`${base}/${rel}`);
+      // 对应 target/classes 的编译产物被精准删（否则 boot 仍 cp 旧 class）
+      expect(removed).toContain(`${base}/target/classes/org/dromara/system/controller/DemoStoreController.class`);
+      expect(removed).toContain(`${base}/target/classes/org/dromara/system/service/impl/DemoStoreServiceImpl.class`);
+      expect(removed).toContain(`${base}/target/classes/mapper/system/DemoStoreMapper.xml`);
+      // 不撞的 OtherController 全家不动
+      expect(removed.some((p) => p.includes('Other'))).toBe(false);
+      // 新 Store 后端文件照常落盘
+      expect(Object.keys(writes)).toContain(`${base}/src/main/java/org/dromara/system/controller/StoreController.java`);
+    });
+
+    it('controller 目录尚不存在（首次置备）→ 不删任何东西，照写', async () => {
+      // mockReaddir 默认抛 ENOENT
+      const client = { importAndDownload: jest.fn(async () => genZipStore()) };
+      await new RuoyiLocalDeployer(client as never, cfg).deployTables(ruoyiCfg, ['store']);
+      expect(removed).toHaveLength(0);
+      expect(Object.keys(writes)).toContain(`${base}/src/main/java/org/dromara/system/controller/StoreController.java`);
+    });
+
+    it('zip 内 Controller 无 @RequestMapping（旧测试桩）→ 不扫不删（不敢乱删）', async () => {
+      const client = { importAndDownload: jest.fn(async () => genZip()) }; // controller 内容是 'class C{}'
+      await new RuoyiLocalDeployer(client as never, cfg).deployTables(ruoyiCfg, ['demo_store']);
+      expect(mockReaddir).not.toHaveBeenCalled();
+      expect(removed).toHaveLength(0);
+    });
   });
 
   describe('waitReady（探活硬化）', () => {

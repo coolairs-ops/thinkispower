@@ -34,6 +34,34 @@ describe('RuoyiClient（若依 codegen REST 客户端 · M3b）', () => {
     expect(calls[3]).toContain('/tool/gen/preview/42');
   });
 
+  it('importAndDownload：importTable 前先删同名旧 gen_table 行（去重 dup）再下载', async () => {
+    const calls: string[] = [];
+    let listCount = 0;
+    global.fetch = jest.fn(async (url: string, opts: any) => {
+      calls.push(`${opts.method} ${url}`);
+      if (url.endsWith('/auth/login')) return jsonRes({ data: { access_token: 't' } });
+      if (url.includes('/tool/gen/list')) {
+        listCount++;
+        // 首次(dedup 扫描)返回两条同名 dup；之后(findTableId)返回干净一条
+        return listCount === 1
+          ? jsonRes({ rows: [{ tableId: 11, tableName: 'store' }, { tableId: 12, tableName: 'store' }] })
+          : jsonRes({ rows: [{ tableId: 13, tableName: 'store' }] });
+      }
+      if (url.match(/\/tool\/gen\/[\d,]+$/) && opts.method === 'DELETE') return jsonRes({ code: 200 });
+      if (url.includes('/tool/gen/importTable')) return jsonRes({ code: 200 });
+      if (url.includes('/tool/gen/download/13')) return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+      throw new Error('unexpected ' + opts.method + ' ' + url);
+    }) as any;
+
+    const buf = await client.importAndDownload(cfg, 'store');
+    expect(Buffer.isBuffer(buf) && buf.length).toBe(3);
+    // DELETE 删了 11,12，且发生在 importTable 之前
+    const delIdx = calls.findIndex((c) => c.startsWith('DELETE') && c.includes('/tool/gen/11,12'));
+    const importIdx = calls.findIndex((c) => c.includes('importTable'));
+    expect(delIdx).toBeGreaterThanOrEqual(0);
+    expect(importIdx).toBeGreaterThan(delIdx);
+  });
+
   it('login 带 clientId/grantType；后续请求带 Bearer+clientid 头', async () => {
     let loginBody: any;
     let previewHeaders: any;

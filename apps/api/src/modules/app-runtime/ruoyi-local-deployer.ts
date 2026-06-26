@@ -1,8 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { promisify } from 'node:util';
 import { exec } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, posix } from 'node:path';
+import { mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';
+import { basename, dirname, join, posix, sep } from 'node:path';
 import AdmZip from 'adm-zip';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
 import { injectDataPermission } from './ruoyi-data-permission';
@@ -117,6 +117,9 @@ export class RuoyiLocalDeployer {
   private async writeBackendFiles(zipBuf: Buffer, table: string): Promise<number> {
     const moduleSrc = join(this.cfg.srcRoot, this.cfg.module, 'src');
     const entries = new AdmZip(zipBuf).getEntries();
+    // 写新文件前先清掉与本次 @RequestMapping 撞车的旧生成物（不同次置备 businessName 重名时，
+    // 旧 *Controller.java + .class 与新文件同存一个模块会让 Spring "Ambiguous mapping" 崩库）。
+    await this.cleanupCollidingMappings(entries, moduleSrc, table);
     let n = 0;
     let vueN = 0;
     for (const e of entries) {
@@ -153,6 +156,94 @@ export class RuoyiLocalDeployer {
       if (name.startsWith(sub)) return join(moduleSrc, ...name.split(posix.sep));
     }
     return null;
+  }
+
+  /**
+   * 删与本次表 @RequestMapping 撞车的旧生成物全家——解跨次置备 businessName 重名致 Spring "Ambiguous mapping" 崩库。
+   * 用本次 Controller 的 @RequestMapping（Spring 真正比对的那个值）作撞车判据：扫模块 controller 目录里
+   * **别的** Controller，凡声明同一 mapping 的，按其类名前缀删掉旧全家(controller/domain/bo/vo/service/impl/mapper + xml)
+   * 及对应 target/classes 的 .class（否则增量编译留旧 .class，boot 仍 cp 到旧类）。
+   * 全程 best-effort：找不到 mapping/目录/文件都静默跳过，绝不阻断置备。
+   */
+  private async cleanupCollidingMappings(entries: AdmZip.IZipEntry[], moduleSrc: string, table: string): Promise<void> {
+    try {
+      const ctrl = entries.find((e) => !e.isDirectory && /(?:^|\/)main\/java\/.*\/controller\/[A-Za-z0-9_]+Controller\.java$/.test(e.entryName.replace(/\\/g, '/')));
+      if (!ctrl) return;
+      const newMapping = this.extractMapping(ctrl.getData().toString('utf8'));
+      if (!newMapping) return; // 取不到 mapping（异常 codegen）→ 不敢乱删
+      const ctrlName = ctrl.entryName.replace(/\\/g, '/');
+      const ctrlAbsPath = this.targetPath(ctrlName, moduleSrc)!;
+      const ctrlDir = dirname(ctrlAbsPath);
+      const newClass = basename(ctrlName, '.java'); // 如 StoreController
+      let siblings: string[];
+      try {
+        siblings = await readdir(ctrlDir);
+      } catch {
+        return; // 目录尚不存在（首次置备）→ 无旧物可清
+      }
+      for (const f of siblings) {
+        if (!f.endsWith('Controller.java') || f === `${newClass}.java`) continue;
+        let src: string;
+        try {
+          src = await readFile(join(ctrlDir, f), 'utf8');
+        } catch {
+          continue;
+        }
+        if (this.extractMapping(src) !== newMapping) continue; // 不撞 mapping → 留着
+        const stalePrefix = f.replace(/Controller\.java$/, ''); // 如 DemoStore
+        await this.deleteGeneratedFamily(stalePrefix, ctrlDir, moduleSrc, newMapping);
+        this.logger.warn(`置备清理[${table}]：旧生成物 ${f} 与本次 ${newClass} 同 @RequestMapping(${newMapping})，已删其全家(java+xml+class)`);
+      }
+    } catch (e) {
+      this.logger.warn(`置备清理[${table}] 跳过（不阻断置备）：${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  /** 从 Controller 源码取 `@RequestMapping("...")` 的路径值；取不到返回 null。 */
+  private extractMapping(src: string): string | null {
+    return src.match(/@RequestMapping\(\s*(?:value\s*=\s*)?"([^"]+)"/)?.[1] ?? null;
+  }
+
+  /** 删一个旧类前缀的若依 codegen 全家（java 七件 + mapper xml）及各自 target/classes 的编译产物。 */
+  private async deleteGeneratedFamily(prefix: string, ctrlDir: string, moduleSrc: string, mapping: string): Promise<void> {
+    const pkgDir = dirname(ctrlDir); // .../org/dromara/<module>
+    const moduleName = mapping.split('/').filter(Boolean)[0] ?? 'system';
+    const targets = [
+      join(ctrlDir, `${prefix}Controller.java`),
+      join(pkgDir, 'domain', `${prefix}.java`),
+      join(pkgDir, 'domain', 'bo', `${prefix}Bo.java`),
+      join(pkgDir, 'domain', 'vo', `${prefix}Vo.java`),
+      join(pkgDir, 'service', `I${prefix}Service.java`),
+      join(pkgDir, 'service', 'impl', `${prefix}ServiceImpl.java`),
+      join(pkgDir, 'mapper', `${prefix}Mapper.java`),
+      join(moduleSrc, 'main', 'resources', 'mapper', moduleName, `${prefix}Mapper.xml`),
+    ];
+    for (const t of targets) {
+      await this.rmQuiet(t);
+      const cls = this.toClassPath(t);
+      if (cls) await this.rmQuiet(cls);
+    }
+  }
+
+  /** src/main/{java,resources} 下源码路径 → target/classes 下编译产物路径（.java→.class）；非源码路径返回 null。 */
+  private toClassPath(srcPath: string): string | null {
+    const fromJava = `${sep}src${sep}main${sep}java${sep}`;
+    const fromRes = `${sep}src${sep}main${sep}resources${sep}`;
+    const to = `${sep}target${sep}classes${sep}`;
+    let p: string;
+    if (srcPath.includes(fromJava)) p = srcPath.replace(fromJava, to);
+    else if (srcPath.includes(fromRes)) p = srcPath.replace(fromRes, to);
+    else return null;
+    return p.endsWith('.java') ? `${p.slice(0, -'.java'.length)}.class` : p;
+  }
+
+  /** rm（force：缺失不报错），任何异常静默——清理是 best-effort。 */
+  private async rmQuiet(path: string): Promise<void> {
+    try {
+      await rm(path, { force: true });
+    } catch {
+      /* best-effort：清理失败不阻断置备 */
+    }
   }
 
   private async run(cmd: string, label: string): Promise<void> {
