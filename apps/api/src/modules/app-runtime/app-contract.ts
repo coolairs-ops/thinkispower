@@ -9,7 +9,8 @@ import { ParsedModel } from './data-model.types';
  * 纯函数、零依赖、确定性（符合 ADR-0002「hard enforcement 靠校验器不靠提示词」）。
  */
 export interface DataContract {
-  resources: { name: string; fields: string[] }[];
+  /** name/fields=资源/字段技术名(数据绑定用)；label/fieldLabels=中文显示名(demo 菜单/标题/表头中文化用，可空→回退技术名)。 */
+  resources: { name: string; fields: string[]; label?: string; fieldLabels?: Record<string, string> }[];
 }
 
 /** 若依基础列 / 审计列：契约里不暴露给前端（由后端自动填）。 */
@@ -47,7 +48,11 @@ export function normalizeContractForRuntime(contract: DataContract, backendKind?
 /** 契约 → 注入生成/迭代 prompt 的硬约束文本块。 */
 export function contractPromptBlock(contract: DataContract): string {
   if (!contract.resources.length) return '';
-  const lines = contract.resources.map((r) => `- ${r.name}：${r.fields.join('、')}`);
+  // 带中文名(label/fieldLabels)：技术名作 bind.resource/fields(数据绑定)，中文名作页面标题/菜单/列头(显示中文)。
+  const lines = contract.resources.map((r) => {
+    const fieldStr = r.fields.map((f) => (r.fieldLabels?.[f] ? `${f}(${r.fieldLabels[f]})` : f)).join('、');
+    return `- ${r.name}${r.label ? `(中文名：${r.label})` : ''}：${fieldStr}`;
+  });
   return [
     '# 数据契约（必须严格遵守，否则验收驳回）',
     'appData 的资源名**只能**取下列之一，读写字段**只能**用对应资源列出的字段：',

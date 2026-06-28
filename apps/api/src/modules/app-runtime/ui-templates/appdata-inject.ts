@@ -37,7 +37,8 @@ function mountGate(){
   function show(){ov.style.display='flex';}
   btn.addEventListener('click',function(){msg.textContent='登录中…';window.appData.login(document.getElementById('tip-au-u').value,document.getElementById('tip-au-p').value).then(function(){ov.style.display='none';location.reload();}).catch(function(e){msg.textContent='登录失败：'+((e&&e.message)||e);});});
   window.addEventListener('tip:auth-required',show);
-  if(!window.appData.isLoggedIn())show();
+  // 不在加载时自动弹登录：设计态预览(后端未置备/appData 404→空数据)应可直接看；
+  // 仅当运行态后端真返 401(需登录)时经 'tip:auth-required' 弹门。避免预览被登录墙挡死(2026-06-28 实测)。
 }
 if(document.readyState!=='loading')mountGate();else document.addEventListener('DOMContentLoaded',mountGate);
 })();</script>`;

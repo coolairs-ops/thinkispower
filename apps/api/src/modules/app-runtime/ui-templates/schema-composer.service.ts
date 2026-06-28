@@ -4,6 +4,7 @@ import { DeepseekService } from '../../../services/deepseek.service';
 import { buildDataContract, normalizeContractForRuntime, DataContract } from '../app-contract';
 import { AppSchema } from './page-schema.types';
 import { coerceSchema, fallbackSchema, ensureCreateForm, extractJson, buildComposePrompt, buildRevisePrompt } from './schema-composer';
+import { generateConsoleLabels } from '../ruoyi-label-gen';
 
 /**
  * Schema 编排服务（Schema 驱动 S2）：需求/数据模型 → AppSchema。
@@ -29,6 +30,7 @@ export class SchemaComposerService {
     features?: string[];
   }): Promise<{ schema: AppSchema; source: 'llm' | 'fallback'; dropped: string[] }> {
     const contract = this.contractOf(input.dataModel, input.backendKind);
+    await this.attachLabels(contract); // demo 中文化：给资源/字段附中文 label(复用 ① label-gen，LLM 抽风有词典兜底)
 
     if (!this.deepseek || !input.dataModel) {
       return { schema: ensureCreateForm(fallbackSchema(input.appName, contract), contract), source: 'fallback', dropped: [] };
@@ -82,6 +84,17 @@ export class SchemaComposerService {
       this.logger.warn(`schema 修订失败，保留原 schema: ${e instanceof Error ? e.message : e}`);
     }
     return { schema: current, dropped: [], changed: false };
+  }
+
+  /** 给契约资源/字段附中文 label（demo 菜单/标题/表头中文化；复用 ① 的 LLM label-gen + 确定性词典兜底）。 */
+  private async attachLabels(contract: DataContract): Promise<void> {
+    if (!contract.resources.length) return;
+    const entities = contract.resources.map((r) => ({ name: r.name, table: r.name, fields: r.fields.map((n) => ({ name: n })) }));
+    const labels = await generateConsoleLabels(this.deepseek, entities as never);
+    for (const r of contract.resources) {
+      const l = labels[r.name];
+      if (l) { r.label = l.functionName; r.fieldLabels = l.columns; }
+    }
   }
 
   /** 数据模型 → 按底座方言归一的数据契约（解析失败 → 空契约，不抛）。 */

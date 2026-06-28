@@ -43,9 +43,10 @@ function tableBlock(b: Extract<Block, { type: 'table' }>, id: string): string {
   const fields = b.bind.fields?.length ? b.bind.fields : ['id'];
   const badges = b.props?.badges ?? [];
   const actions = b.props?.rowActions ?? [];
+  const lbl = (f: string) => b.bind.fieldLabels?.[f] || f; // 字段中文显示名(回退技术名)
   const C = jcfg({ resource: b.bind.resource, columns: fields, badges: fields.map((f) => badges.includes(f)), actions });
   const colspan = fields.length + (actions.length ? 1 : 0);
-  const thead = fields.map((f) => `<th>${esc(f)}</th>`).join('') + (actions.length ? `<th style="width:90px">操作</th>` : '');
+  const thead = fields.map((f) => `<th>${esc(lbl(f))}</th>`).join('') + (actions.length ? `<th style="width:90px">操作</th>` : '');
   const title = b.props?.title ? `<div class="h1">${esc(b.props.title)}</div>` : '';
   const toolbar = b.props?.searchable
     ? `<div style="display:flex;justify-content:space-between;margin-bottom:12px"><div style="display:flex;gap:8px"><input placeholder="搜索" style="height:32px;border:.5px solid var(--t-card-border);border-radius:8px;padding:0 10px;background:var(--t-card);color:var(--t-text);width:200px"/><button class="btn" style="height:32px"><i class="ti ti-search"></i> 查询</button></div></div>`
@@ -56,10 +57,10 @@ function tableBlock(b: Extract<Block, { type: 'table' }>, id: string): string {
 
 function detailBlock(b: Extract<Block, { type: 'detail' }>, id: string): string {
   const fields = b.bind.fields?.length ? b.bind.fields : ['id'];
-  const C = jcfg({ resource: b.bind.resource, fields });
+  const C = jcfg({ resource: b.bind.resource, fields, labels: fields.map((f) => b.bind.fieldLabels?.[f] || f) });
   const title = b.props?.title ? `<div class="h1">${esc(b.props.title)}</div>` : '';
   return title + `<div class="card"><table id="${id}-d"><tbody><tr><td class="muted">加载中…</td></tr></tbody></table></div>`
-    + `<script>(function(){var C=${C},T=window.__tpl;if(!window.appData||!T)return;window.appData.list(C.resource,{pageSize:1}).then(function(r){var row=(r&&r.items&&r.items[0])||{},tb=document.querySelector('#${id}-d tbody');if(!tb)return;tb.innerHTML=C.fields.map(function(f){return '<tr><th style="width:140px">'+T.txt(f)+'</th><td>'+T.txt(row[f])+'</td></tr>';}).join('');}).catch(function(){});})();</script>`;
+    + `<script>(function(){var C=${C},T=window.__tpl;if(!window.appData||!T)return;window.appData.list(C.resource,{pageSize:1}).then(function(r){var row=(r&&r.items&&r.items[0])||{},tb=document.querySelector('#${id}-d tbody');if(!tb)return;tb.innerHTML=C.fields.map(function(f,i){return '<tr><th style="width:140px">'+T.txt(C.labels[i]||f)+'</th><td>'+T.txt(row[f])+'</td></tr>';}).join('');}).catch(function(){});})();</script>`;
 }
 
 function formBlock(b: Extract<Block, { type: 'form' }>, id: string): string {
@@ -67,7 +68,7 @@ function formBlock(b: Extract<Block, { type: 'form' }>, id: string): string {
   const C = jcfg({ resource: b.bind.resource, fields });
   const title = b.props?.title ? `<div class="h1">${esc(b.props.title)}</div>` : '';
   const inputs = fields.map((f, i) =>
-    `<div style="margin-bottom:12px"><div class="muted" style="margin-bottom:4px">${esc(f)}</div><input id="${id}-f${i}" style="width:100%;height:34px;padding:0 10px;border:.5px solid var(--t-card-border);border-radius:8px;background:var(--t-card);color:var(--t-text)"/></div>`,
+    `<div style="margin-bottom:12px"><div class="muted" style="margin-bottom:4px">${esc(b.bind.fieldLabels?.[f] || f)}</div><input id="${id}-f${i}" style="width:100%;height:34px;padding:0 10px;border:.5px solid var(--t-card-border);border-radius:8px;background:var(--t-card);color:var(--t-text)"/></div>`,
   ).join('');
   const submit = esc(b.props?.submitLabel ?? '提交');
   return title + `<div class="card" style="max-width:560px">${inputs}<button class="btn" id="${id}-submit">${submit}</button></div>`

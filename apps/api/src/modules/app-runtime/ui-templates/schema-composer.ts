@@ -23,8 +23,9 @@ const clean = (o: Record<string, unknown>): Record<string, unknown> | undefined 
 };
 
 /** 资源名（小写）→契约资源（字段用契约原名）。 */
-function resourceIndex(contract: DataContract): Map<string, { name: string; fields: string[] }> {
-  const map = new Map<string, { name: string; fields: string[] }>();
+type ResourceDef = DataContract['resources'][number];
+function resourceIndex(contract: DataContract): Map<string, ResourceDef> {
+  const map = new Map<string, ResourceDef>();
   for (const r of contract.resources) map.set(r.name.toLowerCase(), r);
   return map;
 }
@@ -46,7 +47,7 @@ function coerceProps(type: BlockType, props: Record<string, unknown>, fields: st
   }
 }
 
-function coerceBlock(b: unknown, idx: Map<string, { name: string; fields: string[] }>, dropped: string[], where: string): Block | null {
+function coerceBlock(b: unknown, idx: Map<string, ResourceDef>, dropped: string[], where: string): Block | null {
   const blk = b as { type?: unknown; bind?: unknown; props?: unknown };
   const type = blk?.type as BlockType;
   if (!BLOCK_TYPES.includes(type)) { dropped.push(`${where} 未知块类型「${String(blk?.type)}」`); return null; }
@@ -70,10 +71,10 @@ function coerceBlock(b: unknown, idx: Map<string, { name: string; fields: string
     fields = res.fields.slice(0, 5);
   }
 
-  if (type === 'kpi') return { type, bind: { resource: res.name }, props: { label: String((props.label as string) || `${res.name} 总数`) } };
+  if (type === 'kpi') return { type, bind: { resource: res.name }, props: { label: String((props.label as string) || `${res.label || res.name} 总数`) } };
   // qa（问答/聊天）只绑资源（落上报、不需字段列表）
   if (type === 'qa') return { type, bind: { resource: res.name }, props: coerceProps('qa', props, fields) } as Block;
-  return { type, bind: { resource: res.name, fields }, props: coerceProps(type, props, fields) } as Block;
+  return { type, bind: { resource: res.name, fields, fieldLabels: res.fieldLabels }, props: coerceProps(type, props, fields) } as Block;
 }
 
 function coerceNav(nav: unknown): { icon?: string; label?: string } | undefined {
@@ -118,17 +119,19 @@ export function fallbackSchema(appName: string, contract: DataContract): AppSche
     return { appName, pages: [{ key: 'home', title: '工作台', nav: { icon: 'layout-dashboard', label: '工作台' }, blocks: [{ type: 'richtext', props: { html: '<div class="muted">暂无数据模型</div>' } }] }] };
   }
   const primary = list[0];
+  const pLbl = primary.label || primary.name; // 中文显示名(回退技术名)
   const pages: Page[] = [{
     key: 'dashboard', title: '工作台', nav: { icon: 'layout-dashboard', label: '工作台' },
     blocks: [
-      { type: 'kpi', bind: { resource: primary.name }, props: { label: `${primary.name} 总数` } },
-      { type: 'table', bind: { resource: primary.name, fields: primary.fields.slice(0, 4) }, props: { title: primary.name, searchable: true, rowActions: ['查看'] } },
+      { type: 'kpi', bind: { resource: primary.name }, props: { label: `${pLbl} 总数` } },
+      { type: 'table', bind: { resource: primary.name, fields: primary.fields.slice(0, 4), fieldLabels: primary.fieldLabels }, props: { title: pLbl, searchable: true, rowActions: ['查看'] } },
     ],
   }];
   for (const r of list.slice(1, 6)) {
+    const lbl = r.label || r.name;
     pages.push({
-      key: slug(r.name, pages.length), title: r.name, nav: { icon: 'database', label: r.name },
-      blocks: [{ type: 'table', bind: { resource: r.name, fields: r.fields.slice(0, 4) }, props: { title: r.name, searchable: true, rowActions: ['查看'] } }],
+      key: slug(r.name, pages.length), title: lbl, nav: { icon: 'database', label: lbl },
+      blocks: [{ type: 'table', bind: { resource: r.name, fields: r.fields.slice(0, 4), fieldLabels: r.fieldLabels }, props: { title: lbl, searchable: true, rowActions: ['查看'] } }],
     });
   }
   return { appName, pages };
@@ -148,11 +151,12 @@ export function ensureCreateForm(schema: AppSchema, contract: DataContract): App
   if (hasForm) return schema;
   const writable = primary.fields.filter((f) => !SYSTEM_FIELDS.has(f.toLowerCase()));
   const fields = (writable.length ? writable : primary.fields).slice(0, 8);
+  const pLbl = primary.label || primary.name; // 中文显示名
   const page: Page = {
     key: slug('new-' + primary.name, schema.pages.length),
-    title: ('新增' + primary.name).slice(0, 20),
-    nav: { icon: 'plus', label: '新增' + primary.name },
-    blocks: [{ type: 'form', bind: { resource: primary.name, fields }, props: { title: '新增' + primary.name, submitLabel: '保存' } }],
+    title: ('新增' + pLbl).slice(0, 20),
+    nav: { icon: 'plus', label: '新增' + pLbl },
+    blocks: [{ type: 'form', bind: { resource: primary.name, fields, fieldLabels: primary.fieldLabels }, props: { title: '新增' + pLbl, submitLabel: '保存' } }],
   };
   return { ...schema, pages: [...schema.pages, page] };
 }
@@ -191,7 +195,8 @@ export function buildComposePrompt(appName: string, pageLabels: string[], featur
     pageLabels.length ? `## 期望页面\n${pageLabels.join('、')}` : '',
     features.length ? `## 功能\n${features.join('、')}` : '',
     contractPromptBlock(contract) || '## 数据契约\n（无，尽量用 richtext 说明）',
-    '按上述编排出 AppSchema JSON。',
+    '按上述编排出 AppSchema JSON。**所有给人看的文字（页面 title、菜单 nav.label、块 title/label）一律用中文**——'
+      + '资源/字段的中文名见数据契约里的「中文名」与 字段(中文)；bind.resource 与 bind.fields 仍用英文技术名，不要把技术名当标题。',
   ].filter(Boolean).join('\n\n');
   return { system, user };
 }

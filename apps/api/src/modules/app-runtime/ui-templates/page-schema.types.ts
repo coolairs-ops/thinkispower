@@ -11,6 +11,8 @@
 export interface Bind {
   resource: string;
   fields?: string[];
+  /** 字段技术名→中文显示名（列头/详情/表单 label 中文化用；缺则回退技术名）。 */
+  fieldLabels?: Record<string, string>;
 }
 
 export type Block =
