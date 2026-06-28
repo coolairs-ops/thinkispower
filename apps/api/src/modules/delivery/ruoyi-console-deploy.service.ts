@@ -26,10 +26,10 @@ export class RuoyiConsoleDeployService {
     private readonly client: RuoyiClient,
   ) {}
 
-  /** ruoyi 项目的交付结局：构建+验控制台+冒烟→上线门。写 goLiveStatus/productionUrl。 */
+  /** ruoyi 项目的交付结局：等后端就绪 → 构建+验控制台+冒烟→上线门。写 goLiveStatus/productionUrl。 */
   async deliver(projectId: string): Promise<void> {
-    const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
-    const desc = (proj?.backendRuntime ?? {}) as { status?: string; resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> };
+    // provision 与本任务并发(各自队列)，provision 含分钟级编译/重启 → 先等后端置备就绪，否则误判 deploy_failed。
+    const desc = await this.waitBackendReady(projectId, Number(process.env.RUOYI_CONSOLE_READY_TIMEOUT_MS) || 30 * 60 * 1000);
     const cfg = loadRuoyiInstanceConfig();
     const backendReady = desc.status === 'ready';
 
@@ -76,9 +76,24 @@ export class RuoyiConsoleDeployService {
     this.logger.log(`[控制台上线门] ${outcome.status}: ${outcome.reason}${outcome.productionUrl ? ' → ' + outcome.productionUrl : ''} (built=${consoleBuilt} deploy=${deployStatus} smoke=${smokePassed})`);
   }
 
+  /** 轮询等若依后端置备就绪（与本任务并发的 provision 含分钟级编译/重启）。ready/error 即返回；超时返回最后态。 */
+  private async waitBackendReady(projectId: string, timeoutMs: number): Promise<{ status?: string; resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> }> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+      const desc = (proj?.backendRuntime ?? {}) as { status?: string; resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> };
+      if (desc.status === 'ready' || desc.status === 'error') return desc;
+      if (Date.now() > deadline) {
+        this.logger.warn(`等后端就绪超时(${Math.round(timeoutMs / 1000)}s)，当前 status=${desc.status ?? '无'}`);
+        return desc;
+      }
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+  }
+
   /** 构建 plus-ui 控制台（vite build）。命令走 env，默认 npm run build。 */
   private async buildConsole(uiRoot: string): Promise<boolean> {
-    const cmd = process.env.RUOYI_CONSOLE_BUILD_CMD || 'npm run build';
+    const cmd = process.env.RUOYI_CONSOLE_BUILD_CMD || 'npm run build:prod'; // plus-ui 生产构建脚本
     try {
       await execAsync(cmd, { cwd: uiRoot, maxBuffer: 128 * 1024 * 1024, timeout: 8 * 60 * 1000 });
       this.logger.log(`控制台构建成功：${cmd} @ ${uiRoot}`);
