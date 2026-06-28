@@ -12,6 +12,7 @@ import { DeploymentService } from '../deployment/deployment.service';
 import { DeployPipelineService } from '../../services/deploy-pipeline.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
+import { RuoyiConsoleDeployService } from './ruoyi-console-deploy.service';
 
 describe('DeliveryEvaluationService — 企业级检查方法', () => {
   let service: DeliveryEvaluationService;
@@ -33,6 +34,7 @@ describe('DeliveryEvaluationService — 企业级检查方法', () => {
         { provide: DeployPipelineService, useValue: makeMock() },
         { provide: AcceptanceVerificationService, useValue: makeMock() },
         { provide: RuoyiProvisionService, useValue: { ensureProvisioned: jest.fn().mockResolvedValue({ triggered: false, status: 'not-ruoyi' }) } },
+        { provide: RuoyiConsoleDeployService, useValue: { deliver: jest.fn() } },
         { provide: getQueueToken(DELIVERY_QUEUE), useValue: { add: jest.fn() } },
       ],
     }).compile();

@@ -13,6 +13,7 @@ import { DeliveryService } from './delivery.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
+import { RuoyiConsoleDeployService } from './ruoyi-console-deploy.service';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { decideDeliveryOutcome, DeployResultStatus } from './golive-gate';
 import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
@@ -33,6 +34,7 @@ export class DeliveryEvaluationService {
     private qwenReviewer: QwenReviewerService,
     private acceptance: AcceptanceVerificationService,
     private ruoyiProvision: RuoyiProvisionService,
+    private consoleDeploy: RuoyiConsoleDeployService,
     @InjectQueue(DELIVERY_QUEUE) private deliveryQueue: Queue,
     @Optional() private schema?: SchemaMigrationService,
   ) {}
@@ -139,6 +141,13 @@ export class DeliveryEvaluationService {
   }
 
   async runProductionDelivery(deliveryId: string, projectId: string, payload: any) {
+    // ADR-0012 ②：ruoyi 底座项目 → 交付物=若依统一控制台(构建+验+冒烟+上线门量控制台)，不走 stepwise 自造前端。
+    const be = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+    if ((be?.backendRuntime as any)?.kind === 'ruoyi') {
+      this.logger.log(`[生产交付] ${deliveryId} 走若依控制台交付路(ADR-0012 ②)`);
+      await this.consoleDeploy.deliver(projectId);
+      return;
+    }
     try {
       // ═══ 主路径: 分步生成 (Phase A) ═══
       this.logger.log(`[生产交付] 使用分步生成: ${deliveryId}`);

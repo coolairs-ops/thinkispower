@@ -21,11 +21,12 @@ import { SensorModule } from '../sensor/sensor.module';
 import { SharedCoreModule } from '../../shared/shared-core.module';
 import { IterativeOptimizerService } from '../../services/iterative-optimizer.service';
 import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
+import { RuoyiConsoleDeployService } from './ruoyi-console-deploy.service';
 
 @Module({
   imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule, AppRuntimeModule, BullModule.registerQueue({ name: DELIVERY_QUEUE }, { name: AUTO_ITERATE_QUEUE })],
   controllers: [DeliveryController],
-  providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, AutoIterateProcessor, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService],
+  providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, AutoIterateProcessor, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService, RuoyiConsoleDeployService],
   exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService],
 })
 export class DeliveryModule {}
