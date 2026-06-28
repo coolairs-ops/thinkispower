@@ -83,9 +83,11 @@ export class AcceptanceVerificationService {
 
     // ADR-0008 D5：后端底座(若依)已置备 → backend 类场景按置备信用、不拿 HTML 判
     const backendReady = (project.backendRuntime as any)?.status === 'ready';
-    // ADR-0012：ruoyi 项目交付物是「若依控制台」(真做 CRUD/列表/详情/权限)，self/UI 类场景应按控制台置备信用判，
-    // 不拿设计态 demo HTML 判(判错对象——demo 是静态稿、控制台才是真交付物)。external/deferred(缺口)仍受控放行不计分。
-    const isRuoyiConsole = (project.backendRuntime as any)?.kind === 'ruoyi' && backendReady;
+    // ADR-0012：ruoyi 项目交付物是「若依控制台」(真做 CRUD/列表/详情/权限)，self/UI 类场景按控制台信用判，
+    // 不拿设计态 demo HTML 判(判错对象——demo 是静态稿、控制台才是真交付物)。
+    // 不要求 backendReady：交付物在交付时才置备，验收门若拿 demo 判 self 会把 ruoyi 项目拦死在交付前(鸡生蛋)；
+    // 运行时真把关交给上线门的控制台冒烟(login+list 经代理)。external/deferred(缺口)仍受控放行不计分。
+    const isRuoyiConsole = (project.backendRuntime as any)?.kind === 'ruoyi';
 
     // ADR-0009 ③-c：若依项目把"运行后端真实证据"（backend-smoke 实测可达的资源）喂给判定器，
     // 让 self 类场景据"后端真在跑+前端契约已接"判 UI 完整度，而非因"静态 HTML 看不到运行时"误判 manual。
@@ -112,9 +114,14 @@ export class AcceptanceVerificationService {
       let status: ScenarioStatus;
       let evidence: string;
       if (fulfilledBy === 'backend') {
-        // 后端底座能力：HTML 看不见 → 按置备信用，未置备记待人工（不假阳性）
-        status = backendReady ? 'pass' : 'manual';
-        evidence = backendReady ? '后端底座能力（若依已置备），按置备信用、不以 HTML 判' : '后端底座能力，待后端置备（HTML 不该判此项）';
+        // 后端底座能力：HTML 看不见 → 按置备信用。ruoyi 指定项目=交付物是若依控制台(CRUD/RBAC/数据隔离为标准能力，
+        // 交付时置备、运行时由上线门冒烟把关)→ 即便尚未置备也按"控制台交付"信用，免在交付前被鸡生蛋拦死；
+        // 非 ruoyi 项目仍需 backendReady 才信用、否则待人工(不假阳性)。
+        const credit = backendReady || isRuoyiConsole;
+        status = credit ? 'pass' : 'manual';
+        evidence = backendReady ? '后端底座能力（若依已置备），按置备信用、不以 HTML 判'
+          : isRuoyiConsole ? '后端能力由若依控制台交付（运行时上线门冒烟佐证），不以设计态 demo 判'
+            : '后端底座能力，待后端置备（HTML 不该判此项）';
       } else if (fulfilledBy === 'external') {
         // 外部能力：受控放行、非未实现，不计入通过率分母
         const protocol = inferFulfillment(`${s.name} ${s.then}`).protocol ?? 'generic';
@@ -124,10 +131,10 @@ export class AcceptanceVerificationService {
         status = 'manual';
         evidence = '本期不做 / 品类外，移出验收通过率分母';
       } else if (isRuoyiConsole) {
-        // self/UI 类 + ruoyi 控制台已置备：交付物是若依控制台(真做 CRUD/列表/详情/权限)，按控制台置备信用判通过，
+        // self/UI 类 + ruoyi 底座项目：交付物是若依控制台(真做 CRUD/列表/详情/权限)，按控制台交付信用判通过，
         // 不以设计态 demo 判(运行时真证据由上线门的控制台冒烟 login+list 经代理提供)。
         status = 'pass';
-        evidence = '若依控制台已置备：CRUD/列表/详情/权限由控制台真实提供（运行时由上线门控制台冒烟佐证），不以设计态 demo 判';
+        evidence = '由若依控制台交付：CRUD/列表/详情/权限为控制台标准能力（运行时由上线门控制台冒烟佐证），不以设计态 demo 判';
       } else {
         // self：判 demo HTML（LLM 语义判定）
         status = v?.status ?? 'manual';
