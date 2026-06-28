@@ -39,8 +39,15 @@ export interface ProvenanceVerdict {
 /** 本期明确不做 → 移出覆盖率分母（lifecycle 状态，非能力本身） */
 const DEFERRED = /(暂不|本期不做|不在本期|二期|后续再|暂缓|待定不做)/u;
 
-/** 后端底座兜底信号（注册表未命中时的保守回退） */
-const BACKEND_FALLBACK = /(登录认证|鉴权|权限|角色|数据隔离|多用户|\bRBAC\b|账号管理|用户管理|\bSSO\b)/u;
+/** 后端底座兜底信号（注册表未命中时的保守回退）。Excel/批量导入导出由若依 FastExcel 提供 → 归 backend(置备后信用)。 */
+const BACKEND_FALLBACK = /(登录认证|鉴权|权限|角色|数据隔离|多用户|\bRBAC\b|账号管理|用户管理|\bSSO\b|Excel|批量导入|导入导出|批量导出)/iu;
+
+/**
+ * 明确外部依赖兜底（需第三方系统/服务，平台与若依都无法独力兑现 → external 受控放行、移出分母、标"待对接"）。
+ * 只摘**确定外部**的（外部系统对接同步 / 联邦登录 / Webhook / 支付 / 短信），守"宁可漏判 external、不错判 external"。
+ * 注意：放在 backend 兜底之前判——外部系统对接优先于后端关键词。
+ */
+const EXTERNAL_FALLBACK = /(快普|金蝶|用友|第三方系统|外部系统|外部接口|与.{0,6}系统(对接|同步|集成)|系统(对接|同步|集成)|\bERP\b|\bCRM\b|\bOAuth\b|单点登录(对接)?|第三方登录|扫码登录|微信登录|\bWebhook\b|回调通知|支付宝|微信支付|银联|在线支付|短信(验证码|网关)?)/iu;
 
 /**
  * 判定一条需求/验收标准的能力来源（ADR-0008 D1）。
@@ -66,7 +73,14 @@ export function inferFulfillment(criterion: string): ProvenanceVerdict {
     return { fulfilledBy: cap.fulfillment, protocol: cap.protocol, capId: cap.capId, maturity: cap.maturity, reason: `命中能力「${cap.name}」(${cap.maturity})` };
   }
 
-  // 4) 注册表未命中 → 保守关键词兜底（后端信号 → backend）
+  // 4) 明确外部依赖 → external（受控放行、移出分母；优先于后端兜底）
+  const ext = EXTERNAL_FALLBACK.exec(text);
+  if (ext) {
+    const protocol: ExternalProtocol = /支付|银联/u.test(text) ? 'payment' : /短信/u.test(text) ? 'sms' : 'generic';
+    return { fulfilledBy: 'external', protocol, reason: `注册表未命中，外部信号兜底「${ext[0]}」→ external` };
+  }
+
+  // 5) 注册表未命中 → 保守关键词兜底（后端信号 → backend）
   const be = BACKEND_FALLBACK.exec(text);
   if (be) return { fulfilledBy: 'backend', reason: `注册表未命中，关键词兜底「${be[0]}」→ backend` };
 

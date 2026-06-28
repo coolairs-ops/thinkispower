@@ -95,7 +95,7 @@ export class IterativeOptimizerService {
       subject.next({ type: 'round_start', round, message: `第${round}轮评估...` });
       const project = await this.prisma.project.findUnique({
         where: { id: projectId },
-        select: { demoHtml: true, planSummary: true, description: true, structuredRequirement: true },
+        select: { demoHtml: true, planSummary: true, description: true, structuredRequirement: true, backendRuntime: true },
       });
       if (!project?.demoHtml) { subject.next({ type: 'error', message: '无Demo数据' }); break; }
 
@@ -150,6 +150,7 @@ export class IterativeOptimizerService {
       // L3: TraceabilityValidator（需求追溯）
       sensorReports.push(await this.traceabilityValidator.validate(
         projectId, project.demoHtml, project.planSummary, project.structuredRequirement,
+        { backendReady: (project.backendRuntime as { status?: string } | null)?.status === 'ready' }, // 已置备若依→后端能力按置备信用(不再拿 demo 误判)
       ));
 
       // L3: L3SemanticSensor（反馈闭环/项目状态）
@@ -238,7 +239,7 @@ export class IterativeOptimizerService {
   }> {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { demoHtml: true, planSummary: true, description: true, structuredRequirement: true },
+      select: { demoHtml: true, planSummary: true, description: true, structuredRequirement: true, backendRuntime: true },
     });
     if (!project?.demoHtml) {
       return { mixedScore: 0, fused: null };
@@ -261,6 +262,7 @@ export class IterativeOptimizerService {
     const l3Report = await this.crossValidator.validate(projectId, project.demoHtml, planSummaryStr);
     const traceReport = await this.traceabilityValidator.validate(
       projectId, project.demoHtml, project.planSummary, project.structuredRequirement,
+      { backendReady: (project.backendRuntime as { status?: string } | null)?.status === 'ready' },
     );
     const l3Semantic = await this.l3Semantic.run(projectId);
 

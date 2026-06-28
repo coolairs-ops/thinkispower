@@ -9,6 +9,8 @@ describe('inferFulfillment（能力来源分类 · ADR-0008 D1）', () => {
       'MVP: 多用户权限管理',
       '数据隔离：普通用户只看自己的数据',
       '功能: RBAC 角色权限',
+      '功能: Excel 批量导入项目',
+      '功能: 批量导入导出',
     ])('%s → backend', (c) => {
       expect(inferFulfillment(c).fulfilledBy).toBe('backend');
     });
@@ -24,6 +26,8 @@ describe('inferFulfillment（能力来源分类 · ADR-0008 D1）', () => {
       ['门店地图服务定位', 'map'],
       ['订单在线支付', 'payment'],
       ['数据同步至外部系统对接', 'generic'],
+      ['导入页从快普系统同步项目', 'generic'],
+      ['支持 OAuth 第三方登录', 'generic'],
     ])('%s → external/%s', (c, protocol) => {
       const v = inferFulfillment(c);
       expect(v.fulfilledBy).toBe('external');
