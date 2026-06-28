@@ -25,7 +25,7 @@ export class DeliveryService {
 
     const options = project.deliveryOptions;
     const latestBuild = await this.buildService.getLatestBuild(projectId);
-    const deliveryAnalysis = (project.structuredRequirement as any)?.deliveryAnalysis || null;
+    const deliveryAnalysis = (project.deliveryAnalysis as any) || null;
 
     // 获取生成文件列表
     const generatedFiles: string[] = [];

@@ -66,11 +66,10 @@ export class DeliveryEvaluationService {
       };
     }
 
-    // 保留式合并：勿整体替换 structuredRequirement，否则抹掉 designSuggestions/completenessGaps 等(用户采纳的设计建议被评估清掉=每次要重选)
-    const srEval = (await this.prisma.project.findUnique({ where: { id: projectId }, select: { structuredRequirement: true } }))?.structuredRequirement as any;
+    // 交付分析存独立字段 deliveryAnalysis(归位：原误塞 structuredRequirement、会被后续整体写覆盖)
     await this.prisma.project.update({
       where: { id: projectId },
-      data: { structuredRequirement: { ...(srEval || {}), deliveryAnalysis: analysis } as any },
+      data: { deliveryAnalysis: analysis as any },
     });
 
     const quality = await this.qualityGate.runAllChecks(projectId, project.demoHtml || '');
@@ -218,12 +217,7 @@ export class DeliveryEvaluationService {
         if (review.issues.length > 0) {
           this.logger.warn(`[Qwen] ${review.issues.length} 个问题: ${review.issues.slice(0,3).map(i => i.description).join('; ')}`);
         }
-        // 存储审查结果（保留式合并，勿整体替换 structuredRequirement→否则抹掉 designSuggestions 等）
-        const srNow = (await this.prisma.project.findUnique({ where: { id: projectId }, select: { structuredRequirement: true } }))?.structuredRequirement as any;
-        await this.prisma.project.update({
-          where: { id: projectId },
-          data: { structuredRequirement: { ...(srNow || {}), qwenReview: review } as any },
-        });
+        // 审查结果只记日志，不再塞进 structuredRequirement(它属需求、qwenReview 是交付产物且无任何读取方)。归位：审计看日志。
       }
 
       // 保存生成的文件
@@ -346,12 +340,12 @@ export class DeliveryEvaluationService {
   async acceptRiskFix(userId: string, orgId: string | null, projectId: string, riskIndex: number, customFix?: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, orgId: true, structuredRequirement: true },
+      select: { id: true, userId: true, orgId: true, structuredRequirement: true, deliveryAnalysis: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     assertResourceAccess(project, userId, orgId);
 
-    const analysis = (project.structuredRequirement as any)?.deliveryAnalysis;
+    const analysis = project.deliveryAnalysis as any;
     const risks = analysis?.risks || [];
     const risk = risks[riskIndex];
     if (!risk) throw new NotFoundException('风险项不存在');
@@ -361,7 +355,6 @@ export class DeliveryEvaluationService {
     const queue = sr.fixQueue || [];
     queue.push({ riskIndex, fixContent, fixTitle: risk.fixTitle });
     sr.fixQueue = queue;
-    sr.deliveryAnalysis = analysis;
 
     await this.prisma.project.update({
       where: { id: projectId },
@@ -406,14 +399,14 @@ export class DeliveryEvaluationService {
   async getReEvaluateStatus(userId: string, orgId: string | null, projectId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { userId: true, orgId: true, structuredRequirement: true },
+      select: { userId: true, orgId: true, structuredRequirement: true, deliveryAnalysis: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     assertResourceAccess(project, userId, orgId);
     const sr = (project.structuredRequirement as any) || {};
     const lastResult = sr.lastReEvaluate;
     const queue = sr.fixQueue || [];
-    const analysis = sr.deliveryAnalysis;
+    const analysis = project.deliveryAnalysis as any;
     return {
       done: !!(lastResult?.completedAt),
       queuedCount: queue.length,
@@ -483,11 +476,10 @@ export class DeliveryEvaluationService {
     const analysis = await this.hermes.analyzeSilent(projectId, latestDemoHtml, planSummary, description);
     const quality = await this.qualityGate.runAllChecks(projectId, latestDemoHtml);
 
-    sr.deliveryAnalysis = analysis;
     sr.lastReEvaluate = { taskId, results, completedAt: new Date().toISOString() };
     await this.prisma.project.update({
       where: { id: projectId },
-      data: { structuredRequirement: sr as any },
+      data: { structuredRequirement: sr as any, deliveryAnalysis: analysis as any }, // 交付分析写独立字段(归位)
     });
 
     this.logger.log(`re Evaluate完成: ${analysis.completeness}%, ${results.length} 项修复`);
@@ -497,12 +489,12 @@ export class DeliveryEvaluationService {
   async acceptSuggestion(userId: string, orgId: string | null, projectId: string, suggestionId: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, orgId: true, structuredRequirement: true },
+      select: { id: true, userId: true, orgId: true, structuredRequirement: true, deliveryAnalysis: true },
     });
     if (!project) throw new NotFoundException('项目不存在');
     assertResourceAccess(project, userId, orgId);
 
-    const analysis = (project.structuredRequirement as any)?.deliveryAnalysis;
+    const analysis = project.deliveryAnalysis as any;
     const suggestions = analysis?.suggestions || [];
     const suggestion = suggestions.find((s: any) => s.id === suggestionId);
     if (!suggestion) throw new NotFoundException('建议不存在');
