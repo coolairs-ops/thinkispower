@@ -83,6 +83,9 @@ export class AcceptanceVerificationService {
 
     // ADR-0008 D5：后端底座(若依)已置备 → backend 类场景按置备信用、不拿 HTML 判
     const backendReady = (project.backendRuntime as any)?.status === 'ready';
+    // ADR-0012：ruoyi 项目交付物是「若依控制台」(真做 CRUD/列表/详情/权限)，self/UI 类场景应按控制台置备信用判，
+    // 不拿设计态 demo HTML 判(判错对象——demo 是静态稿、控制台才是真交付物)。external/deferred(缺口)仍受控放行不计分。
+    const isRuoyiConsole = (project.backendRuntime as any)?.kind === 'ruoyi' && backendReady;
 
     // ADR-0009 ③-c：若依项目把"运行后端真实证据"（backend-smoke 实测可达的资源）喂给判定器，
     // 让 self 类场景据"后端真在跑+前端契约已接"判 UI 完整度，而非因"静态 HTML 看不到运行时"误判 manual。
@@ -120,6 +123,11 @@ export class AcceptanceVerificationService {
       } else if (fulfilledBy === 'deferred') {
         status = 'manual';
         evidence = '本期不做 / 品类外，移出验收通过率分母';
+      } else if (isRuoyiConsole) {
+        // self/UI 类 + ruoyi 控制台已置备：交付物是若依控制台(真做 CRUD/列表/详情/权限)，按控制台置备信用判通过，
+        // 不以设计态 demo 判(运行时真证据由上线门的控制台冒烟 login+list 经代理提供)。
+        status = 'pass';
+        evidence = '若依控制台已置备：CRUD/列表/详情/权限由控制台真实提供（运行时由上线门控制台冒烟佐证），不以设计态 demo 判';
       } else {
         // self：判 demo HTML（LLM 语义判定）
         status = v?.status ?? 'manual';

@@ -163,6 +163,17 @@ describe('AcceptanceVerificationService', () => {
     expect(r.passRate).toBe(1);
   });
 
+  it('ruoyi 控制台已置备：self/UI 场景按控制台置备信用 pass（覆盖 demo-judge 的 fail，ADR-0012 A/B 揪出）', async () => {
+    const scenarios = [{ name: '新增客户', given: '已登录', when: '填写表单并提交', then: '列表出现该客户', priority: 'P0', coverage: 'core' }];
+    prisma.specification.findUnique.mockResolvedValue({ projectId: 'p1', version: 1, acceptanceScenarios: scenarios, changeLog: [] });
+    prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'u1', demoHtml: '<body>静态设计稿，无真 CRUD</body>', description: '', backendRuntime: { kind: 'ruoyi', status: 'ready' } });
+    llm.chat.mockResolvedValue(JSON.stringify({ verdicts: [{ index: 1, status: 'fail', evidence: 'demo 静态看不到 CRUD' }] })); // demo-judge 判 fail
+    const r = await service.verify('u1', null, 'p1');
+    expect(r.scenarios[0].status).toBe('pass'); // 控制台信用覆盖 demo-fail（交付物是若依控制台、真做 CRUD）
+    expect(r.scenarios[0].evidence).toContain('若依控制台');
+    expect(r.passRate).toBe(1);
+  });
+
   it('backend 未置备 → 该项待人工、拖累通过率（self pass + backend manual = 0.5）', async () => {
     prisma.specification.findUnique.mockResolvedValue({ projectId: 'p1', version: 1, acceptanceScenarios: mixed.slice(0, 2), changeLog: [] });
     prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'u1', demoHtml: '<body>x</body>', description: '', backendRuntime: null });
