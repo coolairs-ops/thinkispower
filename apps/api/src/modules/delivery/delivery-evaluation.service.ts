@@ -66,9 +66,11 @@ export class DeliveryEvaluationService {
       };
     }
 
+    // 保留式合并：勿整体替换 structuredRequirement，否则抹掉 designSuggestions/completenessGaps 等(用户采纳的设计建议被评估清掉=每次要重选)
+    const srEval = (await this.prisma.project.findUnique({ where: { id: projectId }, select: { structuredRequirement: true } }))?.structuredRequirement as any;
     await this.prisma.project.update({
       where: { id: projectId },
-      data: { structuredRequirement: { deliveryAnalysis: analysis } as any },
+      data: { structuredRequirement: { ...(srEval || {}), deliveryAnalysis: analysis } as any },
     });
 
     const quality = await this.qualityGate.runAllChecks(projectId, project.demoHtml || '');
@@ -216,10 +218,11 @@ export class DeliveryEvaluationService {
         if (review.issues.length > 0) {
           this.logger.warn(`[Qwen] ${review.issues.length} 个问题: ${review.issues.slice(0,3).map(i => i.description).join('; ')}`);
         }
-        // 存储审查结果
+        // 存储审查结果（保留式合并，勿整体替换 structuredRequirement→否则抹掉 designSuggestions 等）
+        const srNow = (await this.prisma.project.findUnique({ where: { id: projectId }, select: { structuredRequirement: true } }))?.structuredRequirement as any;
         await this.prisma.project.update({
           where: { id: projectId },
-          data: { structuredRequirement: { qwenReview: review } as any },
+          data: { structuredRequirement: { ...(srNow || {}), qwenReview: review } as any },
         });
       }
 
