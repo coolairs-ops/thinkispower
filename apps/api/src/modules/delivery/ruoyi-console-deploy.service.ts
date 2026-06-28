@@ -48,7 +48,7 @@ export class RuoyiConsoleDeployService {
     // ③ 冒烟：初始用户(无则 admin)登录 + 首个业务资源 list 200
     let smokePassed: boolean | undefined;
     if (deployStatus === 'deployed' && backendReady) {
-      smokePassed = await this.smoke(cfg, desc);
+      smokePassed = await this.smoke(cfg, consoleUrl, desc);
     }
 
     // ④ 上线门（backendReady 传 false：强制「控制台可达」为 completed 唯一路径，不让后端就绪单独放行=诚实）
@@ -113,18 +113,30 @@ export class RuoyiConsoleDeployService {
     }
   }
 
-  /** 冒烟：用初始用户(回退 admin)登录 + 首个业务资源 list 返 200。 */
-  private async smoke(cfg: ReturnType<typeof loadRuoyiInstanceConfig>, desc: { resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> }): Promise<boolean> {
+  /**
+   * 冒烟：**经控制台 URL 的代理**(consoleUrl + apiPrefix)登录 + 首个业务资源 list 返 200。
+   * 关键：必须走控制台前端的访问路径(非 API 直连若依)——否则测不出"控制台→后端"断链
+   * (preview 缺代理 / 加密开关不匹配 / CORS 等)，导致门误判 completed 但真人登不上去(2026-06-28 实测坑)。
+   */
+  private async smoke(cfg: ReturnType<typeof loadRuoyiInstanceConfig>, consoleUrl: string, desc: { resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> }): Promise<boolean> {
+    const apiPrefix = process.env.RUOYI_CONSOLE_API_PREFIX || '/prod-api';
+    const base = `${consoleUrl.replace(/\/$/, '')}${apiPrefix}`;
+    const u = desc.initialUsers?.[0];
+    const username = u?.userName ?? cfg.client.username;
+    const password = u?.password ?? cfg.client.password;
+    const hdr = { 'Content-Type': 'application/json', clientid: cfg.client.clientId };
     try {
-      const u = desc.initialUsers?.[0];
-      const loginCfg = u ? { ...cfg.client, username: u.userName, password: u.password } : cfg.client;
-      const token = await this.client.login(loginCfg);
+      const lr = await fetch(`${base}/auth/login`, { method: 'POST', headers: hdr, body: JSON.stringify({ tenantId: cfg.client.tenantId, username, password, grantType: 'password', clientId: cfg.client.clientId }) });
+      const lj = (await lr.json()) as { code?: number; data?: { access_token?: string } };
+      if (lj?.code !== 200 || !lj.data?.access_token) { this.logger.warn(`控制台冒烟：经代理登录失败 code=${lj?.code}`); return false; }
       const resource = (desc.resources ?? [])[0];
-      if (!resource) return true; // 无资源可冒烟→不判失败
-      const data = await this.client.dataList(cfg.client, token, resource, {});
-      return data != null;
+      if (!resource) return true; // 无资源可冒烟→登录通即认可
+      const rr = await fetch(`${base}/system/${resource}/list?pageNum=1&pageSize=1`, { headers: { Authorization: `Bearer ${lj.data.access_token}`, clientid: cfg.client.clientId } });
+      const ok = rr.status === 200;
+      if (!ok) this.logger.warn(`控制台冒烟：经代理 list ${resource} HTTP ${rr.status}`);
+      return ok;
     } catch (e) {
-      this.logger.warn(`控制台冒烟失败：${e instanceof Error ? e.message : e}`);
+      this.logger.warn(`控制台冒烟失败(经代理 ${base})：${e instanceof Error ? e.message : e}`);
       return false;
     }
   }
