@@ -36,6 +36,8 @@ export interface BackendRuntimeDescriptor {
   error?: string;
   /** provision 断点续跑相位（仅置备中/失败时有意义；ready 终态可省）。失败重跑据此续。 */
   phase?: ProvisionPhase;
+  /** 置备时自动种的初始登录账号（每角色一个，默认密码，交付即能登）。ADR-0012 ①。 */
+  initialUsers?: Array<{ userName: string; password: string; role: string }>;
 }
 
 export interface ProvisionResult {

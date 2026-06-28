@@ -132,21 +132,28 @@ export class RuoyiRuntime implements BackendRuntime {
       await infra.waitReady();
       await checkpoint.save('ready');
     }
-    // ③ RBAC 运行时配：角色 + data_scope（'1'全部/'5'仅本人）+ 接口权限点（解生成 Controller 的 @SaCheckPermission 403）
+    // ③ RBAC 运行时配：角色 + data_scope + 接口权限点 + 初始用户。roleKeys/initialUsers 确定性派生(放相位门外，
+    //    断点续跑时 descriptor 仍带账号；种入操作幂等放门内)。
+    const roleKeys = (spec.roles ?? []).map((r, i) => roleKey(r.name, i, scopeKey));
+    const defaultPwd = process.env.RUOYI_DEFAULT_USER_PWD || '123456';
+    const initialUsers = (spec.roles ?? []).map((r, i) => ({ userName: `${scopeKey}_u${i + 1}`, password: defaultPwd, role: r.name }));
     if (!phaseReached(from, 'seeded')) {
       if (spec.roles?.length) {
-        const roleKeys = spec.roles.map((r, i) => roleKey(r.name, i, scopeKey));
         await this.client.seedRoles(
           cfg,
           spec.roles.map((r, i) => ({ roleName: `${r.name}·${roleLabel}`.slice(0, 30), roleKey: roleKeys[i], dataScope: r.dataScope })), // 兜底截 ≤30(若依 role_name 限长)
         );
         // 坎1：种控制台页菜单(C)+按钮权限点(F)并绑业务角色——否则控制台无导航/终端用户调接口被 @SaCheckPermission 挡 403。
-        // labels 传入：C 菜单名用中文 functionName（ADR-0012 ①③）。
         await this.client.seedMenusAndGrant(cfg, tables, roleKeys, { labels });
+        // ① 种初始登录账号：每角色一个可登录用户(项目域唯一用户名 + 默认密码)，让交付出的系统"开箱能登"。幂等。
+        await this.client.seedUsers(
+          cfg,
+          initialUsers.map((u, i) => ({ userName: u.userName, nickName: u.role, password: u.password, roleKey: roleKeys[i] })),
+        );
       }
       await checkpoint.save('seeded');
     }
-    // ④ descriptor（schemaName 复用租户号；resources = 暴露的表）
+    // ④ descriptor（schemaName 复用租户号；resources = 暴露的表；initialUsers = 开箱登录账号）
     return {
       descriptor: {
         kind: 'ruoyi',
@@ -154,6 +161,7 @@ export class RuoyiRuntime implements BackendRuntime {
         resources: tables,
         status: 'ready',
         provisionedAt: new Date().toISOString(),
+        ...(initialUsers.length ? { initialUsers } : {}),
       },
     };
   }

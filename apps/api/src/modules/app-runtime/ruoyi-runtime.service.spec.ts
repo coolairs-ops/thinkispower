@@ -23,6 +23,7 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
     const client = {
       seedRoles: jest.fn(async () => { order.push('seed'); return { created: 1, skipped: 0 }; }),
       seedMenusAndGrant: jest.fn(async () => { order.push('grant'); return { menusCreated: 5, rolesGranted: 2 }; }),
+      seedUsers: jest.fn(async () => ({ created: 2, skipped: 0 })),
     };
     const infra = {
       applyDdl: jest.fn(async (s: string[]) => { order.push(`ddl:${s.length}`); }),
@@ -65,7 +66,7 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
 
   it('断点续跑：相位=deployed → 跳过建表/部署（不重编译），只补探活+seed，相位推进', async () => {
     const saved: string[] = [];
-    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })), seedMenusAndGrant: jest.fn(async () => ({ menusCreated: 5, rolesGranted: 1 })) };
+    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })), seedMenusAndGrant: jest.fn(async () => ({ menusCreated: 5, rolesGranted: 1 })), seedUsers: jest.fn(async () => ({ created: 1, skipped: 0 })) };
     const infra = {
       applyDdl: jest.fn(async () => {}),
       deploySources: jest.fn(async () => {}),
@@ -85,7 +86,7 @@ describe('RuoyiRuntime · provisionApp 串完整链', () => {
 
   it('断点续跑：相位=none（首跑）→ 全步执行并逐相位 save', async () => {
     const saved: string[] = [];
-    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })), seedMenusAndGrant: jest.fn(async () => ({ menusCreated: 5, rolesGranted: 1 })) };
+    const client = { seedRoles: jest.fn(async () => ({ created: 1, skipped: 0 })), seedMenusAndGrant: jest.fn(async () => ({ menusCreated: 5, rolesGranted: 1 })), seedUsers: jest.fn(async () => ({ created: 1, skipped: 0 })) };
     const infra = { applyDdl: jest.fn(async () => {}), deploySources: jest.fn(async () => {}), waitReady: jest.fn(async () => {}) };
     const checkpoint = { load: jest.fn(async () => 'none' as const), save: jest.fn(async (p: string) => { saved.push(p); }) };
     const rt = new RuoyiRuntime(client as never);
