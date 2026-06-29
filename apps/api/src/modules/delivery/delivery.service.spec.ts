@@ -41,6 +41,28 @@ describe('DeliveryService', () => {
       expect(result.status).toBe('completed');
       expect(result.productionUrl).toBe('http://example.com');
       expect(result.isPro).toBe(true);
+      expect(result.consoleLogin).toBeNull(); // 非若依项目无控制台账号引导
+    });
+
+    it('若依项目 → 带出项目专属登录账号(引导勿用 admin 超管)', async () => {
+      prisma.project.findUnique.mockResolvedValue({
+        id: mockProjectId, userId: mockUserId, status: 'completed', productionUrl: 'http://127.0.0.1:8089',
+        deliveryOptions: {}, user: { plan: 'free' },
+        backendRuntime: { kind: 'ruoyi', initialUsers: [{ userName: 'proj_u1', password: '123456', role: '管理员' }] },
+      });
+      const result = await service.getDelivery(mockUserId, null, mockProjectId);
+      expect(result.consoleLogin).toMatchObject({ username: 'proj_u1', password: '123456', hasScopedAccount: true });
+      expect(result.consoleLogin!.note).toContain('admin'); // 明确引导勿用跨项目超管
+    });
+
+    it('若依项目但无 initialUsers(早期置备) → hasScopedAccount=false + 重新交付提示', async () => {
+      prisma.project.findUnique.mockResolvedValue({
+        id: mockProjectId, userId: mockUserId, status: 'completed', productionUrl: 'http://127.0.0.1:8089',
+        deliveryOptions: {}, user: { plan: 'free' },
+        backendRuntime: { kind: 'ruoyi' },
+      });
+      const result = await service.getDelivery(mockUserId, null, mockProjectId);
+      expect(result.consoleLogin).toMatchObject({ hasScopedAccount: false, username: null });
     });
 
     it('should throw NotFoundException for non-existent project', async () => {

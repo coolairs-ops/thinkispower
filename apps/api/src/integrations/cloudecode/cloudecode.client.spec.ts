@@ -74,6 +74,9 @@ describe('CloudecodeClient', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // clearAllMocks 不清实现：各测对 project.findUnique 的 mockResolvedValue 会持久污染后续测试，
+    // 这里把默认实现（无 backendRuntime → 视作 crud）复位，让每个测从干净默认开始。
+    mockPrismaService.project.findUnique.mockResolvedValue({ name: '门店巡检' });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -339,6 +342,23 @@ describe('CloudecodeClient', () => {
       expect(res.success).toBe(true);
     });
 
+    it('若依底座项目：demo 重生成跳过 crud 置备（不覆盖 designate），但仍持久 dataModel', async () => {
+      mockPrismaService.project.update.mockResolvedValue({});
+      mockPrismaService.project.findUnique.mockResolvedValue({ backendRuntime: { kind: 'ruoyi' } });
+      mockDeepseekService.chatWithRetry.mockResolvedValue(
+        '```prisma\nmodel Todo {\n  id String @id @default(uuid())\n  title String\n}\n```\n<!DOCTYPE html><html><head></head><body><script>var pages={}</script></body></html>',
+      );
+
+      const res = await client.generateDemoHtmlDirect('pr', planSummary);
+      expect(res.success).toBe(true);
+      // 关键：CrudRuntime.provision 会整体覆盖 backendRuntime → 把 {kind:ruoyi} 抹回 {kind:crud}，故 ruoyi 项目必须跳过
+      expect(mockBackend.provision).not.toHaveBeenCalled();
+      // dataModel 仍持久（codegen/契约用得到），只是不触发 crud 置备
+      expect(mockPrismaService.project.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ dataModel: expect.stringContaining('model Todo') }) }),
+      );
+    });
+
     it('注入的 appData 客户端按 REST 约定构造请求并解包响应', async () => {
       const html = client.injectAppDataClient('<html><head></head><body></body></html>', 'proj-1');
       const iife = html.match(/\(function\(\)\{[\s\S]*\}\)\(\);/)![0];
@@ -440,6 +460,18 @@ describe('CloudecodeClient', () => {
       expect(demoHtml).toContain('门店页内容');        // p1 内容已拼入
       expect(demoHtml).not.toContain('<!--TIP_PAGE:'); // 占位符全替换
       expect(demoHtml).toContain('window.appData');    // appData 注入
+    });
+
+    it('若依底座项目：分段生成跳过 crud 置备（不覆盖 designate）', async () => {
+      mockPrismaService.project.update.mockResolvedValue({});
+      mockPrismaService.project.findUnique.mockResolvedValue({ name: '门店', backendRuntime: { kind: 'ruoyi' } });
+      mockDeepseekService.chatWithRetry
+        .mockResolvedValueOnce('```prisma\nmodel Store {\n  id String @id @default(uuid())\n  name String\n}\n```')
+        .mockResolvedValue('<div data-module-key="m">页</div>');
+
+      const res = await client.generateDemoStaged('pr', { summary: '门店', pages: ['总览'], features: [] });
+      expect(res.success).toBe(true);
+      expect(mockBackend.provision).not.toHaveBeenCalled();
     });
 
     it('generatePageContent：一次调用产单页内容 HTML（供建造回路复用）', async () => {
@@ -567,6 +599,18 @@ describe('CloudecodeClient', () => {
       expect(deepseek.chatWithRetry).toHaveBeenCalled(); // 仅小调用出数据模型
       expect(mockBackend.provision).toHaveBeenCalledWith('p1', expect.stringContaining('model Company'));
       expect(mockTemplateApp.buildAndStore).toHaveBeenCalledWith('p1'); // 套模板出页
+    });
+
+    it('若依底座项目：跳过 crud 置备（不覆盖 designate），仍套模板出页', async () => {
+      (prisma as any).project.findUnique.mockResolvedValue({ name: '风险监管平台', backendRuntime: { kind: 'ruoyi' } });
+      (prisma as any).project.update.mockResolvedValue({});
+      (deepseek.chatWithRetry as jest.Mock).mockResolvedValue('```prisma\nmodel Company { id String @id\n name String\n}\n```');
+
+      const r = await client.generateDemoFromTemplate('pr', { pages: ['总览'], features: ['查询'] });
+
+      expect(r.success).toBe(true);
+      expect(mockBackend.provision).not.toHaveBeenCalled();
+      expect(mockTemplateApp.buildAndStore).toHaveBeenCalledWith('pr');
     });
   });
 });

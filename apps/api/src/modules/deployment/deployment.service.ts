@@ -31,7 +31,7 @@ export class DeploymentService {
     // 1. Read current demoHtml + 数据模型
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { demoHtml: true, dataModel: true },
+      select: { demoHtml: true, dataModel: true, backendRuntime: true },
     });
 
     const html = project?.demoHtml;
@@ -44,7 +44,9 @@ export class DeploymentService {
     // 1.5 确保 per-project 后端数据服务就位（幂等）——让在线链接背后真有 API，而非只托管静态 HTML。
     // demo 注入的 appData 走相对路径 /api/app/<projectId>/，与 serveDeploy 同源（均在 API），无需跨域配置。
     let backendInfo: { schemaName: string; resources: string[] } | undefined;
-    if (this.backend && project.dataModel) {
+    // 若依底座项目交付物=控制台（走 RuoyiConsoleDeployService），不该用 crud 置备覆盖 backendRuntime 描述符（保 designate/已置备态）。
+    const isRuoyi = (project.backendRuntime as { kind?: string } | null)?.kind === 'ruoyi';
+    if (this.backend && project.dataModel && !isRuoyi) {
       try {
         const { descriptor } = await this.backend.provision(projectId, project.dataModel);
         backendInfo = { schemaName: descriptor.schemaName, resources: descriptor.resources };

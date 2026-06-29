@@ -5,6 +5,8 @@ import { Queue } from 'bullmq';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service';
 import { AcceptanceVerificationService, AcceptanceReport } from '../delivery/acceptance-verification.service';
+import { loadRuoyiInstanceConfig } from '../app-runtime/ruoyi-provision.config';
+import { smokeRuoyiConsole } from '../app-runtime/ruoyi-console-smoke';
 import { GuardianRemediationService } from './guardian-remediation.service';
 import { GuardianReportService } from './guardian-report.service';
 import { GUARDIAN_QUEUE, GUARDIAN_SWEEP_JOB, GUARDIAN_CHECK_JOB } from './guardian.queue';
@@ -64,7 +66,7 @@ export class GuardianService implements OnModuleInit {
   async runCheck(projectId: string, trigger: 'scheduled' | 'manual' = 'scheduled') {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, userId: true, orgId: true, productionUrl: true },
+      select: { id: true, userId: true, orgId: true, productionUrl: true, backendRuntime: true },
     });
     if (!project) {
       this.logger.warn(`Guardian 巡检跳过：项目 ${projectId} 不存在`);
@@ -80,7 +82,13 @@ export class GuardianService implements OnModuleInit {
 
     // 线上 liveness 真探活(修 #2)：守护必须打用户实际访问的 productionUrl，
     // 而非只看库存 demoHtml + 平台健康。线上挂了即 critical，静态判定无法掩盖。
-    const liveness = project.productionUrl ? await this.probeLiveness(project.productionUrl) : null;
+    // 若依控制台(kind=ruoyi&ready)：深探——经控制台代理 login+list(与交付上线门同口径)，
+    // 否则只 GET 首页会被"SPA 首页 200 但后端断链/登不上去"骗过(浅探探不出真挂)。
+    const liveness = project.productionUrl
+      ? (this.isRuoyiConsole(project.backendRuntime)
+          ? await this.probeRuoyiConsole(project.productionUrl, project.backendRuntime as any)
+          : await this.probeLiveness(project.productionUrl))
+      : null;
     if (liveness && !liveness.reachable) {
       this.logger.warn(`Guardian liveness 不可达 ${projectId}: ${project.productionUrl} → ${liveness.detail}`);
     }
@@ -158,6 +166,24 @@ export class GuardianService implements OnModuleInit {
     if (base == null) return { healthScore: 0, status: 'unknown' };
     const status = base >= HEALTHY_MIN ? 'healthy' : base >= DEGRADED_MIN ? 'degraded' : 'critical';
     return { healthScore: base, status };
+  }
+
+  /** 该项目是否以若依控制台为交付物且已就绪（决定深探 vs 浅探）。未配若依实例则退回浅探。 */
+  private isRuoyiConsole(backendRuntime: unknown): boolean {
+    const be = backendRuntime as { kind?: string; status?: string } | null;
+    return be?.kind === 'ruoyi' && be?.status === 'ready' && loadRuoyiInstanceConfig().enabled;
+  }
+
+  /**
+   * 若依控制台深探：经控制台 URL 代理 login + 首个业务资源 list 200（与交付上线门同口径）。
+   * 真测"控制台→后端"连通，能抓出"首页 200 但代理断链/加密不匹配/登不上去"——浅探 GET 抓不出。
+   */
+  private async probeRuoyiConsole(
+    url: string,
+    desc: { resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> },
+  ): Promise<{ reachable: boolean; statusCode?: number; detail: string }> {
+    const r = await smokeRuoyiConsole(url, desc, { timeoutMs: 10000 });
+    return { reachable: r.ok, statusCode: r.statusCode, detail: `控制台冒烟: ${r.detail}` };
   }
 
   /** 线上 liveness 探活：GET productionUrl，5xx/网络错误=不可达 */

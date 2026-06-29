@@ -48,10 +48,19 @@ describe('RuoyiProvisionService', () => {
       expect(queue.add).not.toHaveBeenCalled();
     });
 
-    it('若依已就绪 → 不重复触发', async () => {
-      const { svc, queue } = make(baseEnv, { kind: 'ruoyi', status: 'ready' });
+    it('若依已就绪且有专属账号 → 不重复触发', async () => {
+      const { svc, queue } = make(baseEnv, { kind: 'ruoyi', status: 'ready', initialUsers: [{ userName: 'p1_u1' }] });
       expect((await svc.ensureProvisioned('p1')).status).toBe('ready');
       expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it('旧项目自愈：已就绪但缺 initialUsers → 补种 RBAC，相位预置 ready(只重 seed、不重 DDL/编译)', async () => {
+      const { svc, prisma, queue } = make(baseEnv, { kind: 'ruoyi', status: 'ready' }); // 无 initialUsers
+      const r = await svc.ensureProvisioned('p1', { userId: 'u1' });
+      expect(r).toMatchObject({ triggered: true, status: 'provisioning' });
+      expect(queue.add).toHaveBeenCalled();
+      const upd = prisma.project.update.mock.calls[0][0].data.backendRuntime;
+      expect(upd).toMatchObject({ kind: 'ruoyi', status: 'provisioning', phase: 'ready' }); // 只重跑 seed 相位
     });
 
     it('若依置备中 → 不重复触发', async () => {

@@ -4,6 +4,7 @@ import { exec } from 'node:child_process';
 import { PrismaService } from '../../database/prisma.service';
 import { RuoyiClient } from '../app-runtime/ruoyi-client.service';
 import { loadRuoyiInstanceConfig } from '../app-runtime/ruoyi-provision.config';
+import { smokeRuoyiConsole } from '../app-runtime/ruoyi-console-smoke';
 import { decideDeliveryOutcome, DeployResultStatus } from './golive-gate';
 
 const execAsync = promisify(exec);
@@ -115,29 +116,11 @@ export class RuoyiConsoleDeployService {
 
   /**
    * 冒烟：**经控制台 URL 的代理**(consoleUrl + apiPrefix)登录 + 首个业务资源 list 返 200。
-   * 关键：必须走控制台前端的访问路径(非 API 直连若依)——否则测不出"控制台→后端"断链
-   * (preview 缺代理 / 加密开关不匹配 / CORS 等)，导致门误判 completed 但真人登不上去(2026-06-28 实测坑)。
+   * 实现抽到 `smokeRuoyiConsole`(与守护探活共用，避免漂移)；此处保留原无超时行为。
    */
   private async smoke(cfg: ReturnType<typeof loadRuoyiInstanceConfig>, consoleUrl: string, desc: { resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> }): Promise<boolean> {
-    const apiPrefix = process.env.RUOYI_CONSOLE_API_PREFIX || '/prod-api';
-    const base = `${consoleUrl.replace(/\/$/, '')}${apiPrefix}`;
-    const u = desc.initialUsers?.[0];
-    const username = u?.userName ?? cfg.client.username;
-    const password = u?.password ?? cfg.client.password;
-    const hdr = { 'Content-Type': 'application/json', clientid: cfg.client.clientId };
-    try {
-      const lr = await fetch(`${base}/auth/login`, { method: 'POST', headers: hdr, body: JSON.stringify({ tenantId: cfg.client.tenantId, username, password, grantType: 'password', clientId: cfg.client.clientId }) });
-      const lj = (await lr.json()) as { code?: number; data?: { access_token?: string } };
-      if (lj?.code !== 200 || !lj.data?.access_token) { this.logger.warn(`控制台冒烟：经代理登录失败 code=${lj?.code}`); return false; }
-      const resource = (desc.resources ?? [])[0];
-      if (!resource) return true; // 无资源可冒烟→登录通即认可
-      const rr = await fetch(`${base}/system/${resource}/list?pageNum=1&pageSize=1`, { headers: { Authorization: `Bearer ${lj.data.access_token}`, clientid: cfg.client.clientId } });
-      const ok = rr.status === 200;
-      if (!ok) this.logger.warn(`控制台冒烟：经代理 list ${resource} HTTP ${rr.status}`);
-      return ok;
-    } catch (e) {
-      this.logger.warn(`控制台冒烟失败(经代理 ${base})：${e instanceof Error ? e.message : e}`);
-      return false;
-    }
+    const r = await smokeRuoyiConsole(consoleUrl, desc, { cfg });
+    if (!r.ok) this.logger.warn(`控制台冒烟未过：${r.detail}`);
+    return r.ok;
   }
 }

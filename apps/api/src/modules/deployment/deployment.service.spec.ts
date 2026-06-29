@@ -203,6 +203,21 @@ describe('DeploymentService', () => {
       expect(result.backend).toBeUndefined();
     });
 
+    it('若依底座项目 → 不用 crud 置备覆盖 backendRuntime（交付物=控制台，保 designate/已置备态）', async () => {
+      prisma.project.findUnique.mockResolvedValue({
+        id: mockProjectId,
+        demoHtml: '<html><body>Hi</body></html>',
+        dataModel: 'model Todo { id String @id @default(uuid()) }',
+        backendRuntime: { kind: 'ruoyi', status: 'ready' },
+      });
+
+      service = await build();
+      const result = await service.deploy(mockProjectId);
+
+      expect(mockBackend.provision).not.toHaveBeenCalled();
+      expect(result.backend).toBeUndefined();
+    });
+
     it('置备失败 → 降级不阻断部署', async () => {
       mockBackend.provision.mockRejectedValue(new Error('迁移失败'));
       prisma.project.findUnique.mockResolvedValue({

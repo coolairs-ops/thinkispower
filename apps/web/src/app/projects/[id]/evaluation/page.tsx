@@ -28,6 +28,15 @@ interface RoundResult {
  details: any[];
 }
 
+// ④ 缺口按类展示：把自迭代路由出去的缺口（disposeGap action）映射成客户能看懂的类别标签。
+const GAP_ACTION_META: Record<string, { label: string; cls: string }> = {
+ 'extend-generator': { label: '平台补建中', cls: 'bg-blue-100 text-blue-700' },
+ 'external-adapter': { label: '待外部对接', cls: 'bg-purple-100 text-purple-700' },
+ 'backend-provision': { label: '待后端置备', cls: 'bg-emerald-100 text-emerald-700' },
+ 'out-of-scope': { label: '转人工/不做', cls: 'bg-gray-200 text-gray-600' },
+ default: { label: '待处置', cls: 'bg-amber-100 text-amber-700' },
+};
+
 export default function EvaluationPage() {
  const router = useRouter();
  const params = useParams();
@@ -40,6 +49,7 @@ export default function EvaluationPage() {
  const [rounds, setRounds] = useState<RoundResult[]>([]);
  const [currentScore, setCurrentScore] = useState(0);
  const [statusText, setStatusText] = useState('就绪');
+ const [routedGaps, setRoutedGaps] = useState<any[]>([]);  // ④ 被自迭代路由出去的缺口（带 customerAction）
  const [stuckModal, setStuckModal] = useState<any>(null);
  const [perfectModal, setPerfectModal] = useState<any>(null);
  const [doneModal, setDoneModal] = useState<any>(null);  // 迭代完成（非达标）面板
@@ -67,6 +77,8 @@ export default function EvaluationPage() {
   if (Array.isArray(res?.phases) && res.phases.length) setPhaseStates(res.phases);
   if (typeof res?.score === 'number') setCurrentScore(res.score);
   if (typeof res?.round === 'number') setCurrentRound(res.round);
+  if (Array.isArray(res?.routedGaps) && res.routedGaps.length) setRoutedGaps(res.routedGaps);
+  else if (Array.isArray(res?.terminal?.routedGaps) && res.terminal.routedGaps.length) setRoutedGaps(res.terminal.routedGaps);
 
   if (res?.otherProjectActive && !res?.active) {
    setBlockedByProject(res.currentProjectName || res.currentProjectId || '其他项目');
@@ -134,6 +146,18 @@ export default function EvaluationPage() {
 
  case 'phase_update':
  if (data.phases) setPhaseStates(data.phases);
+ break;
+
+ case 'gaps_routed':
+ if (Array.isArray(data.routedGaps)) setRoutedGaps(data.routedGaps);
+ break;
+
+ case 'routed_stop':
+ completedRef.current = true;
+ if (Array.isArray(data.routedGaps)) setRoutedGaps(data.routedGaps);
+ setStuckModal(data);
+ setStatusText(data.message || '剩余缺口需人工处置，自迭代已停');
+ setIterating(false);
  break;
 
  case 'stuck':
@@ -555,8 +579,31 @@ export default function EvaluationPage() {
    </div>
    </>
  )}
+ {/* ④ 缺口清单：自迭代补不出来、已按类别路由的缺口 + 客户侧下一步 */}
+ {routedGaps.length > 0 && (
+   <div className="mt-5 pt-4 border-t border-gray-100">
+   <h2 className="font-semibold text-sm mb-1 text-amber-600">🧩 缺口清单 ({routedGaps.length}项)</h2>
+   <p className="text-xs text-gray-400 mb-3">这些缺口靠自迭代补不出来，已按处置类别登记，下面是各自的下一步。</p>
+   <div className="space-y-2">
+   {routedGaps.map((g: any, i: number) => {
+     const meta = GAP_ACTION_META[g.action] || GAP_ACTION_META.default;
+     return (
+     <div key={`gap-${i}`} className="flex items-start gap-2 rounded bg-gray-50 border border-gray-100 px-3 py-2">
+     <span className={`shrink-0 mt-0.5 rounded px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.label}</span>
+     <div className="min-w-0">
+     <div className="text-xs text-gray-700">{g.customerAction || g.recommendation}</div>
+     {g.customerAction && g.recommendation && (
+       <div className="text-[11px] text-gray-400 truncate">来源：{g.recommendation}</div>
+     )}
+     </div>
+     </div>
+     );
+   })}
+   </div>
+   </div>
+ )}
  {/* 无风险也无建议 */}
- {(!latest?.risks || latest.risks.length === 0) && (!latest?.recommendations || latest.recommendations.length === 0) && (
+ {(!latest?.risks || latest.risks.length === 0) && (!latest?.recommendations || latest.recommendations.length === 0) && routedGaps.length === 0 && (
    <p className="text-xs text-gray-400">暂无风险和建议</p>
  )}
  </div>

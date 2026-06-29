@@ -215,6 +215,17 @@ export class CloudecodeClient {
   }
 
   /**
+   * 项目是否已显式指定若依底座（designate=ruoyi）。
+   * 设计态 demo 生成会顺手用 crud 后端置备出空表作数据背板，但 CrudRuntime.provision 会整体覆盖
+   * backendRuntime 描述符 → 把已选的 {kind:ruoyi} 抹回 {kind:crud}（"designate 被覆盖"bug）。
+   * ruoyi 项目的 demo 数据走 appData（设计态 404→空表，置备后→若依代理），无需 crud 背板，故直接跳过置备保住意图。
+   */
+  private async isRuoyiDesignated(projectId: string): Promise<boolean> {
+    const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+    return (p?.backendRuntime as { kind?: string } | null)?.kind === 'ruoyi';
+  }
+
+  /**
    * 首次 Demo 生成 — 从 plan 信息生成完整 HTML（无需 Task，供 DemoService 直调）。
    */
   async generateDemoHtmlDirect(projectId: string, planSummary: any): Promise<{
@@ -262,8 +273,12 @@ export class CloudecodeClient {
     if (dataModel) {
       try {
         await this.prisma.project.update({ where: { id: projectId }, data: { dataModel } });
-        await this.backend.provision(projectId, dataModel);
-        this.logger.log(`Demo 数据后端已置备 for project ${projectId}`);
+        if (await this.isRuoyiDesignated(projectId)) {
+          this.logger.log(`项目 ${projectId} 已指定若依底座，跳过 crud 后端置备（不覆盖 designate）`);
+        } else {
+          await this.backend.provision(projectId, dataModel);
+          this.logger.log(`Demo 数据后端已置备 for project ${projectId}`);
+        }
       } catch (e) {
         this.logger.warn(`Demo 数据后端置备失败（降级为无数据后端）: ${e instanceof Error ? e.message : e}`);
       }
@@ -301,7 +316,11 @@ export class CloudecodeClient {
     }
     try {
       await this.prisma.project.update({ where: { id: projectId }, data: { dataModel } });
-      await this.backend.provision(projectId, dataModel);
+      if (await this.isRuoyiDesignated(projectId)) {
+        this.logger.log(`项目 ${projectId} 已指定若依底座，跳过 crud 后端置备（不覆盖 designate）`);
+      } else {
+        await this.backend.provision(projectId, dataModel);
+      }
     } catch (e) {
       this.logger.warn(`模板路径置备后端失败（降级为无数据后端）: ${e instanceof Error ? e.message : e}`);
     }
@@ -371,7 +390,11 @@ export class CloudecodeClient {
     if (dataModel) {
       try {
         await this.prisma.project.update({ where: { id: projectId }, data: { dataModel } });
-        await this.backend.provision(projectId, dataModel);
+        if ((project?.backendRuntime as { kind?: string } | null)?.kind === 'ruoyi') {
+          this.logger.log(`项目 ${projectId} 已指定若依底座，跳过 crud 后端置备（不覆盖 designate）`);
+        } else {
+          await this.backend.provision(projectId, dataModel);
+        }
       } catch (e) {
         this.logger.warn(`分段生成置备后端失败（降级）: ${e instanceof Error ? e.message : e}`);
       }

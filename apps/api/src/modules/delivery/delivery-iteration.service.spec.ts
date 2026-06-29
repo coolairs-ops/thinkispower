@@ -151,3 +151,49 @@ describe('DeliveryIterationService.autoFixViaSchema (S5)', () => {
     expect(await (svc as any).autoFixViaSchema('p1', ['x'])).toBeNull();
   });
 });
+
+describe('DeliveryIterationService.triageRecommendations (④ 缺口处置接线·ADR-0008 D6)', () => {
+  const svc = new DeliveryIterationService(
+    {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
+  );
+
+  it('self/默认建议进自迭代；external/backend/deferred 路由出去且带 customerAction', () => {
+    const t = (svc as any).triageRecommendations([
+      '提升按钮对比度，页面结构需要优化', // self → 自迭代喂大模型
+      '对接微信支付',                     // external → 路由（不烧大模型）
+      '完善登录认证与权限管理',           // backend → 路由
+      '本期不做智能推荐',                 // deferred → 路由
+    ]);
+    expect(t.autoIterate).toEqual(['提升按钮对比度，页面结构需要优化']);
+    expect(t.routed).toHaveLength(3);
+    expect(t.routed.map((r: any) => r.action).sort()).toEqual(['backend-provision', 'external-adapter', 'out-of-scope']);
+    for (const r of t.routed) expect(r.customerAction).toBeTruthy(); // 每条带客户侧下一步
+  });
+
+  it('全部可自迭代 → routed 为空（不误丢可修项）', () => {
+    const t = (svc as any).triageRecommendations(['优化间距', '调整配色']);
+    expect(t.routed).toEqual([]);
+    expect(t.autoIterate).toHaveLength(2);
+  });
+});
+
+describe('DeliveryIterationService.getAutoIterateStatus (④ routedGaps 透传)', () => {
+  it('autoIterateState.routedGaps 透传进状态响应——running/terminal 两态前端都能渲染缺口清单', async () => {
+    const prisma = {
+      project: { findUnique: jest.fn().mockResolvedValue({ autoIterateState: {
+        taskId: 't', status: 'awaiting_decision', round: 3, score: 78, rounds: [], phases: [],
+        routedGaps: [{ recommendation: 'x', action: 'external-adapter', channel: 'gap-workflow', customerAction: '需对接外部能力', reason: 'r' }],
+        terminal: { type: 'routed_stop' }, updatedAt: new Date().toISOString(),
+      } }) },
+      systemLock: { findUnique: jest.fn().mockResolvedValue(null) },
+    };
+    const svc = new DeliveryIterationService(
+      prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
+    );
+    const res = await svc.getAutoIterateStatus('p1');
+    // 防回归：状态响应是字段白名单，routedGaps 必须在白名单里（否则前端拿不到、缺口清单永远空）
+    expect(res.status).toBe('awaiting_decision');
+    expect(res.routedGaps).toHaveLength(1);
+    expect(res.routedGaps[0].action).toBe('external-adapter');
+  });
+});

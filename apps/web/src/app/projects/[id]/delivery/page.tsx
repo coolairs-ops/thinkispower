@@ -130,6 +130,7 @@ export default function DeliveryPage() {
   const hasFiles = genFiles.length > 0;
   const sourceZipUrl = delivery?.latestBuild?.sourceZipUrl;
   const productionUrl = delivery?.productionUrl;
+  const consoleLogin = delivery?.consoleLogin; // 若依控制台：项目专属登录账号（勿用 admin 超管，会串其他项目菜单）
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -181,6 +182,19 @@ export default function DeliveryPage() {
                   <button onClick={() => navigator.clipboard.writeText(productionUrl!)}
                     className="rounded border px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">复制</button>
                 </div>
+                {consoleLogin && (
+                  <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-2">
+                    {consoleLogin.hasScopedAccount ? (
+                      <p className="text-xs text-amber-800">
+                        登录账号（仅本项目）：<span className="font-mono font-medium">{consoleLogin.username}</span>
+                        {consoleLogin.password && <> / <span className="font-mono font-medium">{consoleLogin.password}</span></>}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-800">本项目暂无专属账号，建议重新交付以自动种项目账号。</p>
+                    )}
+                    <p className="text-[11px] text-amber-600 mt-1">{consoleLogin.note}</p>
+                  </div>
+                )}
               </>}
               unavailableContent={<>
                 <p className="text-xs text-gray-400">代码生成后将自动部署</p>

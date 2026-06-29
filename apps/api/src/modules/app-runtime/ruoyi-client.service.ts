@@ -281,6 +281,17 @@ export class RuoyiClient {
     if (data?.code !== 200) throw new Error(`建控制台菜单失败(${resource}): ${JSON.stringify(data).slice(0, 200)}`);
   }
 
+  /** 确保某菜单挂在指定业务目录下（自愈旧置备把 C 菜单建在「系统工具」等目录→角色没授其父目录→菜单被当孤儿丢弃不显示）。已在目标目录下则不动。 */
+  private async ensureMenuUnderDir(cfg: RuoyiClientConfig, token: string, menuId: string | number, dirId: string | number): Promise<boolean> {
+    const cur = await this.get(cfg, `/system/menu/${menuId}`, token);
+    const menu = cur?.data;
+    if (!menu || String(menu.parentId) === String(dirId)) return false;
+    const put = await this.put(cfg, '/system/menu', { ...menu, parentId: dirId }, token);
+    if (put?.code !== 200) throw new Error(`改菜单父级失败(${menuId}→${dirId}): ${JSON.stringify(put).slice(0, 150)}`);
+    this.logger.log(`若依菜单改挂业务目录: menu=${menuId} parent→${dirId}`);
+    return true;
+  }
+
   /** 角色当前已绑菜单 id（roleMenuTreeselect.checkedKeys）。 */
   private async roleMenuCheckedKeys(cfg: RuoyiClientConfig, token: string, roleId: string | number): Promise<Array<string | number>> {
     const data = await this.get(cfg, `/system/menu/roleMenuTreeselect/${roleId}`, token);
@@ -340,7 +351,13 @@ export class RuoyiClient {
     const dirId = await this.ensureBizDir(cfg, token);
     // 每资源建 C 页菜单（承载 list 权限，让控制台可导航；component/path/perms 用 businessName，菜单名用中文 functionName）
     for (const m of metas) {
-      if (permMap.has(`${m.moduleName}:${m.businessName}:list`)) continue;
+      const existingCId = permMap.get(`${m.moduleName}:${m.businessName}:list`);
+      if (existingCId != null) {
+        // 旧置备可能把 C 菜单建在别的目录(如若依内置「系统工具」)下；项目角色只授「业务模块」目录
+        // → 那些菜单父级未授、被若依菜单树当孤儿丢弃、授了却不显示。重新交付时改挂到业务模块目录自愈。
+        await this.ensureMenuUnderDir(cfg, token, existingCId, dirId);
+        continue;
+      }
       await this.createConsoleMenu(cfg, token, dirId, m.businessName, m.name, m.moduleName);
       menusCreated++;
     }
