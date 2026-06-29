@@ -129,5 +129,5 @@ designate 若依底座 (backendRuntime.kind=ruoyi,status=pending)  ← 方案页
 1. **一项目一若依租户硬隔离**（架构级；现共享 tenant 000000）。
 2. **控制台 serve 基建自动化 + 守护接控制台 URL**（让"部署"和"持续守护"进闭环）。
 3. ~~**designate 被覆盖排查**~~（已根治 `4c5ad83`，见 §7）。
-4. 自迭代收敛止损（覆盖率连续无提升即停）+ 缺口按类展示（前端可修/待后端置备/待外部对接）。
+4. ~~自迭代收敛止损 + 缺口按类展示~~ **已做（`8dbc4d4` 后端 + `3fea7d0` 前端）**：`disposeGap` 此前完整实现+单测但生产零调用；现接进自迭代主循环——FIX 前 `triageRecommendations` 按 `inferFulfillment→disposeGap` 分流，只把 self+生成器能产的喂 DeepSeek，self+red/external/backend/deferred 路由出去（带 `customerAction`）经 `gaps_routed` 落 `autoIterateState`；本轮无可自迭代项但有路由缺口 → `routed_stop` 终态止损，不再空转烧 LLM/传感器。前端评估页新增"缺口清单"区按类别（平台补建中/待外部对接/待后端置备/转人工）展示。**验证边界**：triage 单测过、全仓 1048 测绿、双端 tsc 0；但"填充态缺口清单的 live 渲染"未驱动（需一次真路由出缺口的自迭代跑，依赖 API+DeepSeek+含 self-red/external 缺口的项目）。注：保留的"覆盖率 plateau 独立止损"仍走既有 score-based STUCK_LIMIT，未新增 coverage 专门信号。
 5. deliveryAnalysis/qwenReview 已归位；其余塞 structuredRequirement 的历史字段可继续清。
