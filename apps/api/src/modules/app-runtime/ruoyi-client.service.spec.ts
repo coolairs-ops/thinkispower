@@ -168,6 +168,35 @@ describe('RuoyiClient（若依 codegen REST 客户端 · M3b）', () => {
       expect(putBody.menuIds.length).toBeGreaterThanOrEqual(7); // 777 + 目录 + C + 5F
     });
 
+    it('自愈：已存在的 C 菜单误挂在错误父目录(如系统工具) → 改挂业务模块目录', async () => {
+      // 业务目录已存在(888)；customer C 菜单(555)误挂在系统工具(parentId=3)下；F 权限点已存在
+      const existing = [
+        { menuId: 888, menuName: '业务模块', menuType: 'M', perms: '' },
+        { menuId: 555, perms: 'system:customer:list', menuName: '客户', menuType: 'C', parentId: 3 },
+        { menuId: 561, perms: 'system:customer:query', menuType: 'F' },
+        { menuId: 562, perms: 'system:customer:add', menuType: 'F' },
+        { menuId: 563, perms: 'system:customer:edit', menuType: 'F' },
+        { menuId: 564, perms: 'system:customer:remove', menuType: 'F' },
+        { menuId: 565, perms: 'system:customer:export', menuType: 'F' },
+      ];
+      let menuPutParent: any;
+      global.fetch = jest.fn(async (url: string, opts: any) => {
+        if (url.endsWith('/auth/login')) return jsonRes({ code: 200, data: { access_token: 'tok' } });
+        if (url.includes('/tool/gen/list')) return jsonRes({ rows: [{ tableId: 1, tableName: 'customer', moduleName: 'system', businessName: 'customer', functionName: '客户' }] });
+        if (url.includes('/system/menu/list')) return jsonRes({ data: existing.map((m) => ({ ...m })) });
+        if (url.match(/\/system\/menu\/555$/) && opts.method === 'GET') return jsonRes({ code: 200, data: { menuId: 555, parentId: 3, menuName: '客户', menuType: 'C', perms: 'system:customer:list' } });
+        if (url.endsWith('/system/menu') && opts.method === 'PUT') { menuPutParent = JSON.parse(opts.body).parentId; return jsonRes({ code: 200 }); }
+        if (url.includes('/system/role/list')) return jsonRes({ rows: [{ roleId: '2068', roleKey: 'app_role_2' }] });
+        if (url.includes('/system/menu/roleMenuTreeselect/2068')) return jsonRes({ data: { checkedKeys: [] } });
+        if (url.match(/\/system\/role\/2068$/) && opts.method === 'GET') return jsonRes({ code: 200, data: { roleId: '2068', roleKey: 'app_role_2', dataScope: '5' } });
+        if (url.endsWith('/system/role') && opts.method === 'PUT') return jsonRes({ code: 200 });
+        throw new Error('unexpected ' + opts.method + ' ' + url);
+      }) as any;
+
+      await client.seedMenusAndGrant(cfg, ['customer'], ['app_role_2']);
+      expect(menuPutParent).toBe(888); // C 菜单被改挂到业务模块目录，否则角色授了也因孤儿被丢弃不显示
+    });
+
     it('无资源或无角色 → 直接返回零，不登录', async () => {
       global.fetch = jest.fn(async () => { throw new Error('should not fetch'); }) as any;
       expect(await client.seedMenusAndGrant(cfg, [], ['r'])).toEqual({ menusCreated: 0, rolesGranted: 0 });
