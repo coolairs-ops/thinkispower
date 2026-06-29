@@ -115,7 +115,7 @@ designate 若依底座 (backendRuntime.kind=ruoyi,status=pending)  ← 方案页
 
 ## 7. 已知坑 / 排查项
 
-- **designate 被覆盖**：项目管理系统0628 曾从 ruoyi 变成 crud(路B)、要重指定才走控制台。"用若依底座"开关状态在某处可能被交付/重置覆盖——**待排查**。
+- ~~**designate 被覆盖**：项目管理系统0628 曾从 ruoyi 变成 crud(路B)、要重指定才走控制台。~~ **已根治（`4c5ad83`）**：根因=三条 demo 生成路径（`generateDemoHtmlDirect`/`generateDemoFromTemplate`/`generateDemoStaged`）+ 路B `deployment.service` 的 `this.backend.provision`（CrudRuntime）无条件整体覆盖 `backendRuntime`，把 designate 的 `{kind:ruoyi}` 抹回 `{kind:crud}`；只要 ruoyi 项目再生成一次设计态 demo 就被打回路B。修：四处置备前判 `kind==='ruoyi'` 则跳过 crud 置备（ruoyi demo 数据走 appData：设计态 404→空表、置备后→若依代理，本不需 crud 背板），仍保留 `dataModel` 持久。+`isRuoyiDesignated` 助手 + 4 回归测。
 - **共享实例未隔离**：所有 ruoyi 项目共用一个 plus-ui(8089)+一个若依租户(000000)，productionUrl 对它们是同一地址。真交付要一项目一若依**租户**(架构级)。
 - **serve 半自动**：平台只 `build:prod`，"部署/serve"靠手工起 vite preview(8089)。真产品要 CI 构建+部署基建。
 - **以岭 4 缺口**：地图路径规划/拍照识别/语音上报/看板——external/deferred，走 gap_workflow/能力中心，控制台 CRUD 不含。
@@ -128,6 +128,6 @@ designate 若依底座 (backendRuntime.kind=ruoyi,status=pending)  ← 方案页
 
 1. **一项目一若依租户硬隔离**（架构级；现共享 tenant 000000）。
 2. **控制台 serve 基建自动化 + 守护接控制台 URL**（让"部署"和"持续守护"进闭环）。
-3. **designate 被覆盖排查**（防路B/若依底座被意外切换）。
+3. ~~**designate 被覆盖排查**~~（已根治 `4c5ad83`，见 §7）。
 4. 自迭代收敛止损（覆盖率连续无提升即停）+ 缺口按类展示（前端可修/待后端置备/待外部对接）。
 5. deliveryAnalysis/qwenReview 已归位；其余塞 structuredRequirement 的历史字段可继续清。
