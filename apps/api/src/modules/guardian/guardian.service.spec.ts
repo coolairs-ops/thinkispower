@@ -112,6 +112,51 @@ describe('GuardianService', () => {
       }
     });
 
+    it('若依控制台项目 → 深探(代理 login+list)，登录通+list 200 → 不被判挂', async () => {
+      const old = { b: process.env.RUOYI_BASE_URL, s: process.env.RUOYI_SRC_ROOT };
+      process.env.RUOYI_BASE_URL = 'http://ruoyi:8080'; process.env.RUOYI_SRC_ROOT = '/src';
+      prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: null, productionUrl: 'http://console:8089',
+        backendRuntime: { kind: 'ruoyi', status: 'ready', resources: ['equipment'], initialUsers: [{ userName: 'u1', password: '123456' }] } });
+      acceptance.verify.mockResolvedValue(report({ passRate: 1, overallScore: 95 }));
+      const origFetch = global.fetch;
+      const calls: string[] = [];
+      global.fetch = jest.fn().mockImplementation((url: string) => {
+        calls.push(url);
+        if (url.includes('/auth/login')) return Promise.resolve({ status: 200, json: () => Promise.resolve({ code: 200, data: { access_token: 'tok' } }) });
+        return Promise.resolve({ status: 200, json: () => Promise.resolve({ rows: [], total: 0 }) });
+      }) as any;
+      try {
+        const rec = await service.runCheck('p1');
+        expect(rec!.status).toBe('healthy'); // 深探通 → 不被判 critical
+        expect(calls.some((u) => u.includes('/prod-api/auth/login'))).toBe(true); // 走控制台代理路径
+        expect(calls.some((u) => u.includes('/system/equipment/list'))).toBe(true);
+        expect((rec!.detail as any).liveness.detail).toContain('控制台冒烟');
+      } finally {
+        global.fetch = origFetch;
+        if (old.b === undefined) delete process.env.RUOYI_BASE_URL; else process.env.RUOYI_BASE_URL = old.b;
+        if (old.s === undefined) delete process.env.RUOYI_SRC_ROOT; else process.env.RUOYI_SRC_ROOT = old.s;
+      }
+    });
+
+    it('若依控制台项目 → 深探登录失败(首页 200 也骗不过) → critical', async () => {
+      const old = { b: process.env.RUOYI_BASE_URL, s: process.env.RUOYI_SRC_ROOT };
+      process.env.RUOYI_BASE_URL = 'http://ruoyi:8080'; process.env.RUOYI_SRC_ROOT = '/src';
+      prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: null, productionUrl: 'http://console:8089',
+        backendRuntime: { kind: 'ruoyi', status: 'ready', resources: ['equipment'], initialUsers: [] } });
+      acceptance.verify.mockResolvedValue(report({ passRate: 1, overallScore: 95 }));
+      const origFetch = global.fetch;
+      global.fetch = jest.fn().mockResolvedValue({ status: 200, json: () => Promise.resolve({ code: 401 }) }) as any; // 首页/login 都 200 但 code 401
+      try {
+        const rec = await service.runCheck('p1');
+        expect(rec!.status).toBe('critical');
+        expect(rec!.healthScore).toBe(0);
+      } finally {
+        global.fetch = origFetch;
+        if (old.b === undefined) delete process.env.RUOYI_BASE_URL; else process.env.RUOYI_BASE_URL = old.b;
+        if (old.s === undefined) delete process.env.RUOYI_SRC_ROOT; else process.env.RUOYI_SRC_ROOT = old.s;
+      }
+    });
+
     it('落库时摘要未通过场景', async () => {
       prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: null });
       acceptance.verify.mockResolvedValue(report({
