@@ -120,14 +120,14 @@ designate 若依底座 (backendRuntime.kind=ruoyi,status=pending)  ← 方案页
 - **serve 半自动**：平台只 `build:prod`，"部署/serve"靠手工起 vite preview(8089)。真产品要 CI 构建+部署基建。
 - **以岭 4 缺口**：地图路径规划/拍照识别/语音上报/看板——external/deferred，走 gap_workflow/能力中心，控制台 CRUD 不含。
 - **provision 慢**：若依模块编译 ~1.5–11min(冷热不定)+重启 boot，Windows 文件桥所致。
-- **守护盯控制台 URL 未验**：上线后是否被守护中心探活，本会话没确认。
+- ~~**守护盯控制台 URL 未验**~~ **已验+深化（`921c46d`）**：守护 `probeLiveness` 原只 GET productionUrl(status<500=活)，对若依控制台 SPA"首页 200≠能登录"探不出真挂。现对 kind=ruoyi&ready 项目走**深探**——抽 `smokeRuoyiConsole` 共享函数(交付上线门与守护共用)，经控制台代理 login+首资源 list 200(同上线门口径)，非 ruoyi 仍浅探。**live 实证**：手动触发 e7175cb0 巡检→liveness `控制台冒烟: 登录+list equipment 200 / reachable:true`(真用 e7175cb0_u1 登 8089 控制台、list equipment 200)。
 
 ---
 
 ## 8. 下一步候选（按价值）
 
 1. **一项目一若依租户硬隔离**（架构级；现共享 tenant 000000）。
-2. **控制台 serve 基建自动化 + 守护接控制台 URL**（让"部署"和"持续守护"进闭环）。
+2. **控制台 serve 基建自动化**（让"部署"进闭环——CI/容器/进程托管替代手工 vite preview，productionUrl 由部署产出而非 env 写死）。**守护接控制台 URL 已做**（`921c46d` 深探，见 §7）；剩 serve 基建这半，属环境/运维基建、与一项目一租户(#1)同源。
 3. ~~**designate 被覆盖排查**~~（已根治 `4c5ad83`，见 §7）。
 4. ~~自迭代收敛止损 + 缺口按类展示~~ **已做（`8dbc4d4` 后端 + `3fea7d0` 前端）**：`disposeGap` 此前完整实现+单测但生产零调用；现接进自迭代主循环——FIX 前 `triageRecommendations` 按 `inferFulfillment→disposeGap` 分流，只把 self+生成器能产的喂 DeepSeek，self+red/external/backend/deferred 路由出去（带 `customerAction`）经 `gaps_routed` 落 `autoIterateState`；本轮无可自迭代项但有路由缺口 → `routed_stop` 终态止损，不再空转烧 LLM/传感器。前端评估页新增"缺口清单"区按类别（平台补建中/待外部对接/待后端置备/转人工）展示。**live 验证已过（`5c29b21`）**：驱动时发现 `getAutoIterateStatus` 是字段白名单、漏了 routedGaps → 前端对账拿不到、缺口清单永远空 → 补进白名单+防回归测。实证：种 4 类缺口→重启 API 新 dist→状态端点返 4 项→评估页"缺口清单"按类别渲染(平台补建中/待外部对接/待后端置备/转人工)+customerAction，accessibility snapshot+截图双证(项目 e7ecab0f，验证用 auto_iterate_state 已还原)。注：保留的"覆盖率 plateau 独立止损"仍走既有 score-based STUCK_LIMIT，未新增 coverage 专门信号。
 5. deliveryAnalysis/qwenReview 已归位；其余塞 structuredRequirement 的历史字段可继续清。
