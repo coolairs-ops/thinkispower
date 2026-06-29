@@ -137,6 +137,7 @@ export class DeliveryIterationService {
       score: st.score ?? 0,
       rounds: st.rounds || [],
       phases: st.phases || [],
+      routedGaps: st.routedGaps || [], // ④ 缺口清单：对账透传，running/terminal 两态前端都能渲染
       statusText: st.statusText,
       terminal: st.terminal || null,
       startedAt: st.startedAt,
