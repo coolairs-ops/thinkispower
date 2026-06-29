@@ -26,7 +26,32 @@
 - `boto3` 不在 requirements-pg（OSS 模块要）；登录是 OAuth2 **form**、captcha 默认开（PoC 关掉）；日志 emoji 撞 Windows GBK（`PYTHONUTF8=1` 解）。
 - 新增接口 body 解析报错（入参字段格式待对齐，PoC-2 平台驱动时纠）。
 
-**判定**：PoC-1 三个命门里的两个（**codegen 产物质量 ✅ / 免编译上线 ✅**）已过；第三个（**data_scope 模板注入一次生效**）留 PoC-3。FastAPI 若依作统一底座在"效果"上的断崖优势（秒级无编译 + PG 统一 + 模板可控）**已被实测支持**。
+**判定**：PoC-1 两命门（**codegen 产物质量 ✅ / 免编译上线 ✅**）已过。
+
+## 0.6 PoC-3 实测结果（2026-06-29，✅ 通过——第三命门）
+
+**目标**：改 controller/service/dao 三个 jinja2 模板各**一处**注入 data_scope，验"改一次模板 → 所有产物自动带数据权限"。
+
+**做法**（基于深读 `common/aspect/data_scope.py`：`DataScopeDependency(Model)` 按当前用户角色 data_scope 返回 SQL 过滤条件，admin/全部→不过滤、仅本人→`Model.user_id==当前user_id`）：
+- **controller.py.jinja2**：list 端点加 `data_scope_sql: Annotated[ColumnElement, DataScopeDependency({{ClassName}})]` 依赖并透传；add 端点加 `user_id = current_user.user.user_id`（仅本人按 user_id 过滤需此列）。
+- **service.py.jinja2** / **dao.py.jinja2**：list 链路加 `data_scope_sql` 形参（带默认 `True` 不破坏 export 调用）；dao 的 `.where(data_scope_sql, ...)` 注入过滤。
+
+**实测**（同一个生成的 `/system/book/list`，两条数据 Admin的书[user_id=1] / Tester的书[user_id=100]）：
+| 用户 | 角色 data_scope | list 返回 |
+|---|---|---|
+| admin | 超管(绕过) | `total=2`（全部）|
+| booktester | 仅本人(=5) | **`total=1`，只有 Tester的书** ✅ |
+
+**结论**：✅ **"改一次模板 → 数据权限确定性生效"成立**。模板用 `{{ClassName}}`/`{{businessName}}` 泛化，任何未来生成的表都自动带数据权限——**"权限分身"卖点成本 = 一次性模板改，不是每次后处理**（相对 Java 若依"平台后注入 Mapper.xml @DataPermission"的 🟢 优势被实测坐实）。
+
+**注意/留尾（平台集成要补全）**：
+- 本 PoC 只注入了 **list 读路径**；完整覆盖还需 export 读路径 + detail/edit/delete 的 data-scope 校验（参照 `dept_controller` 对全部读写端点都注）。
+- data_scope 默认按 `user_id` 列过滤"仅本人"；业务表须有 `user_id` 列且 add 时填（模板已注入）。"本部门"档需 `dept_id` 列。
+- 测试用的角色/权限点/用户为手工 seed；平台化时由置备链种（对标 Java 若依 seedRoles/Menus/Users）。
+
+---
+
+**三命门总判定：codegen 产物质量 ✅ / 免编译上线 ✅ / data_scope 模板注入一次生效 ✅ —— 全过。** FastAPI 若依作统一底座在"效果"上的断崖优势（秒级无编译 + PG 统一 + 模板可控数据权限）**已被三轮实测全面坐实**。剩商业风险（信创/招标是否写死 Java，见 §6）+ 适配工作量（重写若依集成层，见 §3）。
 
 ---
 
