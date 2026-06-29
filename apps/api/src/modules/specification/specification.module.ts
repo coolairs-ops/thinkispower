@@ -18,10 +18,13 @@ import { BusinessRuleCompletionController } from './business-rule-completion.con
 import { BusinessRuleCompletionService } from './business-rule-completion.service';
 import { FollowUpQuestionController } from './followup-question.controller';
 import { FollowUpQuestionService } from './followup-question.service';
+import { RequirementCoverageController } from './requirement-coverage.controller';
+import { RequirementCoverageService } from './requirement-coverage.service';
 import { SharedCoreModule } from '../../shared/shared-core.module';
+import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 
 @Module({
-  imports: [SharedCoreModule],
+  imports: [SharedCoreModule, AppRuntimeModule],
   controllers: [
     SpecificationController,
     DecisionController,
@@ -33,6 +36,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     RelationCompletionController,
     BusinessRuleCompletionController,
     FollowUpQuestionController,
+    RequirementCoverageController,
   ],
   providers: [
     SpecificationService,
@@ -44,6 +48,7 @@ import { SharedCoreModule } from '../../shared/shared-core.module';
     RelationCompletionService,
     BusinessRuleCompletionService,
     FollowUpQuestionService,
+    RequirementCoverageService,
   ],
   exports: [SpecificationService],
 })

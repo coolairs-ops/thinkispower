@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import NavBar from '@/lib/nav-bar';
 import DesignSuggestions from './design-suggestions';
 import FollowUpQuestions from './follow-up-questions';
+import CoverageProgress from './coverage-progress';
 import RuleEngineEntry from './rule-engine-entry';
 import NextStepCard from '@/components/next-step-card';
 import WarningCard from '@/components/warning-card';
@@ -426,12 +427,13 @@ export default function PlanPage() {
  )) : (
  <div className="space-y-4">
  <DesignSuggestions projectId={projectId} onSaved={handleDesignSaved} />
+ <CoverageProgress projectId={projectId} refreshKey={relKey} />
  {detecting && (
  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
  正在根据你采纳的设计分析实体关系与业务规则…
  </div>
  )}
- <FollowUpQuestions projectId={projectId} enabled={designReady} refreshKey={relKey} onDone={() => setActiveTab('plan')} />
+ <FollowUpQuestions projectId={projectId} enabled={designReady} refreshKey={relKey} onDone={() => { setRelKey((k) => k + 1); setActiveTab('plan'); }} />
  </div>
  )}
  </div>

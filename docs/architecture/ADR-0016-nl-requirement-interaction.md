@@ -106,10 +106,11 @@
 - **实现/验**：[`ruoyi-coverage.service.ts`](../../apps/api/src/modules/app-runtime/ruoyi-coverage.service.ts)；10 测——空 spec→0、满 spec→100、无验收→验收 missing(−10)、roles 全默认全部→dataScope partial、部分裸实体→fields partial、单实体不罚关系、覆盖度单调。已注册进 app-runtime module（供切片2 端点注入）。
 - **校准取舍（备查）**：①数据范围——角色全为 data_scope='1'(全部) 判 partial（"没区分谁看哪些数据"）；②关系——恰 1 实体不罚、0 实体随空 spec missing、≥2 实体无关系才 missing；③字段——只算非 id/审计列。
 
-### 切片 2 · 完备度进度条 + 缺口清单（前端 + 一个聚合端点）
-- **加**：后端 `GET /api/projects/:id/coverage`（切片1覆盖度 + followup questions）；前端需求页(`idea`/`spec`)顶部"完备度 X% → 还差 N 项"进度条 + 缺口清单。
-- **复用**：`FollowUpQuestionService.getQuestions`（已有业务选择题）；**ADR-0008 D6 已做的"缺口按类展示"前端组件**（评估页那个，搬过来）。
-- **验**：preview 起需求页，造不同完整度项目 → 进度条数字 + 缺口清单与后端 coverage 一致（accessibility snapshot 文本核对）。
+### 切片 2 · 完备度进度条 + 缺口清单（前端 + 一个聚合端点）✅ 已落（2026-06-29）
+- **加**：后端 `GET /api/projects/:id/coverage`（切片1覆盖度 + followup questions，聚合服务 [`requirement-coverage.service.ts`](../../apps/api/src/modules/specification/requirement-coverage.service.ts) + 控制器）；前端方案页"设计建议"子页 [`coverage-progress.tsx`](../../apps/web/src/app/projects/%5Bid%5D/plan/coverage-progress.tsx)——"需求完备度 X% · 还差 N 项"进度条 + 7 槽状态 chip + 缺口清单。
+- **复用**：`AppSpecAssemblerService.assemble`（dataModel 空/不合法 → 容错空实体，进度条不 500）；`FollowUpQuestionService.getQuestions`（只读，无 LLM）。聚合只读、不写库、不调模型。
+- **实现/验**：后端 7 测（属主校验/空·不合法 dataModel 容错/聚合/followup 失败不阻断/场景取值优先级）；**live 实证**——真人项目跑通：合同管理系统 80%（关系+验收 missing）、客户系统 100%；浏览器 design 子页渲染"需求完备度 80% · 还差 2 项 ✓业务对象 ✓字段 ○关系 …"与后端一致。
+- **取舍**：进度条挂方案页"设计建议"子页（needs design tab；与已有 FollowUpQuestions 同位，互补：进度条=总览，followup=作答），未单建 idea/spec 顶部；后续可上移。answer followup 后 `relKey++` → 进度条重取前进。
 
 ### 切片 3 · 澄清记录区（后端·保留式合并，独立低风险）
 - **加**：followup 提交 apply 时往 `structuredRequirement.clarifications` **append** `{slot, question, answer, at, source}`；**保留式合并**（遵 handoff §4 + 本会话 `66bad41` 把整体覆盖改保留式的纪律），绝不整体替换。
