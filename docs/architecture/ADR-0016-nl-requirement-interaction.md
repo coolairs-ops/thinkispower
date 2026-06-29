@@ -1,6 +1,6 @@
 # ADR-0016: 全自然语言需求交互 —— 覆盖式收敛澄清，把"需求反复"前移到便宜的澄清阶段
 
-**Status:** Proposed（2026-06-29；从白皮书价值一/六倒逼设计——"需求响应分钟级 + 重塑 IT 角色"的引擎是需求交互层。融合 spec-kit/BMAD/OpenSpec 三个高星成熟方案的**模式**，建在现有 discovery 上，不重做、不装工具）
+**Status:** Proposed（2026-06-29；从白皮书价值一/六倒逼设计——"需求响应分钟级 + 重塑 IT 角色"的引擎是需求交互层。融合 spec-kit/BMAD/OpenSpec 三个高星成熟方案的**模式**，建在现有 discovery 上，不重做、不装工具。**已勘探现有 discovery/specification 并附落地切片计划**——见下"实现地基盘点 + 切片计划"，两样已有雏形、净新增面小；待批准后从切片1起。）
 **Date:** 2026-06-29
 **Deciders:** 平台负责人
 
@@ -84,14 +84,48 @@
 
 ---
 
-## Action Items（排 serve 基建之后，与 ADR-0014 业务翻译官合流）
+## 实现地基盘点（2026-06-29 勘探现有 discovery/specification，落"建在现有上、不重做"）
 
-1. [ ] **（覆盖度）** 在完备性批判 A 之上，按若依交付必填槽（实体/字段/关系/角色/数据范围/菜单/验收场景）算覆盖度；需求阶段输出"完备度 X% + 缺 N 项"。
-2. [ ] **（进度条）** 前端需求页加完备度进度条 + 缺口清单（复用 ADR-0008 D6 已有的缺口按类展示）。
-3. [ ] **（澄清记录）** structuredRequirement 加"澄清记录"区（保留式合并），记录每次选择题的问/答/时间。
-4. [ ] **（冻结状态机）** 规格 proposal/apply/archive：冻结才进交付；改需求 = 新 proposal，版本化；与项目状态机协调。
-5. [ ] **（persona 蓝本）** 业务翻译官/领域建模师角色提示词参考 BMAD persona 结构（接 ADR-0014 R2 SOP）。
-6. [ ] **（红线）** 表面只用业务选择题 + demo，不引技术问答；不装 spec-kit/BMAD/OpenSpec 工具本体。
+三样里**两样已有雏形**，净新增面比想象小：
+
+| ADR 要的 | 现有（复用） | 差距（净新增） |
+|---|---|---|
+| 覆盖度量化 | `discovery/completeness-checker.service.ts` 已算 0-100 加权分 + 每槽状态 + gaps + `isReadyForPlan(≥70)` | 它算**通用发现槽**(产品形态/规模/目标用户…)，**非若依交付槽**(实体/字段/关系/角色+数据范围/菜单/验收场景)→ 需对齐交付槽的覆盖层 |
+| 一屏业务选择题 | `specification/followup-question.service.ts` 已把 D 的 ask 缺口 + 关系 + 业务规则**合批成统一选择题列表**(带 options，提交路由回各自 apply) | 缺"完备度进度条"呈现头 |
+| 澄清记录 | followup 答案 apply 回写 `structuredRequirement` | **无 clarifications 记录**(问/答/时间) |
+| 冻结状态机 | `specification.service.ts` 已有 `frozen`/`frozenAt` + `spec_confirmed` + `assertValidTransition` | 有冻结雏形，**缺 proposal/apply/archive 版本化**(交付后改=新版本) |
+| 若依交付槽定义 | `app-runtime/app-spec.types.ts`：`entities`/`roles(dataScope)`/`menus`/`relations` + `acceptanceScenarios{name,given,when,then,priority}` | 这就是覆盖度该对齐的槽 |
+
+---
+
+## 实现切片计划（排 serve 基建之后；与 ADR-0014 业务翻译官合流。每片独立可验、可回退）
+
+### 切片 1 · 若依交付覆盖度量化（后端纯函数，单测先行，最安全）
+- **加**：`RuoyiCoverageService.evaluate(structuredRequirement, dataModel)` → 按若依交付槽算覆盖度，输出 `{coverage:0-100, perSlot, gaps[]}`。权重按交付必填度（实体/字段重、菜单/规模轻）。
+- **复用**：照抄 `CompletenessChecker` 的"加权+gaps"结构；槽来源取 `app-spec.types.ts` + `app-spec-assembler`（relations/roles.dataScope/acceptanceScenarios）。
+- **验**：单测喂 N 组不同完整度的 (sr, dataModel) → 断言 coverage%、缺口项、每槽状态（无实体→entities missing / 无 acceptanceScenarios→验收 missing / roles 缺 dataScope→数据范围 partial）。纯函数秒级。
+
+### 切片 2 · 完备度进度条 + 缺口清单（前端 + 一个聚合端点）
+- **加**：后端 `GET /api/projects/:id/coverage`（切片1覆盖度 + followup questions）；前端需求页(`idea`/`spec`)顶部"完备度 X% → 还差 N 项"进度条 + 缺口清单。
+- **复用**：`FollowUpQuestionService.getQuestions`（已有业务选择题）；**ADR-0008 D6 已做的"缺口按类展示"前端组件**（评估页那个，搬过来）。
+- **验**：preview 起需求页，造不同完整度项目 → 进度条数字 + 缺口清单与后端 coverage 一致（accessibility snapshot 文本核对）。
+
+### 切片 3 · 澄清记录区（后端·保留式合并，独立低风险）
+- **加**：followup 提交 apply 时往 `structuredRequirement.clarifications` **append** `{slot, question, answer, at, source}`；**保留式合并**（遵 handoff §4 + 本会话 `66bad41` 把整体覆盖改保留式的纪律），绝不整体替换。
+- **复用**：现有 followup apply 三条回写链路（requirement/relation/businessRule）。
+- **验**：单测多轮答题 → clarifications 累积 N 条、原需求字段不被覆盖、时间戳/来源正确。
+
+### 切片 4 · 冻结 proposal/apply/archive 版本化（后端+前端·最重·最后做）
+- **现状**：已有 `frozen`/`spec_confirmed` 雏形，先别推翻。
+- **加**：交付后"改需求"入口 → 生成**新 proposal 版本**（不直接改已冻结规格），apply 后归档旧版（archive）；与项目状态机(spec_confirmed→demo→…→completed)用 `assertValidTransition` 协调守合法流转。
+- **验**：单测——冻结后改需求生成新版本/旧版归档/非法流转被挡；端到端"交付后小改→新 proposal→apply→重交付"。
+- **注**：与状态机耦合最深、风险最高，最后做；先做最小版（"冻结后改=新版本"，archive 可后补）。
+
+**顺序**：1→2（覆盖度地基→看得见缺口，最高价值闭环）→ 3（澄清沉淀，独立）→ 4（冻结版本化，最重最后）。切片 1/3 纯后端可单测先行、零前端依赖。
+
+### 横切（贯穿，非独立片）
+- [ ] **persona 蓝本**：业务翻译官/领域建模师提示词参考 BMAD persona 结构（接 [ADR-0014] R2 SOP）。
+- [ ] **红线**：表面只用业务选择题 + demo，不引技术问答；不装 spec-kit/BMAD/OpenSpec 工具本体（D4）。
 
 ---
 
