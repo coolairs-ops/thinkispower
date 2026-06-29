@@ -50,17 +50,22 @@ export class RuoyiProvisionService {
     if (!this.cfg.enabled) return { triggered: false, status: 'disabled' };
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { userId: true, backendRuntime: true } });
     if (!project) return { triggered: false, status: 'no-project' };
-    const be = project.backendRuntime as { kind?: string; status?: string; phase?: ProvisionPhase } | null;
+    const be = project.backendRuntime as { kind?: string; status?: string; phase?: ProvisionPhase; initialUsers?: unknown[] } | null;
+    // 旧项目自愈：已 ready 但没有项目专属初始账号(initialUsers，多为 seedUsers 特性之前置备的、还在用旧共享角色)——
+    // 重新交付时补种 RBAC(项目角色+菜单+账号)，否则永远只能用 admin 超管登录、串其他项目菜单。
+    // 仅重跑 seed 相位(下面把 priorPhase 预置 'ready')，不重 DDL/不重编译。
+    const needsReseed = be?.kind === 'ruoyi' && be?.status === 'ready' && !(be?.initialUsers?.length);
     if (!opts.force) {
-      // 自动场景：只对"已选若依"的项目动作；已就绪/置备中不重复触发
+      // 自动场景：只对"已选若依"的项目动作；已就绪(且已有专属账号)/置备中不重复触发
       if (be?.kind !== 'ruoyi') return { triggered: false, status: 'not-ruoyi' };
-      if (be?.status === 'ready') return { triggered: false, status: 'ready' };
+      if (be?.status === 'ready' && !needsReseed) return { triggered: false, status: 'ready' };
       if (be?.status === 'provisioning') return { triggered: false, status: 'provisioning' };
     }
     const spec = opts.spec?.entities?.length ? opts.spec : await this.assembler.fromProject(opts.userId ?? project.userId, projectId);
     if (!spec.entities.length) return { triggered: false, status: 'no-entities' };
     const resources = spec.entities.map((e) => e.table);
-    const priorPhase = be?.phase; // 续跑相位保留（重 POST 重置 provisioning 时不丢断点）
+    // 续跑相位保留；补种场景把相位预置到 'ready' → 置备 job 只重跑 seed(角色/菜单/账号)，跳过 DDL/编译/探活。
+    const priorPhase: ProvisionPhase | undefined = needsReseed ? 'ready' : be?.phase;
     await this.prisma.project.update({
       where: { id: projectId },
       data: { backendRuntime: { kind: 'ruoyi', status: 'provisioning', resources, schemaName: '', provisionedAt: null, ...(priorPhase ? { phase: priorPhase } : {}) } as never },
