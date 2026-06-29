@@ -60,9 +60,12 @@
 | `RUOYI_TENANT` | 租户号（单客户固定） | `000000` |
 | `RUOYI_COMPILE_CMD` | 重编译命令（按客户构建方式配） | `mvn -o -q compile -pl <module>` |
 | `RUOYI_RESTART_CMD` | 重启若依命令 | `systemctl restart ruoyi`（或 docker restart）|
-| `RUOYI_CONSOLE_URL` | 控制台对外地址（nginx，见 §5） | `https://console.<客户域>` |
+| `RUOYI_CONSOLE_URL` | 控制台对外地址（手工/外部 serve 时用，见 §5 路线A） | `https://console.<客户域>` |
 | `RUOYI_CONSOLE_API_PREFIX` | 控制台代理前缀 | `/prod-api`（默认）|
 | `RUOYI_CONSOLE_BUILD_CMD` | plus-ui 生产构建 | `npm run build:prod`（默认）|
+| `RUOYI_CONSOLE_SERVE` | **托管 serve 开关**（=`managed` 则平台自起静态服务+代理产出 URL，见 §5 路线B；默认空=回落 `RUOYI_CONSOLE_URL`） | `managed` |
+| `RUOYI_CONSOLE_SERVE_HOST`/`_PORT` | 托管 serve 监听地址/端口 | `127.0.0.1`/`8089`（默认）|
+| `RUOYI_CONSOLE_PUBLIC_URL` | 托管 serve 的对外 URL（反代/域名场景覆盖；不设则用 `http://host:port`） | `https://console.<客户域>` |
 | `RUOYI_DEFAULT_USER_PWD` | 初始账号默认密码 | `123456`（交付后让客户改）|
 
 改完 env：`cd apps/api && npm run build` 后重启 API。
@@ -81,9 +84,21 @@
 
 ---
 
-## 5. 部署控制台（plus-ui）— 当前唯一手工环节
+## 5. 部署控制台（plus-ui）— 两条路线
 
-平台只做 `build:prod` 产出 `dist`；**把 dist serve 出来要在客户侧配一次 nginx**（单客户一套，配一次即可）：
+平台 `build:prod` 产出 `dist` 后，把 dist serve 出来有两条路线，二选一：
+
+### 路线 B（推荐·托管 serve，候选② 已落地）
+
+设 `RUOYI_CONSOLE_SERVE=managed`，平台交付时**自己起一个受管静态服务**（serve `dist` + 代理 `/prod-api`→若依），`productionUrl` 由实际监听端口产出（默认 `http://127.0.0.1:8089`），**无需手配 nginx/手起 vite preview**。代理口径与 §6 冒烟、守护探活完全一致（剥前缀转发 `RUOYI_BASE_URL`）。
+
+- 对外走域名/HTTPS：在前面套一层反代（nginx/Caddy 仅做 TLS 终止 + 转发到 `host:8089`），并设 `RUOYI_CONSOLE_PUBLIC_URL=https://console.<客户域>` 让 `productionUrl` 写域名。
+- 实现：[`ConsoleServeService`](../apps/api/src/modules/delivery/console-serve.service.ts) / [`console-serve.ts`](../apps/api/src/modules/delivery/console-serve.ts)（Node 内置 http，零额外依赖，进程内托管，随 API 进程生命周期）。
+- 重新构建（新页）后**无需重启**托管服务：文件实时读盘自动反映。
+
+### 路线 A（手工 nginx，外部 serve）
+
+不开 `RUOYI_CONSOLE_SERVE` 时回落此路：客户侧配一次 nginx，`RUOYI_CONSOLE_URL` = 这个地址。
 
 ```nginx
 server {
@@ -101,7 +116,7 @@ server {
 
 要点：`RUOYI_CONSOLE_URL` = 这个 nginx 地址；`/prod-api` 前缀要和 `RUOYI_CONSOLE_API_PREFIX` 一致；若 plus-ui 生产构建开了加密，需与若依实例配置对齐（dev 曾踩"加密不匹配→登录未知异常"）。
 
-> 这一步就是 WHITEPAPER §七 说的"serve 部署基建"。单客户手工/脚本起一次可接受；要量产再做自动化（候选②）。
+> 候选② serve 自动化首刀已落（路线 B 托管 serve）：进程托管替代手工 vite preview，`productionUrl` 由部署产出。对外域名/HTTPS 仍建议套一层反代做 TLS（路线 B 的前置），这部分按客户基建走。
 
 ---
 
@@ -134,7 +149,7 @@ server {
 
 ## 附：当前已知手工/限制（诚实清单）
 
-- **serve 部署**（§5 nginx）手工配一次——候选② serve 自动化未做，单客户可接受。
+- **serve 部署**：候选② 首刀已落（§5 路线 B `RUOYI_CONSOLE_SERVE=managed` 托管 serve，productionUrl 由部署产出）；**对外域名/HTTPS/TLS 终止仍需一层反代**，按客户基建手工配一次。不开 managed 则回落路线 A 手工 nginx。
 - **新增模块要重编译**——codegen 交付模型固有；客户实例需 JDK+Maven+源码（非纯 fat-jar 运行时）。
 - **冷启/编译**在 Windows 慢；生产用 Linux + fat-jar。
 - **连接器/行业库/全域数据**=路线图，不当现货。

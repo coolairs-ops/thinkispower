@@ -6,6 +6,7 @@ import { RuoyiClient } from '../app-runtime/ruoyi-client.service';
 import { loadRuoyiInstanceConfig } from '../app-runtime/ruoyi-provision.config';
 import { smokeRuoyiConsole } from '../app-runtime/ruoyi-console-smoke';
 import { decideDeliveryOutcome, DeployResultStatus } from './golive-gate';
+import { ConsoleServeService } from './console-serve.service';
 
 const execAsync = promisify(exec);
 
@@ -16,7 +17,8 @@ const execAsync = promisify(exec);
  * 把新生成的页纳入，规避 dev 模式新组件不进 glob 的白页) → 验控制台可达 → 冒烟(初始用户登录 + 业务 list 200)
  * → 复用 decideDeliveryOutcome 二值上线门 → 写 goLiveStatus + productionUrl=控制台 URL。
  *
- * 服务边界：构建由平台做；「部署/serve」是环境基建——控制台 URL 由 RUOYI_CONSOLE_URL 提供(CI/容器/preview 服务)。
+ * 服务边界：构建由平台做；「部署/serve」可由平台托管(RUOYI_CONSOLE_SERVE=managed，平台内置静态服务+代理，
+ * 见 ConsoleServeService)产出 productionUrl，或回落手工/外部 serve 时由 RUOYI_CONSOLE_URL 提供。
  */
 @Injectable()
 export class RuoyiConsoleDeployService {
@@ -25,6 +27,7 @@ export class RuoyiConsoleDeployService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly client: RuoyiClient,
+    private readonly consoleServe: ConsoleServeService,
   ) {}
 
   /** ruoyi 项目的交付结局：等后端就绪 → 构建+验控制台+冒烟→上线门。写 goLiveStatus/productionUrl。 */
@@ -37,8 +40,13 @@ export class RuoyiConsoleDeployService {
     // ① 构建控制台前端(产生产 bundle；构建期 glob 解析→新页纳入，避免 dev 白页)
     const consoleBuilt = backendReady && cfg.deploy.uiRoot ? await this.buildConsole(cfg.deploy.uiRoot) : false;
 
-    // ② 控制台 URL + 可达性（serve 由 RUOYI_CONSOLE_URL 提供）
-    const consoleUrl = process.env.RUOYI_CONSOLE_URL || '';
+    // ② 控制台 URL + 可达性。开启托管 serve(RUOYI_CONSOLE_SERVE=managed)则平台自起静态服务并产出 URL(候选②)；
+    //    未开/失败 → 回落 RUOYI_CONSOLE_URL(手工 vite preview / nginx)。productionUrl 由部署产出而非纯 env 写死。
+    let consoleUrl = '';
+    if (consoleBuilt && cfg.deploy.uiRoot) {
+      consoleUrl = (await this.consoleServe.ensureServed(cfg.deploy.uiRoot, cfg.client.baseUrl)) || '';
+    }
+    if (!consoleUrl) consoleUrl = process.env.RUOYI_CONSOLE_URL || '';
     let deployStatus: DeployResultStatus = 'not_deployed';
     let deployedUrl: string | undefined;
     if (consoleUrl) {
