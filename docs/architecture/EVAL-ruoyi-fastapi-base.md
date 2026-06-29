@@ -1,0 +1,118 @@
+# EVAL：RuoYi-FastAPI 作为思想动力底座 / 链A框架 的评估 + PoC 清单
+
+**类型**：技术评估 + 决策留痕（非 ADR；PoC 通过后再升级为 ADR 决策）
+**日期**：2026-06-29
+**评估对象**：`C:\Users\coola\Desktop\资料汇集\dev-base-backend-frontend-20260629180008`（一份"魔改的" RuoYi-FastAPI + vfadmin 前端）
+**评估人**：平台负责人 + Claude（深读源码）
+**战略前提**：党政市场靠**产品+架构断崖式领先**、**效果第一**。底座选型按"能不能支撑确定性生成 + 数据权限真生效 + 秒级响应"判，而非按惯性。
+
+---
+
+## 0. 一句话结论
+
+RuoYi-FastAPI 作统一底座在"**效果**"上有断崖潜力（**无 JVM 编译→秒级 / Postgres 统一 / 模板可控→数据权限确定性注入 / Python 利于嵌 AI**），但作底座要**重写整套若依适配层**、且 **data_scope 不开箱**（同 Java 若依坑，但可改模板根治）。**结论：不纸上拍板，先做 PoC-1/2/3（命门三片）；商业上盯死目标客户是否信创/招标写死 Java。**
+
+---
+
+## 1. 它是什么（定性，已读源码确认）
+
+- **后端**：RuoYi-FastAPI —— FastAPI 0.128 + SQLAlchemy 2.0(async) + **MySQL/Postgres 双支持**（`Dockerfile.pg` + `requirements-pg.txt` + `config/database.py` db_type 分流）+ Redis + JWT + APScheduler(定时任务) + alembic(迁移)。
+- **前端**：vfadmin 1.9.0 —— Vue 3.5 + Element-Plus 2.13 + Vite 6（≠ 平台现用的 plus-ui/若依-Vue-Plus 前端）。
+- **若依能力齐全**：`module_admin` 全套系统模块（user/role/menu/dept/dict/post/notice/job/log/online/cache/server/captcha/login）；**data_scope 数据权限机制在**（`module_admin/service/dept_service.py` 用 `data_scope_sql`）；**无多租户**（`grep tenant module_admin` 空 → 单租户，正契合"一客户一套"）。
+- **代码生成器** `module_generator`：REST 可驱动，jinja2 模板，产 Python+Vue3+SQL。
+- **"魔改"不透明**：无 README、非 git 仓库 → 改了什么不可知，推断在 Postgres 双支持 / sqlglot SQL 方言 / `APIRouterPro` / codegen 模板。**作底座前须吃透魔改点**（尤其 PG 适配 + sqlglot 方言转换是易埋坑处）。
+
+---
+
+## 2. 深读结论
+
+### 2.1 codegen 全流程（与 Java 若依同构，REST 全可驱动）
+
+REST 面（`module_generator/controller/gen_controller.py`，前缀 `/tool/gen`，几乎与 Java 若依路径对齐）：
+
+| 步 | 端点 | 作用 |
+|---|---|---|
+| 建表 | `POST /tool/gen/createTable?sql=<CREATE TABLE…>` | 从 DDL 建物理表 |
+| 导入 | `POST /tool/gen/importTable?tables=<name>` | 进 `gen_table` + 列元数据 |
+| 配置 | `PUT /tool/gen` | 改 businessName/中文 functionName/moduleName/parentMenuId/每列 html_type·dict·是否 list/query/edit |
+| **预览** | `GET /tool/gen/preview/{table_id}` | **返回 `dict{模板路径: 渲染后代码}`，不落盘、不编译，平台直接拿** ⭐ |
+| 落盘 | `GET /tool/gen/genCode/{table_name}` | 写磁盘（受 `GenConfig.allow_overwrite` 控制） |
+| 打包 | `GET /tool/gen/batchGenCode?tables=` | zip 流 |
+| 同步 | `GET /tool/gen/synchDb/{table_name}` | 表结构同步进 gen_table |
+
+产物（`utils/template_util.py` get_template_list/get_file_name）：`controller/dao/do/service/vo`(Python) + `index.vue`(Vue3，element-plus 走 `vue/v3`) + `api.js` + `{business}_menu.sql`。落点确定（`backend/.../{business}_controller.py`、`frontend/views/{module}/{business}/index.vue`）。模板上下文（`prepare_context`）：tableName/className/businessName/functionName/permissionPrefix=`{module}:{business}`/columns/pkColumn/dbType/parentMenuId。
+
+→ **平台现有"REST 驱动若依 codegen + 编辑 gen_table 元数据"的集成模式可近乎平移**（API 路径/产物不同，要重写适配层，但模型同构）。
+
+### 2.2 鉴权 & 数据权限（决定"权限分身"招牌卖点）
+
+- ✅ **功能权限点在产物里**（`controller.py.jinja2`）：生成的每个接口都带 `UserInterfaceAuthDependency('{permissionPrefix}:list/add/edit/remove/query/export')` —— 权限点是构造性的（对标 Java 若依 @SaCheckPermission；坎1 不用额外种产物级权限点，但角色仍需被授权）。
+- ❌ **data_scope 数据权限不在产物里**：生成的 `get_..._list` 接口**只有 UserInterfaceAuthDependency + DBSessionDependency，没有 GetDataScope 依赖**，list 直查不带数据范围过滤。框架层有 data_scope 机制（dept_service 用 `data_scope_sql: ColumnElement`），但 **codegen 模板不注入** → "普通用户只看自己"**开箱不工作，和 Java 若依坎2 同坑**。
+- 🟢 **关键利好**：这里是 **jinja2 模板**。**改一次 `controller.py.jinja2` / `service.py.jinja2` 注入 `GetDataScope` 依赖 + 把 data_scope_sql 串进 DAO 查询 → 所有后续产物自动带数据权限**。比 Java 若依（平台后处理注入 Mapper.xml @DataPermission）**更干净、更确定**。这是"模板可控"带来的根治式优势。
+
+### 2.3 会平移过来的已知坑
+
+- **默认父菜单 ID='3'（系统工具）**（`template_util.py` `DEFAULT_PARENT_MENU_ID='3'`）→ 生成菜单挂错目录。**与本会话 `4bac241` 修过的 Java 若依同坑**——FastAPI 版要同样改模板/置 parentMenuId。
+- 平台要为 FastAPI 版**重写一套**：菜单/角色/账号 seed + 授权 + data_scope 模板注入 + 控制台部署（对标现有 `app-runtime/ruoyi-*` + 本会话修的菜单改挂/账号自愈）。
+
+### 2.4 相对 Java 若依的真优势（对"效果第一/断崖"是杠杆）
+
+1. **preview_code 返回代码 dict（REST、不落盘、不编译）** → 平台集成更顺。
+2. **无 JVM 编译** → 新模块秒级热重载（uvicorn reload）vs Java 若依 ~10min 编译+冷启（平台头号痛点）。
+3. **MySQL/Postgres 双支持** → 与平台主库统一；**信创 PG 系（openGauss/人大金仓）适配可能比 Java+MySQL 更顺**。
+4. **模板 jinja2、平台可控** → 数据权限/审计/菜单父级这些**确定性注入直接改模板**，不靠后处理。
+5. **Python 生态** → 嵌 AI 端点（ADR-0010/0011 domain-ai-endpoint）天然，Java 若依里别扭。
+6. **单租户** → 契合"一客户一套"（ADR-0017 租户搁置正好）。
+
+---
+
+## 3. 作底座的适配工作量（诚实）
+
+换 FastAPI 若依 ≈ 重写平台 `app-runtime` 的整条若依集成：`ruoyi-client`(REST 形状变) / `ruoyi-ddl`(建表) / codegen 驱动 / provision 编排 / data-proxy(终端登录代持) / console-deploy(前端从 plus-ui→vfadmin) / 菜单·角色·账号 seed + 本会话的菜单改挂/账号自愈 —— **平台投入最大的模块之一基本重做**。这是作底座的最大成本，PoC 通过也要正视。
+
+---
+
+## 4. PoC 清单（怎么做 + 验什么 + 通过标准）
+
+必做顺序 **1→2→3**（底座可行性命门）；4 按目标客户画像。
+
+### PoC-1 · 起环境 + 跑它自带 codegen（半天）
+- **做**：起 RuoYi-FastAPI(**Postgres 档**，对齐平台主库) + vfadmin；用自带代码生成页对一个测试表走 createTable→importTable→edit→genCode→热重载。
+- **验**：① 产物(Python+Vue)能直接跑、CRUD 通；② 热重载是否真免编译、秒级；③ Postgres 档无 sqlglot 方言坑。
+- **通过**：一个新表 5 分钟内从 DDL 到可用 CRUD 页、无需编译。
+
+### PoC-2 · 平台 REST 驱动 codegen（1-2 天）
+- **做**：思想动力写最小适配（对标现有 ruoyi-client）调 `/tool/gen`：createTable(sql)→importTable→edit(配 businessName/中文 functionName/parentMenuId)→**preview_code 拿产物** 或 genCode 落盘→重载。
+- **验**：① 平台能否像驱动 Java 若依那样全自动驱动；② preview_code 产物质量(中文标签、字段映射)；③ 落盘+重载后接口 200。
+- **通过**：平台一条命令把一个数据模型变成可用 FastAPI+Vue CRUD、零手工。
+
+### PoC-3 · data_scope 数据权限验证（命门，1 天）
+- **做**：① **未改模板时**：建两个角色(全部/仅本人)+两个用户，各自登录 list → 看是否隔离（预期：不隔离，因模板没注入）。② **改 `controller.py.jinja2`/`service.py.jinja2` 注入 GetDataScope + data_scope_sql**，重新生成 → 再验。
+- **验**：注入后"普通用户只看自己建的、管理员看全部"是否真生效。
+- **通过**：**改模板一次 → 所有生成接口数据权限生效**（决定"权限分身"卖点成本=一次模板改 vs 每次后处理）。
+
+### PoC-4 · 信创 / 部署形态（1 天，按目标客户）
+- **做**：后端跑国产 PG 系库（openGauss/人大金仓）+ 国产 OS（麒麟）；前端 build 部署。
+- **验**：① PG 系信创库兼容（FastAPI 相对 Java+MySQL 的潜在优势点）；② 整栈能跑。
+- **通过**：一套信创栈（国产 OS + PG 系库）跑通 CRUD + 数据权限。
+
+---
+
+## 5. 用它做链A框架的适用性
+
+链A 现状 = 自造前端 HTML(DeepSeek 即兴) + crud postgres，是"交付不确定性最大来源"。用 RuoYi-FastAPI codegen 替代 = 把"赌 LLM 出对 HTML"换成"确定性产 Python+Vue"，**直接消灭链A 不确定性源**，且 Postgres 一致、无编译、适合快出小系统。
+
+**但定位要先想清**：若链A 也用若依 codegen 控制台，**链A 与链B 就趋同/合并**——这其实是"用 FastAPI 若依做统一底座"的更大决策（回到本评估主题），而非单纯"给链A 换框架"。且链A 原本"自造灵活/对外品牌化前台"（ADR-0012 D1 两个界面里的对外/匿名/C 端）的能力，若依控制台覆盖不了——对外门户仍需别的方案。**故：用它只覆盖链A 里"管理后台形态"的部分。**
+
+---
+
+## 6. 决策建议
+
+- **命门三片**（codegen 产物质量 / 平台 REST 驱动 / data_scope 模板注入一次生效）→ PoC-1/2/3 必做、成本小、决定性强。
+- **若三片通过** → FastAPI 若依作**统一底座**在"效果"上确有断崖优势（秒级无编译 + Postgres 统一 + 模板可控注入 + Python 嵌 AI），正是"靠产品和架构打天下"的底座级杠杆；可同时解决链A 不确定性 + 链B 编译痛点 + DB 割裂。
+- **要盯死的商业风险**：目标客户招标是否写死 Java（信创生态 Java 最厚）。这由 PoC-4 + 客户画像（党政核心？还是中小政企/国企业务系统？）决定，不是技术问题。
+- **过渡策略**：在跑的 Java 若依客户不动；FastAPI 底座先 PoC，再决定是新客户切换还是统一替换。
+
+---
+
+> 触发：2026-06-29 会话——平台负责人提供一份魔改 RuoYi-FastAPI，问"作底座/链A框架合不合适"。深读 gen_controller/gen_service/template_util/controller.py.jinja2/dept_service 后产出本评估。相关 [ADR-0012]（若依统一控制台）、[ADR-0017]（租户搁置·一客户一套）、`WHITEPAPER-value-and-delivery-v2`、`RUNBOOK-customer-onboarding`。
