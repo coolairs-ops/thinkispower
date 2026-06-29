@@ -17,6 +17,8 @@ import { SensorService } from '../../sensors/sensor.service';
 import { IterativeOptimizerService } from '../../services/iterative-optimizer.service';
 import { HtmlModuleExtractorService } from '../../services/html-module-extractor.service';
 import { FusedReport, SensorReport } from '../../sensors/sensor-report.interface';
+import { inferFulfillment } from '../../sensors/capability-provenance';
+import { disposeGap, GapAction } from '../../sensors/gap-disposition';
 import { DeliveryService } from './delivery.service';
 
 @Injectable()
@@ -194,8 +196,8 @@ export class DeliveryIterationService {
     // ── 持久化运行状态（真相源）：每个事件归并进 state 并落库，前端可对账自愈，不依赖内存流 ──
     const state: {
       taskId: string; status: string; round: number; score: number;
-      rounds: any[]; phases: any[]; statusText: string; terminal: any; startedAt: string;
-    } = { taskId, status: 'running', round: 0, score: 0, rounds: [], phases: [], statusText: '启动自迭代评估', terminal: null, startedAt: new Date().toISOString() };
+      rounds: any[]; phases: any[]; routedGaps: any[]; statusText: string; terminal: any; startedAt: string;
+    } = { taskId, status: 'running', round: 0, score: 0, rounds: [], phases: [], routedGaps: [], statusText: '启动自迭代评估', terminal: null, startedAt: new Date().toISOString() };
 
     let persistChain: Promise<unknown> = Promise.resolve();
     const persist = () => {
@@ -207,12 +209,13 @@ export class DeliveryIterationService {
     };
 
     // 终态事件类型 → 持久 status（与前端对账映射一致）
-    const TERMINAL: Record<string, string> = { needs_human: 'needs_human', stuck: 'awaiting_decision', done: 'done', error: 'error' };
+    const TERMINAL: Record<string, string> = { needs_human: 'needs_human', stuck: 'awaiting_decision', routed_stop: 'awaiting_decision', done: 'done', error: 'error' };
     const emit = (event: { type: string; message?: string; round?: number; overallScore?: number; score?: number; phases?: unknown[]; [k: string]: unknown }) => {
       switch (event.type) {
         case 'round': if (event.round != null) state.round = event.round; if (event.message) state.statusText = event.message; break;
         case 'round_result': state.score = (event.overallScore ?? event.score ?? state.score) as number; state.rounds.push(event); break;
         case 'phase_update': if (event.phases) state.phases = event.phases as unknown[]; break;
+        case 'gaps_routed': if (event.routedGaps) state.routedGaps = event.routedGaps as unknown[]; break;
         case 'fix_failed': case 'stuck_progress': if (event.message) state.statusText = event.message; break;
         default:
           if (TERMINAL[event.type]) { state.status = TERMINAL[event.type]; state.terminal = event; if (event.message) state.statusText = event.message; }
@@ -351,6 +354,21 @@ export class DeliveryIterationService {
           }
         }
 
+        // ── 缺口处置接线（ADR-0008 D6）：建议按能力来源分流，只把 self+生成器能产的喂自迭代；
+        //    self+red(缺 block)/external/backend/deferred 路由到工单/对接/置备/人工，不再烧 DeepSeek 撞墙。──
+        const triage = this.triageRecommendations(fused.recommendations);
+        if (triage.routed.length > 0) emit({ type: 'gaps_routed', round, routedGaps: triage.routed });
+        fused.recommendations = triage.autoIterate;
+
+        // 本轮无可自迭代项、但有被路由出去的缺口 → 自迭代停（剩下的大模型补不出来，别空转烧 LLM/传感器）。
+        if (fused.recommendations.length === 0 && triage.routed.length > 0) {
+          pushPhase('decide', ['sense-l1', 'sense-l2', 'sense-l3', 'fix']);
+          emit({ type: 'routed_stop', round, score, routedGaps: triage.routed, history,
+            message: '剩余缺口需扩生成器/外部对接/后端置备/人工处置，自迭代已停' });
+          subject?.complete();
+          return;
+        }
+
         // ── FIX ──
         let fixSucceeded = false;
         if (fused.recommendations.length > 0) {
@@ -458,6 +476,26 @@ export class DeliveryIterationService {
   }
 
   /** 过滤内部传感器诊断，转为用户可读的优化建议 */
+  /**
+   * 缺口处置（ADR-0008 D6）：把传感器建议按能力来源分流。
+   * 只有 self+生成器能产（disposeGap→auto-iterate）的建议进自迭代喂大模型；self+red（缺 block）/external/
+   * backend/deferred 路由到扩生成器工单/外部对接/后端置备/人工——不再让 DeepSeek 反复修做不出来的东西（省钱省时）。
+   * 保守：inferFulfillment 拿不准默认 self → 仍自迭代，绝不误丢可修项。
+   */
+  private triageRecommendations(recommendations: string[]): {
+    autoIterate: string[];
+    routed: Array<{ recommendation: string; action: GapAction; channel: string; customerAction: string; reason: string }>;
+  } {
+    const autoIterate: string[] = [];
+    const routed: Array<{ recommendation: string; action: GapAction; channel: string; customerAction: string; reason: string }> = [];
+    for (const rec of recommendations) {
+      const disp = disposeGap(inferFulfillment(rec));
+      if (disp.action === 'auto-iterate') autoIterate.push(rec);
+      else routed.push({ recommendation: rec, action: disp.action, channel: disp.channel, customerAction: disp.customerAction, reason: disp.reason });
+    }
+    return { autoIterate, routed };
+  }
+
   private sanitizeRecommendations(raw: string[]): string[] {
     return raw
       .map(r => {
