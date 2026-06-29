@@ -116,7 +116,7 @@ designate 若依底座 (backendRuntime.kind=ruoyi,status=pending)  ← 方案页
 ## 7. 已知坑 / 排查项
 
 - ~~**designate 被覆盖**：项目管理系统0628 曾从 ruoyi 变成 crud(路B)、要重指定才走控制台。~~ **已根治（`4c5ad83`）**：根因=三条 demo 生成路径（`generateDemoHtmlDirect`/`generateDemoFromTemplate`/`generateDemoStaged`）+ 路B `deployment.service` 的 `this.backend.provision`（CrudRuntime）无条件整体覆盖 `backendRuntime`，把 designate 的 `{kind:ruoyi}` 抹回 `{kind:crud}`；只要 ruoyi 项目再生成一次设计态 demo 就被打回路B。修：四处置备前判 `kind==='ruoyi'` 则跳过 crud 置备（ruoyi demo 数据走 appData：设计态 404→空表、置备后→若依代理，本不需 crud 背板），仍保留 `dataModel` 持久。+`isRuoyiDesignated` 助手 + 4 回归测。
-- **共享实例未隔离**：所有 ruoyi 项目共用一个 plus-ui(8089)+一个若依租户(000000)，productionUrl 对它们是同一地址。真交付要一项目一若依**租户**(架构级)。
+- **共享实例未隔离**：所有 ruoyi 项目共用一个 plus-ui(8089)+一个若依租户(000000)，productionUrl 对它们是同一地址。真交付要一项目一若依**租户**(架构级)。**B 止血已做(`a082264`)**：排查"客户系统上线产品混进设备维修菜单"→根因=共享控制台含全部模块，项目专属角色(app_role_1/2)菜单其实干净(只 customer+project)，混进是因为**用若依超管 admin/admin123 登录**(超管看所有菜单)，平台交付页又只给 URL 不给账号→用户回退 admin。修：getDelivery 带出 consoleLogin(项目专属账号取 initialUsers+"勿用 admin 超管"警告)，交付页 productionUrl 旁展示。生成器侧本就对(隔离角色+新项目种账号 cf7e097)，此为平台引导缺口。**彻底隔离仍需一项目一租户(本条/#1)**。注:ed541b1e 等早期项目无 initialUsers,需重新交付才种专属账号。
 - **serve 半自动**：平台只 `build:prod`，"部署/serve"靠手工起 vite preview(8089)。真产品要 CI 构建+部署基建。
 - **以岭 4 缺口**：地图路径规划/拍照识别/语音上报/看板——external/deferred，走 gap_workflow/能力中心，控制台 CRUD 不含。
 - **provision 慢**：若依模块编译 ~1.5–11min(冷热不定)+重启 boot，Windows 文件桥所致。
