@@ -46,7 +46,7 @@ master = **`b94615b`**（Gitee+GitHub 全推；本会话把 `feat/ruoyi-console-
 
 ## 6. 下一步候选（平台开发）
 
-1. **ADR-0016 需求交互引擎·切片1**：若依交付覆盖度量化(后端纯函数+单测，最安全第一刀)。切片计划已落 ADR Action Items。← 白皮书 §七 排的下一个建设主线(价值一引擎)。
+1. ~~**ADR-0016 需求交互引擎·切片1**~~ **已落**(2026-06-29)：`RuoyiCoverageService.evaluate(AppSpec, 验收场景)`→7 槽覆盖度`{coverage,perSlot,gaps}`，10 测，已注册 app-runtime。**下一步切片2**：聚合端点 `GET /api/projects/:id/coverage`(覆盖度+followup 选择题) + 需求页顶部"完备度 X% → 还差 N 项"进度条+缺口清单(搬 ADR-0008 D6 缺口组件)。
 2. ~~**serve 基建自动化**(候选②剩半)~~ **首刀已落**：托管 serve(`RUOYI_CONSOLE_SERVE=managed`)——平台内置静态服务+代理替代手工 vite preview，productionUrl 由部署产出(`ConsoleServeService`/`console-serve.ts`，14 测，RUNBOOK §5 路线B)。**剩**：对外域名/HTTPS/TLS 终止仍需一层反代(客户基建)。
 3. 价值三：一键审计报告导出页(地基有，补成品)。
 4. 自迭代收敛/缺口分类的后续打磨(④已接线，可继续)。

@@ -11,6 +11,7 @@ import { RuoyiProvisionService } from './ruoyi-provision.service';
 import { RuoyiProvisionProcessor } from './ruoyi-provision.processor';
 import { RuoyiProvisionController } from './ruoyi-provision.controller';
 import { AppSpecAssemblerService } from './app-spec-assembler.service';
+import { RuoyiCoverageService } from './ruoyi-coverage.service';
 import { RuoyiAppDataService } from './ruoyi-appdata.service';
 import { RuoyiDataProxyService } from './ruoyi-data-proxy.service';
 import { RuleEngineService } from './rule-engine/rule-engine.service';
@@ -47,6 +48,7 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     RuoyiProvisionService,
     RuoyiProvisionProcessor,
     AppSpecAssemblerService,
+    RuoyiCoverageService,
     RuoyiAppDataService,
     RuoyiDataProxyService,
     RuleEngineService,
@@ -58,6 +60,6 @@ import { RUOYI_PROVISION_QUEUE } from './ruoyi-provision.queue';
     SchemaComposerService,
     QaService,
   ],
-  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiRuntime, RuoyiProvisionService, RuoyiClient, AppSpecAssemblerService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService, TemplateAppService, SchemaComposerService],
+  exports: [SchemaMigrationService, CrudRuntime, CrudDataService, BACKEND_RUNTIME, RuoyiRuntime, RuoyiProvisionService, RuoyiClient, AppSpecAssemblerService, RuoyiCoverageService, RuoyiAppDataService, RuleEngineService, RuleEvaluationService, KnowledgeService, KnowledgeSourceService, TemplateAppService, SchemaComposerService],
 })
 export class AppRuntimeModule {}

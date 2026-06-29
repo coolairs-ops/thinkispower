@@ -100,10 +100,11 @@
 
 ## 实现切片计划（排 serve 基建之后；与 ADR-0014 业务翻译官合流。每片独立可验、可回退）
 
-### 切片 1 · 若依交付覆盖度量化（后端纯函数，单测先行，最安全）
-- **加**：`RuoyiCoverageService.evaluate(structuredRequirement, dataModel)` → 按若依交付槽算覆盖度，输出 `{coverage:0-100, perSlot, gaps[]}`。权重按交付必填度（实体/字段重、菜单/规模轻）。
-- **复用**：照抄 `CompletenessChecker` 的"加权+gaps"结构；槽来源取 `app-spec.types.ts` + `app-spec-assembler`（relations/roles.dataScope/acceptanceScenarios）。
-- **验**：单测喂 N 组不同完整度的 (sr, dataModel) → 断言 coverage%、缺口项、每槽状态（无实体→entities missing / 无 acceptanceScenarios→验收 missing / roles 缺 dataScope→数据范围 partial）。纯函数秒级。
+### 切片 1 · 若依交付覆盖度量化（后端纯函数，单测先行，最安全）✅ 已落（2026-06-29）
+- **加**：`RuoyiCoverageService.evaluate(spec: AppSpec, acceptanceScenarios)` → 按 7 个若依交付槽（实体/字段/关系/角色/数据范围/菜单/验收场景）算覆盖度，输出 `{coverage:0-100, perSlot, gaps[]}`。权重和=100（实体25/字段20/角色15/关系10/数据范围10/菜单10/验收10）。
+- **复用**：照抄 `CompletenessChecker` 的"加权+gaps"结构；**输入取已组装的 `AppSpec`**（= 复用 app-spec-assembler 产物，保纯函数可单测）；验收场景取自 `structuredRequirement.acceptanceScenarios`。
+- **实现/验**：[`ruoyi-coverage.service.ts`](../../apps/api/src/modules/app-runtime/ruoyi-coverage.service.ts)；10 测——空 spec→0、满 spec→100、无验收→验收 missing(−10)、roles 全默认全部→dataScope partial、部分裸实体→fields partial、单实体不罚关系、覆盖度单调。已注册进 app-runtime module（供切片2 端点注入）。
+- **校准取舍（备查）**：①数据范围——角色全为 data_scope='1'(全部) 判 partial（"没区分谁看哪些数据"）；②关系——恰 1 实体不罚、0 实体随空 spec missing、≥2 实体无关系才 missing；③字段——只算非 id/审计列。
 
 ### 切片 2 · 完备度进度条 + 缺口清单（前端 + 一个聚合端点）
 - **加**：后端 `GET /api/projects/:id/coverage`（切片1覆盖度 + followup questions）；前端需求页(`idea`/`spec`)顶部"完备度 X% → 还差 N 项"进度条 + 缺口清单。
