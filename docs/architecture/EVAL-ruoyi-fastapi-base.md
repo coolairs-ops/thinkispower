@@ -8,6 +8,28 @@
 
 ---
 
+## 0.5 PoC-1 实测结果（2026-06-29，✅ 通过）
+
+**实跑环境**：Python 3.12 venv + requirements-pg + 独立 postgres 容器(5434) + 主机 redis(6379/DB2)，`app.py --env=poc`（PG 档），端口 9099。
+
+**结论：✅ "确定性出全栈 CRUD + 免编译" 成立。** 关键实测：
+1. **起得来（PG 档）**：FastAPI 在 Postgres 上 boot + 登录(admin/admin123)通；REST 全可驱动（`/tool/gen/*` 路径与 Java 若依对齐）。
+2. **codegen 确定性出 8 文件**：对 `poc_book` 表走 createTable(psql)→importTable→edit→**preview_code**，`<1s` 返回 8 个产物：Python `controller/dao/do/service/vo` + Vue3 `index.vue` + `menu.sql` + `api.js`。
+3. **免编译上线**：把生成的 5 个 .py 放进 `poc_book/` 模块树（匹配路由 glob `*/controller/[!_]*.py`）→ **app 重启 ~5s（零编译）→ `/system/book/list` 返回 HTTP 200**（标准若依分页壳）。对比 Java 若依新模块 ~10min 编译+冷启——**这是断崖级差异**。
+4. **鉴权/数据权限实测印证深读**：生成 controller **7 个功能权限点在**（`UserInterfaceAuthDependency('system:book:list/...')`）；**data_scope = 0**（需改模板注入，同坎2）。
+
+**实测中暴露的坑（平台集成必须处理，均可控）**：
+- **codegen 前置条件**：`gen_table.options` 须非空 + **每列须有注释**（多个模板裸用 `column_comment.find()`，null 即崩）→ 平台的"LLM 中文标签"步骤正好兜这两样。
+- **默认父菜单 ID='3'（系统工具）** → 同 Java 若依菜单挂错坑（本会话 `4bac241`）。
+- **package_name 须单层**（匹配 glob `*/controller/`）才能被自动注册——平台落盘时按此组织。
+- **热重载在 Windows/git-bash 下 watchfiles 不灵**（新目录监听不到）；**重启可靠且仍免编译**（Python 重启秒级）。生产 Linux 下热重载预计正常，待 PoC-2 复验。
+- `boto3` 不在 requirements-pg（OSS 模块要）；登录是 OAuth2 **form**、captcha 默认开（PoC 关掉）；日志 emoji 撞 Windows GBK（`PYTHONUTF8=1` 解）。
+- 新增接口 body 解析报错（入参字段格式待对齐，PoC-2 平台驱动时纠）。
+
+**判定**：PoC-1 三个命门里的两个（**codegen 产物质量 ✅ / 免编译上线 ✅**）已过；第三个（**data_scope 模板注入一次生效**）留 PoC-3。FastAPI 若依作统一底座在"效果"上的断崖优势（秒级无编译 + PG 统一 + 模板可控）**已被实测支持**。
+
+---
+
 ## 0. 一句话结论
 
 RuoYi-FastAPI 作统一底座在"**效果**"上有断崖潜力（**无 JVM 编译→秒级 / Postgres 统一 / 模板可控→数据权限确定性注入 / Python 利于嵌 AI**），但作底座要**重写整套若依适配层**、且 **data_scope 不开箱**（同 Java 若依坑，但可改模板根治）。**结论：不纸上拍板，先做 PoC-1/2/3（命门三片）；商业上盯死目标客户是否信创/招标写死 Java。**
