@@ -5,6 +5,7 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
   let rel: { get: jest.Mock; apply: jest.Mock };
   let biz: { get: jest.Mock; apply: jest.Mock };
   let spec: { generateDraft: jest.Mock };
+  let prisma: { project: { findUnique: jest.Mock; update: jest.Mock } };
   let svc: FollowUpQuestionService;
 
   beforeEach(() => {
@@ -12,7 +13,8 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
     rel = { get: jest.fn().mockResolvedValue({ candidates: [] }), apply: jest.fn().mockResolvedValue({ relations: [] }) };
     biz = { get: jest.fn().mockResolvedValue({ candidates: [] }), apply: jest.fn().mockResolvedValue({ rules: [] }) };
     spec = { generateDraft: jest.fn().mockResolvedValue({}) };
-    svc = new FollowUpQuestionService(req as never, rel as never, biz as never, spec as never);
+    prisma = { project: { findUnique: jest.fn().mockResolvedValue({ structuredRequirement: {} }), update: jest.fn().mockResolvedValue({}) } };
+    svc = new FollowUpQuestionService(req as never, rel as never, biz as never, spec as never, prisma as never);
   });
 
   describe('getQuestions', () => {
@@ -113,6 +115,46 @@ describe('FollowUpQuestionService（追加问答合批）', () => {
       await svc.submit('u1', null, 'p1', {});
       expect(rel.apply).toHaveBeenCalledWith('u1', null, 'p1', {});
       expect(req.apply).toHaveBeenCalledWith('u1', null, 'p1', []);
+    });
+  });
+
+  describe('submit → 澄清记录（切片3）', () => {
+    it('保留式 append 进 sr.clarifications，不动其余字段', async () => {
+      prisma.project.findUnique.mockResolvedValue({
+        structuredRequirement: { foo: 'bar', clarifications: [{ slot: '旧', kind: 'rule', question: '', answer: 'x', source: 'followup', at: 't0' }] },
+      });
+      const r = await svc.submit('u1', null, 'p1', { acceptGaps: ['数据看板'] });
+      const sr = prisma.project.update.mock.calls[0][0].data.structuredRequirement;
+      expect(sr.foo).toBe('bar'); // 原字段保留
+      expect(sr.clarifications).toHaveLength(2); // 旧 + 新
+      expect(sr.clarifications[1]).toMatchObject({ slot: '数据看板', answer: '已采纳', source: 'followup' });
+      expect(typeof sr.clarifications[1].at).toBe('string');
+      expect(r.clarificationsAdded).toBe(1);
+    });
+
+    it('答案记选项标签（非原始值）+ 题面/槽位取自当下问题', async () => {
+      rel.get.mockResolvedValue({
+        candidates: [{ parent: '客户', child: '工单', disposition: 'ask', questions: [{ key: 'cardinality', question: '一个客户多个工单吗？', options: [{ label: '能，多对多', value: 'N-N' }] }] }],
+        relations: [],
+      });
+      await svc.submit('u1', null, 'p1', { relations: { '客户->工单': { cardinality: 'N-N' } } });
+      const sr = prisma.project.update.mock.calls[0][0].data.structuredRequirement;
+      expect(sr.clarifications[0]).toMatchObject({ slot: '客户 与 工单', kind: 'cardinality', question: '一个客户多个工单吗？', answer: '能，多对多', source: 'followup' });
+    });
+
+    it('无答案 → 不写库，clarificationsAdded=0', async () => {
+      const r = await svc.submit('u1', null, 'p1', {});
+      expect(prisma.project.update).not.toHaveBeenCalled();
+      expect(r.clarificationsAdded).toBe(0);
+    });
+
+    it('多轮提交累积', async () => {
+      const store: { structuredRequirement: Record<string, unknown> } = { structuredRequirement: {} };
+      prisma.project.findUnique.mockImplementation(async () => ({ structuredRequirement: store.structuredRequirement }));
+      prisma.project.update.mockImplementation(async (a: any) => { store.structuredRequirement = a.data.structuredRequirement; return {}; });
+      await svc.submit('u1', null, 'p1', { businessRules: { 金额精度: '保留2位' } });
+      await svc.submit('u1', null, 'p1', { acceptGaps: ['看板'] });
+      expect((store.structuredRequirement.clarifications as unknown[])).toHaveLength(2);
     });
   });
 });

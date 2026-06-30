@@ -5,6 +5,7 @@ dist/
 .env
 *.log
 .claude/
+.codex/
 .hermes/
 demo_response.json
 internal/*
@@ -18,6 +19,9 @@ _r.ps1
 _r.vbs
 _repl2.vbs
 _test.txt
+*.tmp
+.~lock.*#
+docs/_qa/
 
 # E2E tests
 e2e/.auth/
