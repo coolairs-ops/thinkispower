@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { DeployController } from './deploy.controller';
 import { DeploymentService } from './deployment.service';
 import { PrismaService } from '../../database/prisma.service';
+import { DeliveryPackageCheckService } from '../delivery/delivery-package-check.service';
 
 /** 链式 res mock：status().json()、setHeader、cookie、set().send() */
 function mockRes() {
@@ -24,12 +25,14 @@ describe('DeployController — 安全边界', () => {
   let jwt: { verify: jest.Mock; sign: jest.Mock };
   let prisma: { project: { findUnique: jest.Mock } };
   let deployment: { getDeployedHtml: jest.Mock };
+  let packageCheck: { attachReportToDeliveryDir: jest.Mock };
   let configValue: Record<string, string | undefined>;
 
   beforeEach(async () => {
     jwt = { verify: jest.fn(), sign: jest.fn().mockReturnValue('signed-token') };
     prisma = { project: { findUnique: jest.fn() } };
     deployment = { getDeployedHtml: jest.fn() };
+    packageCheck = { attachReportToDeliveryDir: jest.fn().mockResolvedValue({}) };
     configValue = {};
 
     const module: TestingModule = await Test.createTestingModule({
@@ -39,6 +42,7 @@ describe('DeployController — 安全边界', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwt },
         { provide: ConfigService, useValue: { get: (k: string) => configValue[k] } },
+        { provide: DeliveryPackageCheckService, useValue: packageCheck },
       ],
     }).compile();
 

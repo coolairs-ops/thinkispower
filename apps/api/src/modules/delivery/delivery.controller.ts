@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, Query, UseGuards, Req, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Param, Body, Query, UseGuards, Req, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PlanGuard, RequiredPlan } from '../../common/guards/plan.guard';
@@ -7,6 +7,7 @@ import { DeliveryService } from './delivery.service';
 import { DeliveryEvaluationService } from './delivery-evaluation.service';
 import { DeliveryIterationService } from './delivery-iteration.service';
 import { AcceptanceVerificationService, ScenarioStatus } from './acceptance-verification.service';
+import { DeliveryCheckMode, DeliveryPackageCheckService } from './delivery-package-check.service';
 
 @Controller('api/projects/:projectId/delivery')
 @UseGuards(JwtAuthGuard)
@@ -16,6 +17,7 @@ export class DeliveryController {
     private evaluationService: DeliveryEvaluationService,
     private iterationService: DeliveryIterationService,
     private acceptanceService: AcceptanceVerificationService,
+    private packageCheckService: DeliveryPackageCheckService,
   ) {}
 
   // ── 验收报告（P15-Y 可验收/可追溯）──
@@ -38,6 +40,18 @@ export class DeliveryController {
     @Body('note') note?: string,
   ) {
     return this.acceptanceService.manualConfirm(req.user.id, req.user.orgId ?? null, projectId, scenarioName, status, note);
+  }
+
+  @Post('package-check')
+  async runPackageCheck(
+    @Req() req: any,
+    @Param('projectId') projectId: string,
+    @Body('mode') mode: DeliveryCheckMode = 'package',
+  ) {
+    if (mode !== 'inspect' && mode !== 'package') {
+      throw new BadRequestException('mode 只能是 inspect 或 package');
+    }
+    return this.packageCheckService.runForUser(req.user.id, req.user.orgId ?? null, projectId, { mode });
   }
 
   // ── 交付页面数据 ──

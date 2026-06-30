@@ -32,6 +32,20 @@ const GATE_FAIL_STATUSES = ['build_failed', 'contract_violation', 'smoke_failed'
 // 任一终态都应停止本次交付的进度动画（含成功/降级/失败）
 const TERMINAL_STATUSES = ['completed', 'preview_only', ...GATE_FAIL_STATUSES];
 
+const CHECK_STATUS_LABEL: Record<string, string> = {
+  pass: '通过',
+  warn: '关注',
+  fail: '阻断',
+  unknown: '未知',
+};
+
+const CHECK_STATUS_CLASS: Record<string, string> = {
+  pass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  warn: 'bg-amber-50 text-amber-700 border-amber-200',
+  fail: 'bg-red-50 text-red-700 border-red-200',
+  unknown: 'bg-gray-50 text-gray-600 border-gray-200',
+};
+
 export default function DeliveryPage() {
   const params = useParams();
   const router = useRouter();
@@ -43,6 +57,8 @@ export default function DeliveryPage() {
   const [projectName, setProjectName] = useState('');
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [packageChecking, setPackageChecking] = useState(false);
+  const [packageReport, setPackageReport] = useState<any>(null);
   const [genFiles, setGenFiles] = useState<string[]>([]);
   const [activeDeliveryId, setActiveDeliveryId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -117,6 +133,21 @@ export default function DeliveryPage() {
     setStarting(false);
   };
 
+  const handlePackageCheck = async () => {
+    if (packageChecking) return;
+    setPackageChecking(true);
+    try {
+      const report = await api.post(`/api/projects/${projectId}/delivery/package-check`, { mode: 'package' });
+      setPackageReport(report);
+      const status = report?.overall?.status;
+      toast(`交付包验收：${CHECK_STATUS_LABEL[status] || status || '未知'} · ${report?.overall?.summary || ''}`, status === 'fail' ? 'error' : 'success');
+    } catch (e: any) {
+      toast(e.message || '交付包验收失败', 'error');
+    } finally {
+      setPackageChecking(false);
+    }
+  };
+
   if (isLoading) return null;
   if (loading) return <div className="p-8 text-gray-500">加载中...</div>;
 
@@ -166,10 +197,54 @@ export default function DeliveryPage() {
               className="rounded-lg border px-5 py-2.5 text-sm text-gray-700 hover:bg-gray-50">查看 Demo</button>
             <button onClick={() => router.push(`/projects/${projectId}/evaluation`)}
               className="rounded-lg border px-5 py-2.5 text-sm text-gray-700 hover:bg-gray-50">自迭代评估</button>
+            <button onClick={handlePackageCheck} disabled={packageChecking || isGenerating}
+              className="rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">
+              {packageChecking ? '体检中...' : '交付包验收'}
+            </button>
           </section>
 
           {/* ═══ 实时进度 ═══ */}
           {isGenerating && <DeliveryProgressBar currentStep={currentStep} steps={DELIVERY_STEPS} />}
+
+          {packageReport && (
+            <section className="mb-6 rounded-xl bg-white p-5 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800">交付包验收</h3>
+                  <p className="mt-1 text-xs text-gray-500">{packageReport.generatedAt}</p>
+                </div>
+                <span className={`rounded-full border px-3 py-1 text-xs font-medium ${CHECK_STATUS_CLASS[packageReport.overall?.status] || CHECK_STATUS_CLASS.unknown}`}>
+                  {CHECK_STATUS_LABEL[packageReport.overall?.status] || '未知'} · {packageReport.overall?.summary}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {(Object.values(packageReport.gates || {}) as any[]).map((gate) => (
+                  <div key={gate.key} className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-gray-700">{gate.name}</p>
+                      <p className="truncate text-xs text-gray-400">{gate.summary}</p>
+                    </div>
+                    <span className={`ml-3 shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${CHECK_STATUS_CLASS[gate.status] || CHECK_STATUS_CLASS.unknown}`}>
+                      {CHECK_STATUS_LABEL[gate.status] || '未知'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {(packageReport.overall?.blockers?.length > 0 || packageReport.overall?.warnings?.length > 0) && (
+                <div className="mt-4 space-y-2 text-xs">
+                  {packageReport.overall.blockers?.slice(0, 4).map((item: string, i: number) => (
+                    <p key={`b-${i}`} className="rounded border border-red-100 bg-red-50 px-3 py-2 text-red-700">{item}</p>
+                  ))}
+                  {packageReport.overall.warnings?.slice(0, 4).map((item: string, i: number) => (
+                    <p key={`w-${i}`} className="rounded border border-amber-100 bg-amber-50 px-3 py-2 text-amber-700">{item}</p>
+                  ))}
+                </div>
+              )}
+              {packageReport.artifacts?.reportMarkdownPath && (
+                <p className="mt-4 break-all text-xs text-gray-400">报告已写入：{packageReport.artifacts.reportMarkdownPath}</p>
+              )}
+            </section>
+          )}
 
           {/* ═══ 交付产物 ═══ */}
           <section className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -212,11 +287,11 @@ export default function DeliveryPage() {
                 <p className="text-xs text-gray-300 mt-1">或使用「一键云部署」服务</p>
               </>}
             />
-            <ServiceCard icon="📦" title="源码下载" available={!!sourceZipUrl}
+            <ServiceCard icon="📦" title="交付包下载" available={!!sourceZipUrl}
               availableContent={<>
-                <p className="text-xs text-gray-500 mb-2">全栈项目源码包</p>
+                <p className="text-xs text-gray-500 mb-2">源码与七道门验收报告</p>
                 <a href={`${sourceZipUrl}${sourceZipUrl?.includes('?') ? '&' : '?'}token=${encodeURIComponent(token || '')}`} target="_blank" rel="noopener noreferrer"
-                  className="rounded bg-green-600 px-3 py-1.5 text-xs text-white hover:bg-green-700">下载源码</a>
+                  className="rounded bg-green-600 px-3 py-1.5 text-xs text-white hover:bg-green-700">下载交付包</a>
               </>}
               unavailableContent={<>
                 <p className="text-xs text-gray-400">代码生成后将自动打包</p>

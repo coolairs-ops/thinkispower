@@ -6,6 +6,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { DeploymentService } from './deployment.service';
 import { PrismaService } from '../../database/prisma.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { DeliveryPackageCheckService } from '../delivery/delivery-package-check.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
@@ -54,6 +55,7 @@ export class DeployController {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private config: ConfigService,
+    private packageCheckService: DeliveryPackageCheckService,
   ) {}
 
   /**
@@ -96,6 +98,19 @@ export class DeployController {
     }
     if (!fs.existsSync(deliveryDir)) {
       return res.status(404).json({ message: '交付文件不存在' });
+    }
+
+    try {
+      await this.packageCheckService.attachReportToDeliveryDir(projectId, deliveryDir);
+    } catch (err) {
+      this.logger.warn(`交付包验收报告写入失败 ${deliveryId}: ${err}`);
+      try {
+        fs.writeFileSync(
+          path.join(deliveryDir, 'delivery-check-error.txt'),
+          `交付包验收报告写入失败：${err instanceof Error ? err.message : String(err)}\n`,
+          'utf8',
+        );
+      } catch {}
     }
 
     // deliveryId 已过 DELIVERY_ID_RE 白名单（无 shell 元字符/路径分隔符），tar 拼接无注入面

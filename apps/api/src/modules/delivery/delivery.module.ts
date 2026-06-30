@@ -23,11 +23,12 @@ import { IterativeOptimizerService } from '../../services/iterative-optimizer.se
 import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 import { RuoyiConsoleDeployService } from './ruoyi-console-deploy.service';
 import { ConsoleServeService } from './console-serve.service';
+import { DeliveryPackageCheckService } from './delivery-package-check.service';
 
 @Module({
   imports: [SharedCoreModule, HermesModule, CaseReviewModule, ExperienceRecommendationModule, DeploymentModule, DemoModule, CloudecodeModule, SensorModule, LlmModule, AppRuntimeModule, BullModule.registerQueue({ name: DELIVERY_QUEUE }, { name: AUTO_ITERATE_QUEUE })],
   controllers: [DeliveryController],
-  providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, AutoIterateProcessor, DeliveryIterationService, AcceptanceVerificationService, QwenReviewerService, IterativeOptimizerService, RuoyiConsoleDeployService, ConsoleServeService],
-  exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService],
+  providers: [DeliveryService, DeliveryEvaluationService, DeliveryProcessor, AutoIterateProcessor, DeliveryIterationService, AcceptanceVerificationService, DeliveryPackageCheckService, QwenReviewerService, IterativeOptimizerService, RuoyiConsoleDeployService, ConsoleServeService],
+  exports: [DeliveryService, DeliveryEvaluationService, DeliveryIterationService, AcceptanceVerificationService, DeliveryPackageCheckService],
 })
 export class DeliveryModule {}

@@ -6,6 +6,7 @@ import { InternalDeploymentProvider } from './providers/internal-deployment.prov
 import { DEPLOYMENT_PROVIDERS } from './interfaces/deployment-provider.interface';
 import { MinioModule } from '../../integrations/minio/minio.module';
 import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
+import { DeliveryPackageCheckService } from '../delivery/delivery-package-check.service';
 
 @Module({
   imports: [MinioModule, AppRuntimeModule],
@@ -13,6 +14,7 @@ import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
   providers: [
     DeploymentService,
     DeployPipelineService,
+    DeliveryPackageCheckService,
     InternalDeploymentProvider,
     {
       provide: DEPLOYMENT_PROVIDERS,
