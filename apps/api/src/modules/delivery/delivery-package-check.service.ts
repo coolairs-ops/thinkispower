@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
@@ -63,7 +62,7 @@ export interface DeliveryCheckReport {
 @Injectable()
 export class DeliveryPackageCheckService {
   constructor(
-    private readonly prisma: PrismaService | PrismaClient,
+    private readonly prisma: PrismaService,
     private readonly schema: SchemaMigrationService,
     private readonly assembler: AppSpecAssemblerService,
     private readonly coverageSvc: RuoyiCoverageService,
