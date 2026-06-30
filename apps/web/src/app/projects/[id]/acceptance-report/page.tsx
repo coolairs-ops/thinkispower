@@ -42,6 +42,65 @@ interface AcceptanceReport {
   specVersion: number | null;
 }
 
+interface UnresolvedRequirementItem {
+  id: string;
+  title: string;
+  category: 'external_interface' | 'existing_tool_or_skill' | 'backend_capability' | 'generator_capability' | 'manual_decision';
+  solutionRouteLabel: string;
+  sourceRecommendation: string;
+  matchingHints: {
+    query: string;
+    topics: string[];
+    suggestedKeywords: string[];
+    mustHaveCapabilities: string[];
+  };
+}
+
+interface CapabilityModuleCandidate {
+  id: string;
+  title: string;
+  category: UnresolvedRequirementItem['category'];
+  solutionRouteLabel: string;
+  requirementIds: string[];
+  whyConverge: string;
+  matchingHints: {
+    query: string;
+    topics: string[];
+    suggestedKeywords: string[];
+    mustHaveCapabilities: string[];
+  };
+}
+
+interface UnresolvedRequirementsDocument {
+  generatedAt: string;
+  source: {
+    status: string;
+    statusText: string | null;
+    terminalType: string | null;
+    round: number;
+    score: number;
+  };
+  summary: {
+    total: number;
+    moduleCandidateCount: number;
+    externalInterfaceCount: number;
+    existingToolOrAgentCount: number;
+    backendCapabilityCount: number;
+    generatorCapabilityCount: number;
+    manualDecisionCount: number;
+    recommendation: string;
+  };
+  collectionPolicy?: {
+    mode: 'document_first';
+    immediateOnlineFetch: false;
+    selectionOwner: 'user';
+    convergenceRule: string;
+  };
+  moduleCandidates: CapabilityModuleCandidate[];
+  requirements: UnresolvedRequirementItem[];
+  markdown: string;
+}
+
 const STATUS_META: Record<ScenarioStatus, { label: string; cls: string; dot: string }> = {
   pass: { label: '通过', cls: 'bg-green-100 text-green-700 border-green-200', dot: 'bg-green-500' },
   fail: { label: '未通过', cls: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500' },
@@ -58,6 +117,8 @@ export default function AcceptanceReportPage() {
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [message, setMessage] = useState('');
+  const [unresolvedDoc, setUnresolvedDoc] = useState<UnresolvedRequirementsDocument | null>(null);
+  const [docLoading, setDocLoading] = useState(true);
 
   const fetchReport = useCallback(async () => {
     if (!token || authLoading) return;
@@ -76,7 +137,22 @@ export default function AcceptanceReportPage() {
     }
   }, [token, authLoading, projectId]);
 
-  useEffect(() => { fetchReport(); }, [fetchReport]);
+  const fetchUnresolvedDoc = useCallback(async () => {
+    if (!token || authLoading) return;
+    try {
+      const data = await api.get(`/api/projects/${projectId}/delivery/unresolved-requirements`);
+      setUnresolvedDoc(data);
+    } catch {
+      setUnresolvedDoc(null);
+    } finally {
+      setDocLoading(false);
+    }
+  }, [token, authLoading, projectId]);
+
+  useEffect(() => {
+    fetchReport();
+    fetchUnresolvedDoc();
+  }, [fetchReport, fetchUnresolvedDoc]);
 
   const runVerify = async () => {
     setVerifying(true);
@@ -84,6 +160,7 @@ export default function AcceptanceReportPage() {
     try {
       const data = await api.post(`/api/projects/${projectId}/delivery/acceptance-verify`);
       setReport(data);
+      await fetchUnresolvedDoc();
       setMessage('✅ 验收完成');
     } catch (e: any) {
       setMessage('验收失败: ' + (e?.message || '未知错误'));
@@ -123,6 +200,27 @@ export default function AcceptanceReportPage() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `acceptance-report-${projectId.slice(0, 8)}-v${report.specVersion ?? 0}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyUnresolvedMarkdown = async () => {
+    if (!unresolvedDoc?.markdown) return;
+    try {
+      await navigator.clipboard.writeText(unresolvedDoc.markdown);
+      setMessage('✅ 已复制未解决需求文档');
+    } catch {
+      setMessage('复制失败，请使用下载文档');
+    }
+  };
+
+  const downloadUnresolvedMarkdown = () => {
+    if (!unresolvedDoc?.markdown) return;
+    const blob = new Blob([unresolvedDoc.markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `unresolved-requirements-${projectId.slice(0, 8)}.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -184,6 +282,14 @@ export default function AcceptanceReportPage() {
           </div>
         )}
 
+        <UnresolvedRequirementsPanel
+          doc={unresolvedDoc}
+          loading={docLoading}
+          onRefresh={fetchUnresolvedDoc}
+          onCopy={copyUnresolvedMarkdown}
+          onDownload={downloadUnresolvedMarkdown}
+        />
+
         {!report?.hasScenarios && (
           <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
             <p className="text-gray-500">当前规格还没有可验收的场景。</p>
@@ -242,6 +348,131 @@ export default function AcceptanceReportPage() {
       </div>
     </div>
   );
+}
+
+function UnresolvedRequirementsPanel({
+  doc,
+  loading,
+  onRefresh,
+  onCopy,
+  onDownload,
+}: {
+  doc: UnresolvedRequirementsDocument | null;
+  loading: boolean;
+  onRefresh: () => void;
+  onCopy: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">未解决需求收敛文档</h2>
+          <p className="text-xs text-gray-500 mt-1">
+            只沉淀自迭代无法闭合的缺口，先归并为模块候选；不在子体生成现场自动联网下载工具。
+          </p>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={onRefresh} className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">
+            刷新
+          </button>
+          <button
+            onClick={onCopy}
+            disabled={!doc?.markdown}
+            className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            复制 Markdown
+          </button>
+          <button
+            onClick={onDownload}
+            disabled={!doc?.markdown}
+            className="px-3 py-1.5 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
+          >
+            下载文档
+          </button>
+        </div>
+      </div>
+
+      {loading && <p className="text-sm text-gray-500 mt-4">正在读取自迭代缺口...</p>}
+
+      {!loading && !doc && (
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mt-4">
+          暂时无法读取未解决需求文档。
+        </p>
+      )}
+
+      {!loading && doc && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
+            <MiniStat label="原子缺口" value={doc.summary.total} />
+            <MiniStat label="模块候选" value={doc.summary.moduleCandidateCount ?? doc.moduleCandidates?.length ?? 0} />
+            <MiniStat label="外部接口" value={doc.summary.externalInterfaceCount} />
+            <MiniStat label="开源工具" value={doc.summary.existingToolOrAgentCount} />
+            <MiniStat label="生成器" value={doc.summary.generatorCapabilityCount + doc.summary.backendCapabilityCount} />
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            状态：{doc.source.status}{doc.source.statusText ? ` · ${doc.source.statusText}` : ''} · 第 {doc.source.round} 轮 · {doc.source.score} 分
+          </p>
+          {doc.collectionPolicy?.convergenceRule && (
+            <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg p-3 mt-3">
+              收敛规则：{doc.collectionPolicy.convergenceRule}
+            </p>
+          )}
+          <p className="text-sm text-gray-700 mt-3">{doc.summary.recommendation}</p>
+          {doc.moduleCandidates?.length > 0 ? (
+            <div className="mt-4 divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+              {doc.moduleCandidates.slice(0, 6).map((mod) => (
+                <div key={mod.id} className="p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{mod.id} {mod.title}</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        覆盖 {mod.requirementIds.join('、')} · {mod.solutionRouteLabel} · {categoryText(mod.category)}
+                      </p>
+                    </div>
+                    <span className="text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100 shrink-0">
+                      待选型
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-2">{mod.whyConverge}</p>
+                  <p className="text-xs text-gray-600 mt-2 break-words">模块匹配输入：{mod.matchingHints.query}</p>
+                  {mod.matchingHints.mustHaveCapabilities.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      必备能力：{mod.matchingHints.mustHaveCapabilities.slice(0, 3).join('；')}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg p-3 mt-4">
+              当前没有沉淀出需要外部接口或开源工具补齐的缺口。
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className="text-xl font-semibold text-gray-900 mt-1">{value}</p>
+    </div>
+  );
+}
+
+function categoryText(category: UnresolvedRequirementItem['category']) {
+  const map: Record<UnresolvedRequirementItem['category'], string> = {
+    external_interface: '外部接口',
+    existing_tool_or_skill: '开源工具/skill',
+    backend_capability: '后端能力',
+    generator_capability: '生成器能力',
+    manual_decision: '人工决策',
+  };
+  return map[category];
 }
 
 function StatCard({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {

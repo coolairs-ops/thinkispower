@@ -22,15 +22,20 @@ const SLOT_LABELS: Record<string, string> = {
   roles: '角色',
   dataScope: '数据权限',
   menus: '菜单',
+  businessRules: '业务规则',
   acceptanceScenarios: '验收场景',
 };
 
 export default function CoverageProgress({
   projectId,
   refreshKey = 0,
+  onComplete,
+  completing = false,
 }: {
   projectId: string;
   refreshKey?: number; // 关系检测/追加问答后 +1 触发重取，进度条随之前进
+  onComplete?: () => void;
+  completing?: boolean;
 }) {
   const [data, setData] = useState<Coverage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,11 +59,22 @@ export default function CoverageProgress({
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-800">需求完备度</span>
-        <span className={`text-sm font-bold ${headColor}`}>
-          {pct}%{gapCount > 0 && <span className="ml-1 font-normal text-gray-500">· 还差 {gapCount} 项</span>}
-        </span>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <span className="text-sm font-semibold text-gray-800">需求完备度</span>
+          <span className={`ml-3 text-sm font-bold ${headColor}`}>
+            {pct}%{gapCount > 0 && <span className="ml-1 font-normal text-gray-500">· 还差 {gapCount} 项</span>}
+          </span>
+        </div>
+        {gapCount > 0 && onComplete && (
+          <button
+            onClick={onComplete}
+            disabled={completing}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
+          >
+            {completing ? '补齐中...' : '补齐缺口'}
+          </button>
+        )}
       </div>
 
       <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">

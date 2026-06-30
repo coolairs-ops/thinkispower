@@ -44,7 +44,7 @@ export class DeploymentService {
     // 1.5 确保 per-project 后端数据服务就位（幂等）——让在线链接背后真有 API，而非只托管静态 HTML。
     // demo 注入的 appData 走相对路径 /api/app/<projectId>/，与 serveDeploy 同源（均在 API），无需跨域配置。
     let backendInfo: { schemaName: string; resources: string[] } | undefined;
-    // 若依底座项目交付物=控制台（走 RuoyiConsoleDeployService），不该用 crud 置备覆盖 backendRuntime 描述符（保 designate/已置备态）。
+    // 若依底座项目由若依提供数据/权限后端，不该用 crud 置备覆盖 backendRuntime 描述符（保 designate/已置备态）。
     const isRuoyi = (project.backendRuntime as { kind?: string } | null)?.kind === 'ruoyi';
     if (this.backend && project.dataModel && !isRuoyi) {
       try {
@@ -130,7 +130,7 @@ export class DeploymentService {
     if (!html || !this.ruoyiAppData?.enabled) return html;
     // 若项目后端是若依，serve 时把烘焙的路B appData 换成若依版（+服务端 token），令前端显示若依真数据
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true, name: true } });
-    return (await this.ruoyiAppData.transform(html, project?.backendRuntime, project?.name)) ?? html;
+    return (await this.ruoyiAppData.transform(html, project?.backendRuntime, project?.name, projectId)) ?? html;
   }
 
   async getHistory(projectId: string) {

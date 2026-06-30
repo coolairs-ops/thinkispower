@@ -4,6 +4,11 @@ import { PlanGeneratorService } from '../../services/plan-generator.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
 import { DemoService } from '../demo/demo.service';
 import { isProjectLocked } from '../../common/utils/project-status';
+import {
+  buildRequirementUplift,
+  mergeRequirementUplift,
+  buildPlanSeedFromRequirement,
+} from '../specification/requirement-uplift.service';
 
 @Injectable()
 export class PlanService {
@@ -27,6 +32,19 @@ export class PlanService {
 
     // Generate plan if not already generated
     if (!project.planSummary) {
+      let structuredRequirement = project.structuredRequirement as any;
+      const answers = Array.isArray(structuredRequirement?.ideaInterview?.answers)
+        ? structuredRequirement.ideaInterview.answers
+        : [];
+      if (answers.length > 0) {
+        const uplift = buildRequirementUplift(answers, { projectName: project.name });
+        structuredRequirement = mergeRequirementUplift(structuredRequirement, uplift, { projectName: project.name });
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: { structuredRequirement: structuredRequirement as any },
+        });
+      }
+
       const userMessages = await this.prisma.projectMessage.findMany({
         where: { projectId, role: 'user' },
         orderBy: { createdAt: 'asc' },
@@ -34,8 +52,11 @@ export class PlanService {
       });
 
       const plan = await this.planGenerator.generatePlan(
-        project.structuredRequirement,
-        userMessages.map(m => m.content),
+        structuredRequirement,
+        [
+          ...userMessages.map(m => m.content),
+          ...answers.map((a: any) => `${a.question}\n${a.answer}`),
+        ],
       );
 
       await this.prisma.project.update({
@@ -50,7 +71,27 @@ export class PlanService {
       return plan;
     }
 
-    return project.planSummary as any;
+    let plan = project.planSummary as any;
+    if (!isProjectLocked(project.status)) {
+      let structuredRequirement = project.structuredRequirement as any;
+      const answers = Array.isArray(structuredRequirement?.ideaInterview?.answers)
+        ? structuredRequirement.ideaInterview.answers
+        : [];
+      if (answers.length > 0) {
+        const uplift = buildRequirementUplift(answers, { projectName: project.name });
+        structuredRequirement = mergeRequirementUplift(structuredRequirement, uplift, { projectName: project.name });
+      }
+      const repaired = this.repairPlanWithRequirement(plan, structuredRequirement);
+      if (JSON.stringify(repaired) !== JSON.stringify(plan)) {
+        plan = repaired;
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: { structuredRequirement: structuredRequirement as any, planSummary: plan as any },
+        });
+      }
+    }
+
+    return plan;
   }
 
   async confirmPlan(userId: string, projectId: string) {
@@ -62,6 +103,20 @@ export class PlanService {
     if (isProjectLocked(project.status)) {
       throw new BadRequestException('项目已进入开发/交付阶段，如需修改请使用迭代功能');
     }
+    let structuredRequirement = project.structuredRequirement as any;
+    const answers = Array.isArray(structuredRequirement?.ideaInterview?.answers)
+      ? structuredRequirement.ideaInterview.answers
+      : [];
+    if (answers.length > 0) {
+      const uplift = buildRequirementUplift(answers, { projectName: project.name });
+      structuredRequirement = mergeRequirementUplift(structuredRequirement, uplift, { projectName: project.name });
+    }
+    const repairedPlan = this.repairPlanWithRequirement(project.planSummary, structuredRequirement);
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { structuredRequirement: structuredRequirement as any, planSummary: repairedPlan as any },
+    });
+    this.assertPlanUpliftReady(repairedPlan, structuredRequirement);
 
     await this.prisma.project.update({
       where: { id: projectId },
@@ -104,4 +159,36 @@ export class PlanService {
 
     return updatedPlan;
   }
+
+  private repairPlanWithRequirement(planSummary: any, structuredRequirement: any) {
+    const seed = buildPlanSeedFromRequirement(structuredRequirement);
+    return {
+      ...planSummary,
+      summary: planSummary?.summary || seed.summary,
+      pages: nonEmpty(planSummary?.pages) ? planSummary.pages : seed.pages,
+      features: nonEmpty(planSummary?.features) ? planSummary.features : seed.features,
+      roles: nonEmpty(planSummary?.roles) ? planSummary.roles : seed.roles,
+      dataObjects: nonEmpty(planSummary?.dataObjects) ? planSummary.dataObjects : seed.dataObjects,
+      acceptanceChecklist: nonEmpty(planSummary?.acceptanceChecklist) ? planSummary.acceptanceChecklist : seed.acceptanceChecklist,
+    };
+  }
+
+  private assertPlanUpliftReady(planSummary: any, structuredRequirement: any) {
+    const seed = buildPlanSeedFromRequirement({ prd: planSummary });
+    const sr = structuredRequirement || {};
+    const gaps = [
+      seed.roles.length ? '' : '角色',
+      seed.features.length ? '' : '功能',
+      seed.dataObjects.length ? '' : '数据对象',
+      Array.isArray(sr.businessRules) && sr.businessRules.length > 0 ? '' : '业务规则',
+      seed.acceptanceChecklist.length ? '' : '验收场景',
+    ].filter(Boolean);
+    if (gaps.length > 0) {
+      throw new BadRequestException(`需求提升未完成，暂不能生成 Demo。还缺：${gaps.join('、')}。请先补齐访谈答案或在方案页编辑后保存。`);
+    }
+  }
+}
+
+function nonEmpty(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.length > 0;
 }

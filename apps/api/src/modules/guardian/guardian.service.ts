@@ -85,7 +85,7 @@ export class GuardianService implements OnModuleInit {
     // 若依控制台(kind=ruoyi&ready)：深探——经控制台代理 login+list(与交付上线门同口径)，
     // 否则只 GET 首页会被"SPA 首页 200 但后端断链/登不上去"骗过(浅探探不出真挂)。
     const liveness = project.productionUrl
-      ? (this.isRuoyiConsole(project.backendRuntime)
+      ? (this.isRuoyiConsole(project.backendRuntime, project.productionUrl)
           ? await this.probeRuoyiConsole(project.productionUrl, project.backendRuntime as any)
           : await this.probeLiveness(project.productionUrl))
       : null;
@@ -169,9 +169,11 @@ export class GuardianService implements OnModuleInit {
   }
 
   /** 该项目是否以若依控制台为交付物且已就绪（决定深探 vs 浅探）。未配若依实例则退回浅探。 */
-  private isRuoyiConsole(backendRuntime: unknown): boolean {
+  private isRuoyiConsole(backendRuntime: unknown, productionUrl?: string | null): boolean {
     const be = backendRuntime as { kind?: string; status?: string } | null;
-    return be?.kind === 'ruoyi' && be?.status === 'ready' && loadRuoyiInstanceConfig().enabled;
+    const consoleUrl = (process.env.RUOYI_CONSOLE_URL || '').replace(/\/+$/, '');
+    const url = (productionUrl || '').replace(/\/+$/, '');
+    return be?.kind === 'ruoyi' && be?.status === 'ready' && loadRuoyiInstanceConfig().enabled && !!consoleUrl && url === consoleUrl;
   }
 
   /**

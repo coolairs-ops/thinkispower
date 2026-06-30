@@ -115,6 +115,7 @@ export class RelationCompletionService {
     const relations: Relation[] = [];
     for (const c of candidates) {
       const ans = answers[`${c.parent}->${c.child}`] || {};
+      if (c.disposition === 'ask' && !hasExplicitRelationAnswer(ans)) continue;
       const cardinality = c.disposition === 'ask' ? this.pick(ans.cardinality, CARDINALITIES, c.cardinality) : c.cardinality;
       if (cardinality === 'none') continue; // 客户答"没关系"→丢弃
       const onDelete = this.pick(ans.onDelete, ON_DELETES, 'restrict');
@@ -239,4 +240,8 @@ export class RelationCompletionService {
     assertResourceAccess(project, userId, orgId);
     return project;
   }
+}
+
+function hasExplicitRelationAnswer(ans: { cardinality?: string; onDelete?: string; required?: boolean }): boolean {
+  return Boolean(ans.cardinality || ans.onDelete || ans.required !== undefined);
 }

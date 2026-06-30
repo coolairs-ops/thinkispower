@@ -27,8 +27,7 @@ export class DeliveryService {
     const latestBuild = await this.buildService.getLatestBuild(projectId);
     const deliveryAnalysis = (project.deliveryAnalysis as any) || null;
 
-    // 若依控制台交付物：上线产品是共享控制台，**必须用项目专属账号登录才只看到本项目功能**。
-    // 若用 admin（跨项目超管）登录会看到所有系统的菜单（"客户系统里混进设备维修菜单"的根因）→ 据实引导。
+    // 若依底座项目：上线产品仍是当前项目业务应用；这里给出业务登录账号，用于应用内数据读写/权限验证。
     const be = project.backendRuntime as { kind?: string; initialUsers?: Array<{ userName: string; password: string; role: string }> } | null;
     const initialUser = be?.kind === 'ruoyi' ? be?.initialUsers?.[0] : undefined;
     const consoleLogin = be?.kind === 'ruoyi'
@@ -37,8 +36,8 @@ export class DeliveryService {
           password: initialUser?.password ?? null,
           hasScopedAccount: !!initialUser?.userName,
           note: initialUser?.userName
-            ? '请用此项目专属账号登录——只看本项目功能。请勿用 admin 登录：admin 是跨项目超级管理员，会看到所有系统的菜单。'
-            : '此项目较早置备、暂无专属账号；重新交付即可自动种项目账号。请勿用 admin（跨项目超管）登录，否则会看到其他系统的菜单。',
+            ? '请用此应用账号登录交付后的业务系统；它用于本项目的数据权限和操作审计。'
+            : '此项目较早置备、暂无应用账号；重新交付即可自动生成业务账号。',
         }
       : null;
 

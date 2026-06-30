@@ -68,14 +68,14 @@ export class AppSpecAssemblerService {
       }));
 
     // roles：planSummary.roles 优先，退 sr.roles；条目可为字符串或 {name}；dataScope 按角色名推
-    const rawRoles = (plan.roles as unknown[]) || (sr.roles as unknown[]) || [];
+    const rawRoles = firstNonEmptyArray(plan.roles, sr.roles);
     const roles: AppRole[] = rawRoles
-      .map((r) => (typeof r === 'string' ? r : ((r as { name?: string })?.name ?? '')))
+      .map((r) => (typeof r === 'string' ? r : ((r as { name?: string; role?: string })?.name ?? (r as { role?: string })?.role ?? '')))
       .filter(Boolean)
       .map((full) => ({ name: cleanRoleName(full), dataScope: deriveDataScope(full) })); // dataScope 用全名(关键词多)，roleName 取清洗后的短名
 
     // menus：planSummary.pages 优先，退 sr.pages；page {name,route} → menu {name,path,entity?}
-    const rawPages = (plan.pages as unknown[]) || (sr.pages as unknown[]) || [];
+    const rawPages = firstNonEmptyArray(plan.pages, sr.pages);
     const menus: AppMenu[] = rawPages
       .map((p) => (typeof p === 'string' ? { name: p } : (p as { name?: string; route?: string; path?: string })))
       .filter((p) => p && p.name)
@@ -85,7 +85,18 @@ export class AppSpecAssemblerService {
         entity: matchEntity(p.name!, entities),
       }));
 
-    return { entities, relations, roles, menus };
+    const rawRules = firstNonEmptyArray(sr.businessRules, plan.businessRules);
+    const businessRules = rawRules
+      .map((rule) => typeof rule === 'string'
+        ? { name: rule }
+        : {
+            name: String((rule as { name?: unknown }).name ?? '').trim(),
+            trigger: String((rule as { trigger?: unknown }).trigger ?? '').trim() || undefined,
+            outcome: String((rule as { outcome?: unknown }).outcome ?? '').trim() || undefined,
+          })
+      .filter((rule) => rule.name || rule.trigger || rule.outcome);
+
+    return { entities, relations, roles, menus, businessRules };
   }
 }
 
@@ -114,4 +125,11 @@ function matchEntity(pageName: string, entities: ParsedModel[]): string | undefi
   const p = pageName.toLowerCase();
   const hit = entities.find((e) => p.includes(e.name.toLowerCase()) || p.includes(e.table.toLowerCase()));
   return hit?.table;
+}
+
+function firstNonEmptyArray(...values: unknown[]): unknown[] {
+  for (const value of values) {
+    if (Array.isArray(value) && value.length > 0) return value;
+  }
+  return [];
 }

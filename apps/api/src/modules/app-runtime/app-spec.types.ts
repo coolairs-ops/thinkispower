@@ -39,6 +39,12 @@ export interface AppRelation {
   onDelete?: string; // cascade | setNull | restrict
 }
 
+export interface AppBusinessRule {
+  name: string;
+  trigger?: string;
+  outcome?: string;
+}
+
 export interface AppSpec {
   /** 实体模型（LLM 产 Prisma → ParsedModel），喂若依 codegen */
   entities: ParsedModel[];
@@ -48,4 +54,6 @@ export interface AppSpec {
   menus: AppMenu[];
   /** 实体关系（1—N 主子表）：补外键列 + 父表 sub-table codegen 配置 */
   relations?: AppRelation[];
+  /** 业务规则：审批、计算、状态流转、校验等生成/验收约束 */
+  businessRules?: AppBusinessRule[];
 }

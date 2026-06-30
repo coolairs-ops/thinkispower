@@ -66,7 +66,7 @@ describe('PlanGeneratorService', () => {
       expect(result.estimatedDays).toBe(10);
     });
 
-    it('should handle empty structured requirement', async () => {
+    it('should not accept empty AI arrays as a valid delivery plan', async () => {
       mockDeepseekService.chat.mockResolvedValue(JSON.stringify({
         summary: '业务管理系统',
         pages: [],
@@ -81,7 +81,33 @@ describe('PlanGeneratorService', () => {
       const result = await service.generatePlan({}, ['做一个系统']);
 
       expect(result.summary).toBe('业务管理系统');
-      expect(result.pages).toEqual([]);
+      expect(result.pages.length).toBeGreaterThan(0);
+      expect(result.features.length).toBeGreaterThan(0);
+      expect(result.roles.length).toBeGreaterThan(0);
+      expect(result.dataObjects.length).toBeGreaterThan(0);
+      expect(result.acceptanceChecklist.length).toBeGreaterThan(0);
+    });
+
+    it('should use uplift fallback when DeepSeek fails', async () => {
+      mockDeepseekService.chat.mockRejectedValue(new Error('network blocked'));
+
+      const result = await service.generatePlan(
+        {
+          prd: {
+            summary: '财务智能问数',
+            features: ['智能问数', '文档结构化'],
+            roles: ['领导用户 - 问数', '财务人员 - 上传数据'],
+            dataObjects: ['财务数据', '财务文档'],
+            successCriteria: ['用户能问几个财务问题并得到答案'],
+          },
+        },
+        [],
+      );
+
+      expect(result.features).toContain('智能问数');
+      expect(result.roles).toContain('领导用户 - 问数');
+      expect(result.dataObjects).toContain('财务数据');
+      expect(result.acceptanceChecklist).toContain('用户能问几个财务问题并得到答案');
     });
 
     it('should call DeepSeek with correct parameters', async () => {

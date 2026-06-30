@@ -7,6 +7,14 @@ import { SchemaMigrationService } from '../app-runtime/schema-migration.service'
 import { AppSpecAssemblerService } from '../app-runtime/app-spec-assembler.service';
 import { RuoyiCoverageService, AcceptanceScenarioLite } from '../app-runtime/ruoyi-coverage.service';
 import { ParsedModel } from '../app-runtime/data-model.types';
+import { designEntitiesFromRequirement } from '../specification/requirement-coverage.service';
+import { buildRequirementUplift, mergeRequirementUplift } from '../specification/requirement-uplift.service';
+import { evaluateSpecificationGate } from '../specification/specification-gate';
+import {
+  buildUnresolvedRequirementsDocument,
+  renderUnresolvedRequirementsMarkdown,
+  type UnresolvedRequirementsDocument,
+} from './unresolved-requirements.service';
 
 export type GateStatus = 'pass' | 'warn' | 'fail' | 'unknown';
 export type DeliveryCheckMode = 'inspect' | 'package';
@@ -50,12 +58,15 @@ export interface DeliveryCheckReport {
     goLive: Gate;
     guardian: Gate;
   };
+  unresolvedRequirements: Omit<UnresolvedRequirementsDocument, 'markdown'>;
   artifacts: {
     productionUrl: string | null;
     demoUrl: string | null;
     latestBuild: unknown;
     reportJsonPath?: string;
     reportMarkdownPath?: string;
+    unresolvedRequirementsJsonPath?: string;
+    unresolvedRequirementsMarkdownPath?: string;
   };
 }
 
@@ -135,6 +146,7 @@ export class DeliveryPackageCheckService {
     const ruoyiProvision = this.ruoyiProvisionGate(project.backendRuntime);
     const goLive = this.goLiveGate(project, latestBuild);
     const guardian = this.guardianGate(project, latestGuardianCheck, pendingRemediations.length);
+    const unresolvedRequirements = omitMarkdown(buildUnresolvedRequirementsDocument(project));
 
     const gates = { requirementCoverage, specification, demo, acceptance, ruoyiProvision, goLive, guardian };
     const all = Object.values(gates);
@@ -163,6 +175,7 @@ export class DeliveryPackageCheckService {
         warnings,
       },
       gates,
+      unresolvedRequirements,
       artifacts: {
         productionUrl: project.productionUrl,
         demoUrl: project.demoUrl,
@@ -178,12 +191,21 @@ export class DeliveryPackageCheckService {
       : resolve(resolveApiRoot(), '.hermes', 'delivery-checks', safeProject, 'delivery-check');
     const jsonPath = base.endsWith('.json') ? base : `${base}.json`;
     const mdPath = jsonPath.replace(/\.json$/i, '.md');
-    const reportWithPaths = this.withReportPaths(report, { jsonPath, mdPath });
+    const unresolvedRequirementsJsonPath = jsonPath.replace(/\.json$/i, '-unresolved-requirements.json');
+    const unresolvedRequirementsMarkdownPath = jsonPath.replace(/\.json$/i, '-unresolved-requirements.md');
+    const reportWithPaths = this.withReportPaths(report, {
+      jsonPath,
+      mdPath,
+      unresolvedRequirementsJsonPath,
+      unresolvedRequirementsMarkdownPath,
+    });
 
     mkdirSync(dirname(jsonPath), { recursive: true });
     writeFileSync(jsonPath, JSON.stringify(reportWithPaths, null, 2), 'utf8');
     writeFileSync(mdPath, this.renderMarkdown(reportWithPaths), 'utf8');
-    return { jsonPath, mdPath };
+    writeFileSync(unresolvedRequirementsJsonPath, JSON.stringify(reportWithPaths.unresolvedRequirements, null, 2), 'utf8');
+    writeFileSync(unresolvedRequirementsMarkdownPath, renderUnresolvedRequirementsMarkdown(reportWithPaths.unresolvedRequirements), 'utf8');
+    return { jsonPath, mdPath, unresolvedRequirementsJsonPath, unresolvedRequirementsMarkdownPath };
   }
 
   renderMarkdown(report: DeliveryCheckReport): string {
@@ -212,11 +234,28 @@ export class DeliveryPackageCheckService {
       for (const item of report.overall.warnings) lines.push(`- ${item}`);
     }
     lines.push('');
+    lines.push('## 未解决需求收敛');
+    lines.push(`- 原子缺口：${report.unresolvedRequirements.summary.total}`);
+    lines.push(`- 模块候选：${report.unresolvedRequirements.summary.moduleCandidateCount}`);
+    lines.push(`- 外部接口：${report.unresolvedRequirements.summary.externalInterfaceCount}`);
+    lines.push(`- 开源工具/skill：${report.unresolvedRequirements.summary.existingToolOrAgentCount}`);
+    lines.push(`- 后端能力：${report.unresolvedRequirements.summary.backendCapabilityCount}`);
+    lines.push(`- 生成器能力：${report.unresolvedRequirements.summary.generatorCapabilityCount}`);
+    lines.push(`- 建议：${report.unresolvedRequirements.summary.recommendation}`);
+    for (const mod of report.unresolvedRequirements.moduleCandidates.slice(0, 8)) {
+      lines.push(`- ${mod.id} ${mod.title}：覆盖 ${mod.requirementIds.join('、')}；匹配输入: ${mod.matchingHints.query}`);
+    }
+    if (report.unresolvedRequirements.moduleCandidates.length > 8) {
+      lines.push(`- 另 ${report.unresolvedRequirements.moduleCandidates.length - 8} 个模块候选见 unresolved-requirements.md`);
+    }
+    lines.push('');
     lines.push('## 交付物');
     lines.push(`- productionUrl：${report.artifacts.productionUrl ?? '无'}`);
     lines.push(`- demoUrl：${report.artifacts.demoUrl ?? '无'}`);
     if (report.artifacts.reportJsonPath) lines.push(`- reportJson：${report.artifacts.reportJsonPath}`);
     if (report.artifacts.reportMarkdownPath) lines.push(`- reportMarkdown：${report.artifacts.reportMarkdownPath}`);
+    if (report.artifacts.unresolvedRequirementsJsonPath) lines.push(`- unresolvedRequirementsJson：${report.artifacts.unresolvedRequirementsJsonPath}`);
+    if (report.artifacts.unresolvedRequirementsMarkdownPath) lines.push(`- unresolvedRequirementsMarkdown：${report.artifacts.unresolvedRequirementsMarkdownPath}`);
     return lines.join('\n');
   }
 
@@ -230,6 +269,7 @@ export class DeliveryPackageCheckService {
   }
 
   private requirementCoverageGate(project: {
+    name: string;
     dataModel: string | null;
     structuredRequirement: unknown;
     planSummary: unknown;
@@ -245,15 +285,22 @@ export class DeliveryPackageCheckService {
       }
     }
 
-    const spec = this.assembler.assemble(entities, project.structuredRequirement, project.planSummary);
-    const sr = asRecord(project.structuredRequirement);
+    let sr = asRecord(project.structuredRequirement);
+    const answers = Array.isArray(asRecord(sr.ideaInterview).answers)
+      ? asRecord(sr.ideaInterview).answers as { question: string; answer: string }[]
+      : [];
+    if (answers.length > 0) {
+      sr = mergeRequirementUplift(sr, buildRequirementUplift(answers, { projectName: project.name }));
+    }
     const plan = asRecord(project.planSummary);
-    const scenarios = firstArray<AcceptanceScenarioLite>(
+    const designEntities = entities.length > 0 ? entities : designEntitiesFromRequirement(sr, plan);
+    const designSpec = this.assembler.assemble(designEntities, sr, project.planSummary);
+    const scenarios = firstNonEmptyArray<AcceptanceScenarioLite>(
       plan.acceptanceScenarios,
       sr.acceptanceScenarios,
       project.specification?.acceptanceScenarios,
     );
-    const coverage = this.coverageSvc.evaluate(spec, scenarios);
+    const coverage = this.coverageSvc.evaluate(designSpec, scenarios);
     const status: GateStatus = parseError
       ? 'warn'
       : coverage.coverage >= 90
@@ -287,24 +334,22 @@ export class DeliveryPackageCheckService {
     businessRules: unknown;
     acceptanceScenarios: unknown;
   } | null | undefined): Gate {
-    if (!spec) {
-      return { key: 'specification', name: '规格', status: 'fail', summary: '未生成规格' };
-    }
-    const counts = {
-      coreFunctions: asArray(spec.coreFunctions).length,
-      pages: asArray(spec.pages).length,
-      roles: asArray(spec.roles).length,
-      dataModels: asArray(spec.dataModels).length,
-      businessRules: asArray(spec.businessRules).length,
-      acceptanceScenarios: asArray(spec.acceptanceScenarios).length,
-    };
-    const status: GateStatus = spec.status === 'frozen' ? 'pass' : 'warn';
+    const gate = evaluateSpecificationGate(spec);
     return {
       key: 'specification',
       name: '规格',
-      status,
-      summary: `v${spec.version} · ${spec.status}${spec.frozenAt ? ` · frozenAt ${spec.frozenAt.toISOString()}` : ''}`,
-      details: counts,
+      status: gate.deliveryStatus,
+      summary: gate.deliverySummary,
+      details: {
+        counts: gate.counts,
+        readyToFreeze: gate.readyToFreeze,
+        frozen: gate.frozen,
+        requiredGaps: gate.requiredGaps,
+        advisoryGaps: gate.advisoryGaps,
+        gaps: gate.gaps,
+        requiredSlots: gate.requiredSlots,
+        advisorySlots: gate.advisorySlots,
+      },
     };
   }
 
@@ -469,13 +514,20 @@ export class DeliveryPackageCheckService {
     };
   }
 
-  private withReportPaths(report: DeliveryCheckReport, paths: { jsonPath: string; mdPath: string }): DeliveryCheckReport {
+  private withReportPaths(report: DeliveryCheckReport, paths: {
+    jsonPath: string;
+    mdPath: string;
+    unresolvedRequirementsJsonPath?: string;
+    unresolvedRequirementsMarkdownPath?: string;
+  }): DeliveryCheckReport {
     return {
       ...report,
       artifacts: {
         ...report.artifacts,
         reportJsonPath: paths.jsonPath,
         reportMarkdownPath: paths.mdPath,
+        unresolvedRequirementsJsonPath: paths.unresolvedRequirementsJsonPath,
+        unresolvedRequirementsMarkdownPath: paths.unresolvedRequirementsMarkdownPath,
       },
     };
   }
@@ -507,13 +559,25 @@ function asArray<T = unknown>(v: unknown): T[] {
   return Array.isArray(v) ? v as T[] : [];
 }
 
-function firstArray<T>(...values: unknown[]): T[] {
+function firstNonEmptyArray<T>(...values: unknown[]): T[] {
   for (const v of values) {
-    if (Array.isArray(v)) return v as T[];
+    if (Array.isArray(v) && v.length > 0) return v as T[];
   }
   return [];
 }
 
 function withIsoDates<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
+}
+
+function omitMarkdown(doc: UnresolvedRequirementsDocument): Omit<UnresolvedRequirementsDocument, 'markdown'> {
+  return {
+    project: doc.project,
+    generatedAt: doc.generatedAt,
+    source: doc.source,
+    summary: doc.summary,
+    collectionPolicy: doc.collectionPolicy,
+    moduleCandidates: doc.moduleCandidates,
+    requirements: doc.requirements,
+  };
 }

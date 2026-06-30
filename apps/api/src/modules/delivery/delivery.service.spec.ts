@@ -41,10 +41,10 @@ describe('DeliveryService', () => {
       expect(result.status).toBe('completed');
       expect(result.productionUrl).toBe('http://example.com');
       expect(result.isPro).toBe(true);
-      expect(result.consoleLogin).toBeNull(); // 非若依项目无控制台账号引导
+      expect(result.consoleLogin).toBeNull(); // 非若依项目无应用账号引导
     });
 
-    it('若依项目 → 带出项目专属登录账号(引导勿用 admin 超管)', async () => {
+    it('若依项目 → 带出应用业务登录账号', async () => {
       prisma.project.findUnique.mockResolvedValue({
         id: mockProjectId, userId: mockUserId, status: 'completed', productionUrl: 'http://127.0.0.1:8089',
         deliveryOptions: {}, user: { plan: 'free' },
@@ -52,7 +52,7 @@ describe('DeliveryService', () => {
       });
       const result = await service.getDelivery(mockUserId, null, mockProjectId);
       expect(result.consoleLogin).toMatchObject({ username: 'proj_u1', password: '123456', hasScopedAccount: true });
-      expect(result.consoleLogin!.note).toContain('admin'); // 明确引导勿用跨项目超管
+      expect(result.consoleLogin!.note).toContain('业务系统');
     });
 
     it('若依项目但无 initialUsers(早期置备) → hasScopedAccount=false + 重新交付提示', async () => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -27,6 +27,7 @@ interface PlanData {
 export default function PlanPage() {
  const params = useParams();
  const router = useRouter();
+ const searchParams = useSearchParams();
  const projectId = params.id as string;
  const { token, isLoading } = useAuth();
 
@@ -34,9 +35,12 @@ export default function PlanPage() {
  const [projectName, setProjectName] = useState('');
  const [loading, setLoading] = useState(true);
  const [saving, setSaving] = useState(false);
+ const [rebuildingAssets, setRebuildingAssets] = useState(false);
+ const [assetRebuildMessage, setAssetRebuildMessage] = useState('');
 	const [refreshKey, setRefreshKey] = useState(0);
 
  const [editing, setEditing] = useState(false);
+ const [scopeMode, setScopeMode] = useState(false);
  const [activeTab, setActiveTab] = useState<'plan' | 'design'>('plan');
  const [editSummary, setEditSummary] = useState('');
  const [editPages, setEditPages] = useState<string[]>([]);
@@ -66,10 +70,22 @@ export default function PlanPage() {
  setPlan(planData);
  setProjectName(proj.name || '');
  initEdit(planData);
+ if (searchParams.get('edit') === 'scope') {
+ setEditing(true);
+ setScopeMode(true);
+ setActiveTab('plan');
+ }
  setLoading(false);
  })
  .catch(() => setLoading(false));
- }, [projectId, token, isLoading, router]);
+ }, [projectId, token, isLoading, router, searchParams]);
+
+ useEffect(() => {
+ if (searchParams.get('edit') !== 'scope') return;
+ setEditing(true);
+ setScopeMode(true);
+ setActiveTab('plan');
+ }, [searchParams]);
 
  // 兼容两种格式：字符串 或 {name} 对象（导入路径产出 [{name}]）
  const toStr = (x: unknown): string =>
@@ -101,6 +117,7 @@ export default function PlanPage() {
  setPlan(saved);
  initEdit(saved);
  setEditing(false);
+ setScopeMode(false);
  setSaving(false);
 	setRefreshKey(k => k + 1);
  };
@@ -108,6 +125,28 @@ export default function PlanPage() {
  const handleCancel = () => {
  if (plan) initEdit(plan);
  setEditing(false);
+ setScopeMode(false);
+ };
+
+ const handleRebuildAssets = async () => {
+ setRebuildingAssets(true);
+ setAssetRebuildMessage('');
+ try {
+ const result = await api.post(`/api/projects/${projectId}/specification/rebuild-from-interview`);
+ if (result?.plan) {
+ setPlan(result.plan);
+ initEdit(result.plan);
+ }
+ const counts = result?.counts || {};
+ setAssetRebuildMessage(`已重建：角色 ${counts.roles || 0}、功能 ${counts.coreFunctions || 0}、数据对象 ${counts.dataModels || 0}、业务规则 ${counts.businessRules || 0}、验收场景 ${counts.acceptanceScenarios || 0}`);
+ setRefreshKey(k => k + 1);
+ setRelKey(k => k + 1);
+ setActiveTab('plan');
+ } catch (e: any) {
+ alert(e?.message || '重建需求资产失败');
+ } finally {
+ setRebuildingAssets(false);
+ }
  };
 
  const handleConfirm = async () => {
@@ -149,19 +188,29 @@ export default function PlanPage() {
      .catch(() => {});
  }, [projectId, token]);
 
- // 设计采纳保存后：基于已采纳的设计检测实体关系 → 出追加问答
- const handleDesignSaved = async () => {
+ // 基于已采纳设计检测实体关系 + 业务规则；能自动确定的先落库，模糊项进入追加问答。
+ const handleRunCompletion = async () => {
    setDesignReady(true);
    setDetecting(true);
-   // 基于已采纳的设计，并行检测实体关系 + 业务规则 → 一起进追加问答
    try {
      await Promise.all([
        api.post(`/api/projects/${projectId}/requirement/relations/detect`),
        api.post(`/api/projects/${projectId}/requirement/business-rules/detect`),
      ]);
+     await api.post(`/api/projects/${projectId}/requirement/followup`, {
+       relations: {},
+       acceptGaps: [],
+       businessRules: {},
+     });
    } catch {}
    setDetecting(false);
    setRelKey(k => k + 1);
+   setRefreshKey(k => k + 1);
+ };
+
+ // 设计采纳保存后：基于已采纳的设计检测实体关系 → 出追加问答
+ const handleDesignSaved = async () => {
+   await handleRunCompletion();
  };
 
  const updateArrayItem = (arr: string[], index: number, value: string, setter: (v: string[]) => void) => {
@@ -195,6 +244,22 @@ export default function PlanPage() {
  <h1 className="text-2xl font-bold text-gray-900">方案确认</h1>
  <p className="text-gray-500 mt-1">{editing ? '编辑方案内容，修改后点击保存' : '确认方案无误后点击"确认方案"，平台将开始生成预览'}</p>
  </div>
+ <div className="flex items-center gap-2">
+ {!editing && (
+ <button
+ onClick={() => { setEditing(true); setScopeMode(false); setActiveTab('plan'); }}
+ className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+ >
+ 编辑方案
+ </button>
+ )}
+ <button
+ onClick={handleRebuildAssets}
+ disabled={rebuildingAssets}
+ className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+ >
+ {rebuildingAssets ? '重建中...' : '重建需求资产'}
+ </button>
  <Link
  href={`/projects/${projectId}/spec`}
  className="px-3 py-1.5 text-sm border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
@@ -202,6 +267,13 @@ export default function PlanPage() {
  产品规格 →
  </Link>
  </div>
+ </div>
+
+ {assetRebuildMessage && (
+ <div className="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+ {assetRebuildMessage}，规格已回到待确认状态。
+ </div>
+ )}
 
  {/* 规则定义子环节（形态A）：这系统要不要风险评分/分级 */}
  <RuleEngineEntry projectId={projectId} />
@@ -246,6 +318,17 @@ export default function PlanPage() {
  设计建议
  </button>
  </div>
+
+ {scopeMode && activeTab === 'plan' && (
+ <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+ <p className="text-sm font-medium text-red-800">正在调整第一版范围和预算</p>
+ <div className="mt-2 grid gap-2 text-xs text-red-700 md:grid-cols-3">
+ <p>先在“功能清单”保留 3-5 个必须功能，其余写成后续版本。</p>
+ <p>把复杂报表、复杂权限、外部系统对接先移出第一版。</p>
+ <p>在“预计周期与费用”里填入能覆盖开发、部署、维护的预算范围。</p>
+ </div>
+ </div>
+ )}
 
  {activeTab === 'plan' ? (plan ? (
  <div className="space-y-6">
@@ -427,7 +510,7 @@ export default function PlanPage() {
  )) : (
  <div className="space-y-4">
  <DesignSuggestions projectId={projectId} onSaved={handleDesignSaved} />
- <CoverageProgress projectId={projectId} refreshKey={relKey} />
+ <CoverageProgress projectId={projectId} refreshKey={relKey} onComplete={handleRunCompletion} completing={detecting} />
  {detecting && (
  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
  正在根据你采纳的设计分析实体关系与业务规则…

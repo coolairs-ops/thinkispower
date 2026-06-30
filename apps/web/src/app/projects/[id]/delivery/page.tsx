@@ -161,7 +161,7 @@ export default function DeliveryPage() {
   const hasFiles = genFiles.length > 0;
   const sourceZipUrl = delivery?.latestBuild?.sourceZipUrl;
   const productionUrl = delivery?.productionUrl;
-  const consoleLogin = delivery?.consoleLogin; // 若依控制台：项目专属登录账号（勿用 admin 超管，会串其他项目菜单）
+  const consoleLogin = delivery?.consoleLogin; // 若依底座项目：交付应用的业务登录账号
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -261,11 +261,11 @@ export default function DeliveryPage() {
                   <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-2">
                     {consoleLogin.hasScopedAccount ? (
                       <p className="text-xs text-amber-800">
-                        登录账号（仅本项目）：<span className="font-mono font-medium">{consoleLogin.username}</span>
+                        应用账号：<span className="font-mono font-medium">{consoleLogin.username}</span>
                         {consoleLogin.password && <> / <span className="font-mono font-medium">{consoleLogin.password}</span></>}
                       </p>
                     ) : (
-                      <p className="text-xs text-amber-800">本项目暂无专属账号，建议重新交付以自动种项目账号。</p>
+                      <p className="text-xs text-amber-800">本项目暂无应用账号，建议重新交付以自动生成业务账号。</p>
                     )}
                     <p className="text-[11px] text-amber-600 mt-1">{consoleLogin.note}</p>
                   </div>

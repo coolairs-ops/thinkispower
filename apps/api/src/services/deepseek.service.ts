@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as http from 'node:http';
 import * as https from 'node:https';
+import * as tls from 'node:tls';
 import { generateFallbackPrd, getFallbackQuestion } from '../common/utils/prd-fallback';
 
 export interface DeepseekMessage {
@@ -23,6 +24,7 @@ export class DeepseekService {
   private baseUrl: string;
   private model: string;
   private httpAgent: https.Agent;
+  private proxyUrl: string;
 
   constructor(private config: ConfigService) {
     this.apiKey = this.config.get('DEEPSEEK_API_KEY', '');
@@ -32,6 +34,10 @@ export class DeepseekService {
     // keepAlive 池子里过期连接被复用会导致 ECONNRESET/socket hang up。
     // 每次新建连接虽然多一次 TLS 握手，但可靠性远高于复用死连接。
     this.httpAgent = new https.Agent({ keepAlive: false });
+    this.proxyUrl = this.resolveProxyUrl();
+    if (this.proxyUrl) {
+      this.logger.log(`DeepSeek proxy enabled: ${sanitizeProxyUrl(this.proxyUrl)}`);
+    }
   }
 
   async chat(messages: DeepseekMessage[], options?: DeepseekOptions & { timeoutMs?: number }): Promise<string> {
@@ -164,8 +170,12 @@ export class DeepseekService {
    * Use node:http instead of fetch() to avoid AbortController hanging issues.
    */
   private httpPost(url: string, body: unknown, timeoutMs: number): Promise<any> {
+    const urlObj = new URL(url);
+    if (this.proxyUrl && urlObj.protocol === 'https:') {
+      return this.httpPostViaProxy(urlObj, body, timeoutMs);
+    }
+
     return new Promise((resolve, reject) => {
-      const urlObj = new URL(url);
       const mod = urlObj.protocol === 'https:' ? https : http;
       const data = JSON.stringify(body);
 
@@ -211,6 +221,129 @@ export class DeepseekService {
   }
 
   /**
+   * 通过 HTTP/HTTPS 代理访问 HTTPS API。
+   * Node 的 http/https 不会自动读取系统代理；这里显式走 CONNECT 隧道，避免后端直连公网被 Windows/网络策略拦截。
+   */
+  private httpPostViaProxy(urlObj: URL, body: unknown, timeoutMs: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(err);
+      };
+      const done = (value: any) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      let proxy: URL;
+      try {
+        proxy = new URL(this.proxyUrl);
+      } catch {
+        fail(new Error(`Invalid proxy URL: ${sanitizeProxyUrl(this.proxyUrl)}`));
+        return;
+      }
+
+      if (!['http:', 'https:'].includes(proxy.protocol)) {
+        fail(new Error(`Unsupported proxy protocol: ${proxy.protocol}. Use http:// or https://`));
+        return;
+      }
+
+      const targetPort = Number(urlObj.port || 443);
+      const proxyPort = Number(proxy.port || (proxy.protocol === 'https:' ? 443 : 80));
+      const proxyAuth = proxy.username
+        ? `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString('base64')}`
+        : undefined;
+      const connectHeaders: Record<string, string> = {
+        Host: `${urlObj.hostname}:${targetPort}`,
+      };
+      if (proxyAuth) connectHeaders['Proxy-Authorization'] = proxyAuth;
+
+      const connectOptions: http.RequestOptions = {
+        hostname: proxy.hostname,
+        port: proxyPort,
+        method: 'CONNECT',
+        path: `${urlObj.hostname}:${targetPort}`,
+        headers: connectHeaders,
+        timeout: timeoutMs,
+      };
+      const proxyModule = proxy.protocol === 'https:' ? https : http;
+      const connectReq = proxyModule.request(connectOptions);
+
+      connectReq.on('connect', (res, socket, head) => {
+        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+          socket.destroy();
+          fail(new Error(`Proxy CONNECT failed: HTTP ${res.statusCode}`));
+          return;
+        }
+        if (head?.length) socket.unshift(head);
+
+        const tlsSocket = tls.connect({ socket, servername: urlObj.hostname });
+        const chunks: Buffer[] = [];
+
+        tlsSocket.setTimeout(timeoutMs, () => {
+          tlsSocket.destroy();
+          fail(new Error('Request timeout'));
+        });
+        tlsSocket.once('error', (err) => fail(err));
+        tlsSocket.once('secureConnect', () => {
+          const data = JSON.stringify(body);
+          const path = `${urlObj.pathname}${urlObj.search}`;
+          const requestText = [
+            `POST ${path} HTTP/1.1`,
+            `Host: ${urlObj.host}`,
+            'Content-Type: application/json',
+            `Authorization: Bearer ${this.apiKey}`,
+            `Content-Length: ${Buffer.byteLength(data)}`,
+            'Connection: close',
+            '',
+            data,
+          ].join('\r\n');
+          tlsSocket.write(requestText);
+        });
+        tlsSocket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        tlsSocket.on('end', () => {
+          try {
+            const parsed = parseHttpResponse(Buffer.concat(chunks));
+            if (parsed.statusCode < 200 || parsed.statusCode >= 300) {
+              this.logger.error(`DeepSeek API error: ${parsed.statusCode} ${parsed.body.slice(0, 200)}`);
+              fail(new Error(`HTTP ${parsed.statusCode}`));
+              return;
+            }
+            done(JSON.parse(parsed.body));
+          } catch (e) {
+            fail(e instanceof Error ? e : new Error(String(e)));
+          }
+        });
+      });
+
+      connectReq.on('timeout', () => {
+        connectReq.destroy();
+        fail(new Error('Proxy CONNECT timeout'));
+      });
+      connectReq.on('error', (err) => fail(err));
+      connectReq.end();
+    });
+  }
+
+  private resolveProxyUrl(): string {
+    const base = this.baseUrl ? new URL(this.baseUrl) : null;
+    const noProxy = this.firstConfig('NO_PROXY', 'no_proxy');
+    if (base && shouldBypassProxy(base.hostname, noProxy)) return '';
+    return this.firstConfig('LLM_PROXY_URL', 'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy');
+  }
+
+  private firstConfig(...keys: string[]): string {
+    for (const key of keys) {
+      const value = this.config.get<string>(key) || process.env[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+  }
+
+  /**
    * Fallback when API key is missing or API call fails.
    * Returns format compatible with ProductDiscoveryService.processMessages():
    *   { needMoreInfo, question, summary, prd }
@@ -244,4 +377,67 @@ export class DeepseekService {
       prd,
     });
   }
+}
+
+function sanitizeProxyUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) {
+      url.username = '***';
+      url.password = '***';
+    }
+    return url.toString();
+  } catch {
+    return value.replace(/\/\/([^:@/]+):([^@/]+)@/u, '//***:***@');
+  }
+}
+
+function shouldBypassProxy(hostname: string, noProxy?: string): boolean {
+  if (!noProxy?.trim()) return false;
+  const host = hostname.toLowerCase();
+  return noProxy
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+    .some((rule) => {
+      if (rule === '*') return true;
+      if (rule.startsWith('.')) return host.endsWith(rule);
+      return host === rule || host.endsWith(`.${rule}`);
+    });
+}
+
+function parseHttpResponse(buffer: Buffer): { statusCode: number; body: string } {
+  const sep = buffer.indexOf('\r\n\r\n');
+  if (sep < 0) throw new Error('Invalid HTTP response');
+  const headerText = buffer.subarray(0, sep).toString('latin1');
+  const [statusLine, ...headerLines] = headerText.split('\r\n');
+  const statusCode = Number(statusLine.match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})/)?.[1]);
+  if (!Number.isFinite(statusCode)) throw new Error('Invalid HTTP status');
+
+  const headers = new Map<string, string>();
+  for (const line of headerLines) {
+    const idx = line.indexOf(':');
+    if (idx > 0) headers.set(line.slice(0, idx).trim().toLowerCase(), line.slice(idx + 1).trim().toLowerCase());
+  }
+
+  const bodyBuffer = buffer.subarray(sep + 4);
+  const decoded = headers.get('transfer-encoding')?.includes('chunked') ? decodeChunkedBody(bodyBuffer) : bodyBuffer;
+  return { statusCode, body: decoded.toString('utf8') };
+}
+
+function decodeChunkedBody(buffer: Buffer): Buffer {
+  const chunks: Buffer[] = [];
+  let offset = 0;
+  while (offset < buffer.length) {
+    const lineEnd = buffer.indexOf('\r\n', offset);
+    if (lineEnd < 0) break;
+    const sizeText = buffer.subarray(offset, lineEnd).toString('ascii').split(';', 1)[0].trim();
+    const size = Number.parseInt(sizeText, 16);
+    if (!Number.isFinite(size)) throw new Error('Invalid chunked response');
+    offset = lineEnd + 2;
+    if (size === 0) break;
+    chunks.push(buffer.subarray(offset, offset + size));
+    offset += size + 2;
+  }
+  return Buffer.concat(chunks);
 }

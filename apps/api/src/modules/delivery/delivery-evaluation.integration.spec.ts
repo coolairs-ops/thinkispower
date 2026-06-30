@@ -18,7 +18,6 @@ import { HermesClient } from '../../integrations/hermes/hermes.client';
 import { DeploymentService } from '../deployment/deployment.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
-import { RuoyiConsoleDeployService } from './ruoyi-console-deploy.service';
 
 const makeMock = () => ({}) as any;
 
@@ -40,7 +39,6 @@ describe('DeliveryEvaluationService — 集成测试', () => {
         { provide: DeploymentService, useValue: makeMock() },
         { provide: AcceptanceVerificationService, useValue: makeMock() },
         { provide: RuoyiProvisionService, useValue: { ensureProvisioned: jest.fn().mockResolvedValue({ triggered: false, status: 'not-ruoyi' }) } },
-        { provide: RuoyiConsoleDeployService, useValue: { deliver: jest.fn() } },
         { provide: getQueueToken(DELIVERY_QUEUE), useValue: { add: jest.fn() } },
       ],
     }).compile();

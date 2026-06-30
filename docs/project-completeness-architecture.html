@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>思想动力项目完整性分析与架构流程图</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #647085;
+      --line: #d8e0ea;
+      --paper: #ffffff;
+      --wash: #f5f7fb;
+      --blue: #2563eb;
+      --teal: #0f9f9a;
+      --green: #16a34a;
+      --amber: #d97706;
+      --red: #dc2626;
+      --violet: #7c3aed;
+      --cyan: #0284c7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--wash);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(1440px, calc(100vw - 40px));
+      margin: 24px auto 48px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 18px 50px rgba(23, 32, 51, 0.08);
+      overflow: hidden;
+    }
+
+    header {
+      padding: 32px 36px 24px;
+      background:
+        linear-gradient(120deg, rgba(37, 99, 235, 0.11), rgba(15, 159, 154, 0.07) 48%, rgba(217, 119, 6, 0.08)),
+        #fff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 3vw, 44px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    p { margin: 0; }
+
+    .subtitle {
+      max-width: 1040px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      height: 30px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.7);
+      color: #334155;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    section {
+      padding: 28px 36px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child { border-bottom: 0; }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 16px;
+    }
+
+    .score {
+      display: flex;
+      flex-direction: column;
+      min-height: 132px;
+      justify-content: space-between;
+    }
+
+    .score strong {
+      display: block;
+      font-size: 34px;
+      line-height: 1;
+      margin-top: 8px;
+    }
+
+    .score .label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .bar {
+      height: 8px;
+      margin-top: 12px;
+      border-radius: 999px;
+      background: #edf2f7;
+      overflow: hidden;
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+
+    .ok { color: var(--green); }
+    .warn { color: var(--amber); }
+    .bad { color: var(--red); }
+    .info { color: var(--blue); }
+
+    .finding {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 14px;
+      align-items: start;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .finding:first-child { border-top: 0; padding-top: 0; }
+
+    .tag {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      height: 28px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      background: #eef2ff;
+      color: #3730a3;
+    }
+
+    .tag.green { background: #ecfdf5; color: #047857; }
+    .tag.amber { background: #fffbeb; color: #b45309; }
+    .tag.red { background: #fef2f2; color: #b91c1c; }
+    .tag.blue { background: #eff6ff; color: #1d4ed8; }
+
+    .diagram-wrap {
+      width: 100%;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 16px;
+    }
+
+    svg {
+      display: block;
+      min-width: 1020px;
+      width: 100%;
+      height: auto;
+    }
+
+    .node rect {
+      fill: #fff;
+      stroke: #cbd5e1;
+      stroke-width: 1.4;
+      rx: 8;
+    }
+
+    .node text {
+      fill: #172033;
+      font-size: 14px;
+      font-weight: 700;
+      text-anchor: middle;
+      dominant-baseline: middle;
+    }
+
+    .node .sub {
+      fill: #647085;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .blue rect { stroke: var(--blue); fill: #eff6ff; }
+    .teal rect { stroke: var(--teal); fill: #ecfeff; }
+    .green rect { stroke: var(--green); fill: #f0fdf4; }
+    .amber rect { stroke: var(--amber); fill: #fffbeb; }
+    .red rect { stroke: var(--red); fill: #fef2f2; }
+    .violet rect { stroke: var(--violet); fill: #f5f3ff; }
+    .cyan rect { stroke: var(--cyan); fill: #f0f9ff; }
+
+    .arrow {
+      stroke: #607089;
+      stroke-width: 1.8;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .arrow.light {
+      stroke: #94a3b8;
+      stroke-dasharray: 7 5;
+    }
+
+    .lane-title {
+      fill: #475569;
+      font-size: 13px;
+      font-weight: 800;
+      text-anchor: start;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 6px;
+      vertical-align: -1px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #334155;
+      background: #f8fafc;
+      font-size: 13px;
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      background: #f1f5f9;
+      padding: 2px 5px;
+      border-radius: 5px;
+      font-size: 0.92em;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    li + li { margin-top: 6px; }
+
+    .note {
+      border-left: 4px solid var(--blue);
+      background: #f8fbff;
+      padding: 12px 14px;
+      border-radius: 0 8px 8px 0;
+      color: #334155;
+    }
+
+    @media (max-width: 980px) {
+      main { width: calc(100vw - 20px); margin-top: 10px; }
+      header, section { padding: 22px 18px; }
+      .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
+      .finding { grid-template-columns: 1fr; gap: 8px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>思想动力项目完整性分析与架构流程图</h1>
+    <p class="subtitle">
+      基于仓库当前代码静态核对生成：README、docker-compose、NestJS AppModule、Prisma schema、Next.js App Router、测试文件与现有架构文档。
+      结论偏工程交接视角，重点看“功能闭环是否完整、运行依赖是否对齐、质量和交付链路是否可持续”。
+    </p>
+    <div class="meta">
+      <span class="pill">生成日期：2026-06-30</span>
+      <span class="pill">前端：Next.js 14 / React 18</span>
+      <span class="pill">后端：NestJS 11 / Prisma 6</span>
+      <span class="pill">数据：PostgreSQL / Redis / MinIO</span>
+      <span class="pill">AI：DeepSeek 主链路 / Qwen 辅助评审</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>一、完整性总览</h2>
+    <div class="grid cols-4">
+      <div class="card score">
+        <div>
+          <span class="label">产品闭环完整度</span>
+          <strong class="ok">82%</strong>
+        </div>
+        <p class="label">从想法、澄清、规格、Demo、反馈、构建、验收到交付的主链路齐全。</p>
+        <div class="bar"><span style="width:82%"></span></div>
+      </div>
+      <div class="card score">
+        <div>
+          <span class="label">工程实现完整度</span>
+          <strong class="info">78%</strong>
+        </div>
+        <p class="label">API 模块、数据模型、测试覆盖丰富；部分外部执行器与文档仍有漂移。</p>
+        <div class="bar"><span style="width:78%; background:var(--teal)"></span></div>
+      </div>
+      <div class="card score">
+        <div>
+          <span class="label">可运行/交付完整度</span>
+          <strong class="warn">70%</strong>
+        </div>
+        <p class="label">compose 声明完整，但 `internal/cc-bridge` 目录缺失会影响一键全栈。</p>
+        <div class="bar"><span style="width:70%; background:var(--amber)"></span></div>
+      </div>
+      <div class="card score">
+        <div>
+          <span class="label">规模化成熟度</span>
+          <strong class="warn">68%</strong>
+        </div>
+        <p class="label">已有组织/租户模型、BullMQ 痕迹和守护中心；仍需验证端到端隔离与队列持久化。</p>
+        <div class="bar"><span style="width:68%; background:var(--violet)"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>二、关键发现</h2>
+    <div class="finding">
+      <span class="tag green">已成型</span>
+      <div>
+        <h3>产品主闭环已经具备“从需求到交付”的完整骨架</h3>
+        <p>前端路由覆盖首页、仪表盘、新建项目、想法访谈、方案、规格、Demo、评估、部署、交付、知识、规则、守护报告等页面；后端有 auth、project、discovery、specification、plan、demo、feedback、build、delivery、deployment、guardian、app-runtime 等模块支撑。</p>
+      </div>
+    </div>
+    <div class="finding">
+      <span class="tag green">补强明显</span>
+      <div>
+        <h3>数据模型已从早期 19 个扩展到 29 个 Prisma model</h3>
+        <p>当前 schema 已包含 Organization、Membership、ImportBatch、GuardianCheck、GuardianRemediation、BuildModule、BuildJournalEntry 等，说明多租户、专业资料导入、守护巡检和自治建造日志都已进入数据层。</p>
+      </div>
+    </div>
+    <div class="finding">
+      <span class="tag amber">需核对</span>
+      <div>
+        <h3>运行拓扑和仓库文件存在不一致</h3>
+        <p><code>docker-compose.yml</code>、README 与文档都引用 <code>internal/cc-bridge</code>，但当前仓库文件清单没有该目录；如果这不是子模块或部署环境注入，会导致 compose 构建 cc-bridge 失败。</p>
+      </div>
+    </div>
+    <div class="finding">
+      <span class="tag amber">需验证</span>
+      <div>
+        <h3>多租户模型已落库，但仍要确认所有查询都按 orgId 收口</h3>
+        <p>Prisma 已有 orgId 和 membership，但完整性不只看 schema；项目、导入、交付、守护、经验推荐等控制器和服务都需要统一租户边界测试。</p>
+      </div>
+    </div>
+    <div class="finding">
+      <span class="tag blue">优势</span>
+      <div>
+        <h3>测试资产很厚，质量闭环不是纸面设计</h3>
+        <p>仓库包含大量 API 单测、集成/e2e 测试和前端 Playwright 测试，覆盖认证、项目流、Demo、反馈、交付、若依运行时、规则引擎、知识、守护、交付门等关键区域。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>三、系统服务架构图</h2>
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 1260 650" role="img" aria-label="思想动力系统服务架构图">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#607089"></path>
+          </marker>
+        </defs>
+
+        <text class="lane-title" x="38" y="38">用户与前端入口</text>
+        <text class="lane-title" x="38" y="182">API 应用层</text>
+        <text class="lane-title" x="38" y="348">AI/执行器与质量闭环</text>
+        <text class="lane-title" x="38" y="520">数据与基础设施</text>
+
+        <g class="node blue" transform="translate(70 62)">
+          <rect width="190" height="78"></rect>
+          <text x="95" y="30">Web 前端</text>
+          <text class="sub" x="95" y="52">Next.js App Router</text>
+        </g>
+        <g class="node teal" transform="translate(310 62)">
+          <rect width="230" height="78"></rect>
+          <text x="115" y="30">项目工作台页面</text>
+          <text class="sub" x="115" y="52">idea / plan / spec / demo / delivery</text>
+        </g>
+        <g class="node amber" transform="translate(590 62)">
+          <rect width="220" height="78"></rect>
+          <text x="110" y="30">导入与专业资料</text>
+          <text class="sub" x="110" y="52">import batch / asset files</text>
+        </g>
+        <g class="node violet" transform="translate(860 62)">
+          <rect width="230" height="78"></rect>
+          <text x="115" y="30">终端预览/交付访问</text>
+          <text class="sub" x="115" y="52">demo view / console serve</text>
+        </g>
+
+        <g class="node blue" transform="translate(70 208)">
+          <rect width="210" height="98"></rect>
+          <text x="105" y="30">NestJS API</text>
+          <text class="sub" x="105" y="54">Auth / Project / Message</text>
+          <text class="sub" x="105" y="73">Sanitize + Audit</text>
+        </g>
+        <g class="node green" transform="translate(330 208)">
+          <rect width="220" height="98"></rect>
+          <text x="110" y="30">需求与规格域</text>
+          <text class="sub" x="110" y="54">Discovery / Specification</text>
+          <text class="sub" x="110" y="73">Plan / Requirement Completion</text>
+        </g>
+        <g class="node teal" transform="translate(600 208)">
+          <rect width="220" height="98"></rect>
+          <text x="110" y="30">生成与交付域</text>
+          <text class="sub" x="110" y="54">Demo / Build / Delivery</text>
+          <text class="sub" x="110" y="73">Deployment / Feedback</text>
+        </g>
+        <g class="node violet" transform="translate(870 208)">
+          <rect width="250" height="98"></rect>
+          <text x="125" y="30">应用运行时域</text>
+          <text class="sub" x="125" y="54">App Runtime / Rule / Knowledge</text>
+          <text class="sub" x="125" y="73">Ruoyi Provision / CRUD Runtime</text>
+        </g>
+
+        <g class="node amber" transform="translate(70 374)">
+          <rect width="210" height="92"></rect>
+          <text x="105" y="28">LLM 网关</text>
+          <text class="sub" x="105" y="52">DeepSeek 主链路</text>
+          <text class="sub" x="105" y="70">Qwen 交叉评审</text>
+        </g>
+        <g class="node cyan" transform="translate(330 374)">
+          <rect width="220" height="92"></rect>
+          <text x="110" y="28">Cloudecode</text>
+          <text class="sub" x="110" y="52">Demo / 项目代码生成</text>
+          <text class="sub" x="110" y="70">port 5000</text>
+        </g>
+        <g class="node red" transform="translate(600 374)">
+          <rect width="220" height="92"></rect>
+          <text x="110" y="28">CC Bridge</text>
+          <text class="sub" x="110" y="52">compose 引用</text>
+          <text class="sub" x="110" y="70">当前目录缺失需确认</text>
+        </g>
+        <g class="node green" transform="translate(870 374)">
+          <rect width="250" height="92"></rect>
+          <text x="125" y="28">质量与守护</text>
+          <text class="sub" x="125" y="52">L1/L2/L3 Sensors</text>
+          <text class="sub" x="125" y="70">Guardian / Go-live Gate</text>
+        </g>
+
+        <g class="node blue" transform="translate(70 544)">
+          <rect width="180" height="66"></rect>
+          <text x="90" y="26">PostgreSQL</text>
+          <text class="sub" x="90" y="46">29 Prisma models</text>
+        </g>
+        <g class="node amber" transform="translate(300 544)">
+          <rect width="180" height="66"></rect>
+          <text x="90" y="26">Redis / BullMQ</text>
+          <text class="sub" x="90" y="46">队列与异步任务</text>
+        </g>
+        <g class="node teal" transform="translate(530 544)">
+          <rect width="180" height="66"></rect>
+          <text x="90" y="26">MinIO</text>
+          <text class="sub" x="90" y="46">截图/包/构建产物</text>
+        </g>
+        <g class="node violet" transform="translate(760 544)">
+          <rect width="190" height="66"></rect>
+          <text x="95" y="26">n8n 工作流</text>
+          <text class="sub" x="95" y="46">internal/n8n-workflows</text>
+        </g>
+        <g class="node green" transform="translate(1000 544)">
+          <rect width="190" height="66"></rect>
+          <text x="95" y="26">若依运行时</text>
+          <text class="sub" x="95" y="46">业务控制台底座</text>
+        </g>
+
+        <path class="arrow" d="M260 101 H310"></path>
+        <path class="arrow" d="M540 101 H590"></path>
+        <path class="arrow" d="M810 101 H860"></path>
+        <path class="arrow" d="M165 140 V208"></path>
+        <path class="arrow" d="M425 140 V208"></path>
+        <path class="arrow" d="M700 140 V208"></path>
+        <path class="arrow" d="M980 140 V208"></path>
+
+        <path class="arrow" d="M280 257 H330"></path>
+        <path class="arrow" d="M550 257 H600"></path>
+        <path class="arrow" d="M820 257 H870"></path>
+
+        <path class="arrow" d="M440 306 V374"></path>
+        <path class="arrow" d="M710 306 V374"></path>
+        <path class="arrow" d="M995 306 V374"></path>
+        <path class="arrow" d="M280 420 H330"></path>
+        <path class="arrow light" d="M550 420 H600"></path>
+        <path class="arrow" d="M820 420 H870"></path>
+
+        <path class="arrow" d="M175 306 V544"></path>
+        <path class="arrow" d="M710 466 V544"></path>
+        <path class="arrow" d="M980 466 V544"></path>
+        <path class="arrow light" d="M760 544 C760 498 720 492 710 466"></path>
+        <path class="arrow" d="M990 466 C1040 492 1080 510 1095 544"></path>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--blue)"></span>核心平台</span>
+      <span><span class="dot" style="background:var(--teal)"></span>业务闭环</span>
+      <span><span class="dot" style="background:var(--amber)"></span>外部/异步依赖</span>
+      <span><span class="dot" style="background:var(--red)"></span>当前需补齐的拓扑点</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>四、端到端业务流程图</h2>
+    <div class="diagram-wrap">
+      <svg viewBox="0 0 1260 620" role="img" aria-label="思想动力端到端业务流程图">
+        <defs>
+          <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#607089"></path>
+          </marker>
+        </defs>
+        <style>.flow-arrow{stroke:#607089;stroke-width:1.8;fill:none;marker-end:url(#arrow2)}.flow-back{stroke:#94a3b8;stroke-width:1.8;fill:none;stroke-dasharray:7 5;marker-end:url(#arrow2)}</style>
+
+        <text class="lane-title" x="38" y="38">用户视角</text>
+        <text class="lane-title" x="38" y="184">平台内部</text>
+        <text class="lane-title" x="38" y="382">质量闭环</text>
+        <text class="lane-title" x="38" y="526">交付结果</text>
+
+        <g class="node blue" transform="translate(70 62)">
+          <rect width="170" height="74"></rect>
+          <text x="85" y="28">提出想法</text>
+          <text class="sub" x="85" y="50">自然语言输入</text>
+        </g>
+        <g class="node green" transform="translate(280 62)">
+          <rect width="170" height="74"></rect>
+          <text x="85" y="28">补充信息</text>
+          <text class="sub" x="85" y="50">访谈与追问</text>
+        </g>
+        <g class="node teal" transform="translate(490 62)">
+          <rect width="170" height="74"></rect>
+          <text x="85" y="28">确认规格</text>
+          <text class="sub" x="85" y="50">页面/角色/数据/规则</text>
+        </g>
+        <g class="node violet" transform="translate(700 62)">
+          <rect width="170" height="74"></rect>
+          <text x="85" y="28">查看 Demo</text>
+          <text class="sub" x="85" y="50">可视化预览</text>
+        </g>
+        <g class="node amber" transform="translate(910 62)">
+          <rect width="170" height="74"></rect>
+          <text x="85" y="28">批注反馈</text>
+          <text class="sub" x="85" y="50">点选元素修改</text>
+        </g>
+
+        <g class="node green" transform="translate(70 210)">
+          <rect width="180" height="82"></rect>
+          <text x="90" y="29">Discovery</text>
+          <text class="sub" x="90" y="53">完备度检查</text>
+        </g>
+        <g class="node teal" transform="translate(300 210)">
+          <rect width="180" height="82"></rect>
+          <text x="90" y="29">Specification</text>
+          <text class="sub" x="90" y="53">规格冻结/补全</text>
+        </g>
+        <g class="node blue" transform="translate(530 210)">
+          <rect width="180" height="82"></rect>
+          <text x="90" y="29">Plan + Build DAG</text>
+          <text class="sub" x="90" y="53">模块拆解/任务编排</text>
+        </g>
+        <g class="node violet" transform="translate(760 210)">
+          <rect width="180" height="82"></rect>
+          <text x="90" y="29">Demo 生成</text>
+          <text class="sub" x="90" y="53">模板/AI/Cloudecode</text>
+        </g>
+        <g class="node amber" transform="translate(990 210)">
+          <rect width="180" height="82"></rect>
+          <text x="90" y="29">Feedback Pipeline</text>
+          <text class="sub" x="90" y="53">拆任务/执行/刷新</text>
+        </g>
+
+        <g class="node cyan" transform="translate(170 408)">
+          <rect width="190" height="82"></rect>
+          <text x="95" y="29">L1 静态检查</text>
+          <text class="sub" x="95" y="53">结构/缺口/占位符</text>
+        </g>
+        <g class="node cyan" transform="translate(410 408)">
+          <rect width="190" height="82"></rect>
+          <text x="95" y="29">L2 运行时检查</text>
+          <text class="sub" x="95" y="53">冒烟/后端资源</text>
+        </g>
+        <g class="node cyan" transform="translate(650 408)">
+          <rect width="190" height="82"></rect>
+          <text x="95" y="29">L3 语义评审</text>
+          <text class="sub" x="95" y="53">Qwen/需求匹配</text>
+        </g>
+        <g class="node green" transform="translate(890 408)">
+          <rect width="190" height="82"></rect>
+          <text x="95" y="29">融合评分</text>
+          <text class="sub" x="95" y="53">达标才交付</text>
+        </g>
+
+        <g class="node green" transform="translate(230 548)">
+          <rect width="190" height="56"></rect>
+          <text x="95" y="28">源码/包导出</text>
+        </g>
+        <g class="node teal" transform="translate(535 548)">
+          <rect width="190" height="56"></rect>
+          <text x="95" y="28">上线门判定</text>
+        </g>
+        <g class="node violet" transform="translate(840 548)">
+          <rect width="190" height="56"></rect>
+          <text x="95" y="28">守护巡检</text>
+        </g>
+
+        <path class="flow-arrow" d="M240 99 H280"></path>
+        <path class="flow-arrow" d="M450 99 H490"></path>
+        <path class="flow-arrow" d="M660 99 H700"></path>
+        <path class="flow-arrow" d="M870 99 H910"></path>
+
+        <path class="flow-arrow" d="M155 136 V210"></path>
+        <path class="flow-arrow" d="M365 136 V210"></path>
+        <path class="flow-arrow" d="M575 136 V210"></path>
+        <path class="flow-arrow" d="M785 136 V210"></path>
+        <path class="flow-arrow" d="M995 136 V210"></path>
+
+        <path class="flow-arrow" d="M250 251 H300"></path>
+        <path class="flow-arrow" d="M480 251 H530"></path>
+        <path class="flow-arrow" d="M710 251 H760"></path>
+        <path class="flow-arrow" d="M940 251 H990"></path>
+        <path class="flow-back" d="M1080 292 C1090 350 1010 370 930 370 C820 370 760 330 850 292"></path>
+
+        <path class="flow-arrow" d="M620 292 C595 340 350 355 265 408"></path>
+        <path class="flow-arrow" d="M620 292 V408"></path>
+        <path class="flow-arrow" d="M850 292 C850 350 800 370 745 408"></path>
+        <path class="flow-arrow" d="M360 449 H410"></path>
+        <path class="flow-arrow" d="M600 449 H650"></path>
+        <path class="flow-arrow" d="M840 449 H890"></path>
+        <path class="flow-back" d="M985 408 C980 342 890 320 850 292"></path>
+
+        <path class="flow-arrow" d="M985 490 C920 535 495 530 325 548"></path>
+        <path class="flow-arrow" d="M420 576 H535"></path>
+        <path class="flow-arrow" d="M725 576 H840"></path>
+      </svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>五、模块与数据完整性</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>后端模块面</h3>
+        <table>
+          <tr><th>领域</th><th>已看到的实现</th><th>完整性判断</th></tr>
+          <tr><td>账号与项目</td><td>Auth、Project、Message、PlanGuard、JWT、审计/脱敏拦截器</td><td class="ok">基础完整</td></tr>
+          <tr><td>需求到规格</td><td>Discovery、Specification、Requirement Completion、Relation、Business Rule、Followup</td><td class="ok">能力较完整</td></tr>
+          <tr><td>生成与反馈</td><td>Demo、Feedback、Task、Pipeline、Cloudecode、Build</td><td class="ok">主链路完整</td></tr>
+          <tr><td>交付与上线</td><td>Delivery、Deployment、Go-live Gate、Acceptance Verification、Console Serve</td><td class="warn">依赖执行器需补齐</td></tr>
+          <tr><td>运行时底座</td><td>App Runtime、CRUD Runtime、若依 Provision、规则引擎、知识模块</td><td class="ok">方向清晰</td></tr>
+          <tr><td>治理与合规</td><td>Compliance、Data Flow Audit、Guardian、Experience、Case Review</td><td class="warn">有模型和服务，需看业务接入深度</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>数据模型面</h3>
+        <table>
+          <tr><th>分组</th><th>代表模型</th><th>判断</th></tr>
+          <tr><td>租户与用户</td><td>User、Organization、Membership</td><td class="ok">租户骨架已存在</td></tr>
+          <tr><td>项目事实源</td><td>Project、ProjectMessage、Specification、Module、Task</td><td class="ok">项目闭环核心完整</td></tr>
+          <tr><td>Demo/交付</td><td>DemoSnapshot、Build、Deployment、DeliveryOption、TestDeployment</td><td class="ok">交付记录可追溯</td></tr>
+          <tr><td>导入理解</td><td>ImportBatch、AssetFile、RequirementUnderstanding、RequirementQuestion</td><td class="ok">专业资料输入已建模</td></tr>
+          <tr><td>经验与错误</td><td>ErrorPattern、ErrorEvent、CaseReview、ExperienceRecommendation</td><td class="warn">沉淀链路需验证闭环</td></tr>
+          <tr><td>自治建造/守护</td><td>BuildModule、BuildJournalEntry、GuardianCheck、GuardianRemediation</td><td class="ok">持续运行所需状态已入库</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>六、完整性缺口与优先级</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3><span class="bad">P0</span> 运行拓扑补齐</h3>
+        <ul>
+          <li>确认 <code>internal/cc-bridge</code> 是否遗失、外部注入或已被新模块替代。</li>
+          <li>若已替代，更新 <code>docker-compose.yml</code>、README、n8n workflow 与代码中的硬编码 URL。</li>
+          <li>用一次干净环境 <code>docker compose build</code> 验证一键启动链路。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="warn">P1</span> 租户隔离闭环</h3>
+        <ul>
+          <li>以 orgId 为主线补全项目、导入、交付、守护、经验推荐的查询约束。</li>
+          <li>给跨租户读取、更新、导出、预览访问补 e2e 反例。</li>
+          <li>明确个人项目和组织项目的产品规则。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="warn">P1</span> 异步任务可靠性</h3>
+        <ul>
+          <li>Demo、交付、自迭代、守护巡检都应以持久队列和数据库状态为事实源。</li>
+          <li>统一失败重试、超时、取消、恢复和前端进度查询。</li>
+          <li>减少进程内事件/SSE 内存状态对结果正确性的影响。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="info">P2</span> 文档校准</h3>
+        <ul>
+          <li>旧文档里“19 个模型、无多租户”等描述已经过期。</li>
+          <li>建议保留一份“当前真相源”架构页，其他文档链接到它。</li>
+          <li>把端口 3001/3003/5000/5001 与本地脚本统一说明。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="info">P2</span> 外部依赖边界</h3>
+        <ul>
+          <li>DeepSeek、Qwen、MinIO、若依、n8n、Docker socket 都应有降级或健康检查。</li>
+          <li>交付失败应能映射为用户可理解的状态，而不是暴露技术细节。</li>
+          <li>外呼、密钥和成本配额建议集中到 LLM Gateway 与租户配额。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="ok">P2</span> 质量指标产品化</h3>
+        <ul>
+          <li>已有 L1/L2/L3、Guardian、Go-live Gate，适合沉淀成统一质量报告。</li>
+          <li>把传感器证据、修复记录、回滚点串成用户可读的验收凭证。</li>
+          <li>经验推荐与案例复盘可反哺新项目生成。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>七、建议的下一步验收清单</h2>
+    <div class="note">
+      这份 HTML 是静态结构分析，没有实际启动服务。建议后续用下面四项做“完整性验收”：一键 compose 构建、API 单测、前端 E2E、真实创建项目到交付的冒烟流程。
+    </div>
+    <table style="margin-top:16px">
+      <tr><th>验收项</th><th>目标</th><th>通过标准</th></tr>
+      <tr><td>干净环境构建</td><td>验证 compose 与目录一致</td><td>所有服务 build 成功，特别是 cc-bridge 或替代服务</td></tr>
+      <tr><td>后端测试</td><td>验证 API 与领域服务</td><td><code>apps/api</code> 单测和关键 e2e 通过</td></tr>
+      <tr><td>前端 E2E</td><td>验证用户流程</td><td>新建项目、规格、Demo、交付页面可完成主路径</td></tr>
+      <tr><td>真实闭环冒烟</td><td>验证外部依赖</td><td>从想法输入到 Demo 生成、反馈修改、交付包产出可追踪</td></tr>
+    </table>
+  </section>
+</main>
+</body>
+</html>

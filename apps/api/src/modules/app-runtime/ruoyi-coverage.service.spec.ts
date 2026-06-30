@@ -21,13 +21,14 @@ function bareEntity(name: string): ParsedModel {
 
 const FULL_SCENARIO: AcceptanceScenarioLite = { name: '新增客户', given: '已登录', when: '提交客户表单', then: '列表出现该客户', priority: 'must' };
 
-/** 完整 spec：七槽全 known。 */
+/** 完整 spec：八槽全 known。 */
 function fullSpec(): AppSpec {
   return {
     entities: [entity('Customer', ['name', 'phone']), entity('Contract', ['amount', 'term'])],
     relations: [{ parent: 'Customer', child: 'Contract', cardinality: '1-N', fkField: 'customerId' }],
     roles: [{ name: '管理员', dataScope: '1' }, { name: '普通员工', dataScope: '5' }],
     menus: [{ name: '客户管理', path: '/customer', entity: 'customer' }],
+    businessRules: [{ name: '合同到期预警', trigger: '合同到期前', outcome: '提醒负责人' }],
   };
 }
 
@@ -35,19 +36,20 @@ describe('RuoyiCoverageService', () => {
   const svc = new RuoyiCoverageService();
 
   it('空 spec → coverage 极低，关键槽 missing', () => {
-    const r = svc.evaluate({ entities: [], relations: [], roles: [], menus: [] }, []);
+    const r = svc.evaluate({ entities: [], relations: [], roles: [], menus: [], businessRules: [] }, []);
     expect(r.perSlot.entities).toBe('missing');
     expect(r.perSlot.fields).toBe('missing');
     expect(r.perSlot.roles).toBe('missing');
     expect(r.perSlot.menus).toBe('missing');
     expect(r.perSlot.acceptanceScenarios).toBe('missing');
+    expect(r.perSlot.businessRules).toBe('missing');
     expect(r.perSlot.dataScope).toBe('missing');
     expect(r.perSlot.relations).toBe('missing'); // 0 实体 → 空 spec，不给关系白送分
     expect(r.coverage).toBe(0);
     expect(r.gaps).toContain('业务对象（要管理哪些数据，如客户/合同/设备）');
   });
 
-  it('完整 spec → 七槽全 known，coverage 100', () => {
+  it('完整 spec → 八槽全 known，coverage 100', () => {
     const r = svc.evaluate(fullSpec(), [FULL_SCENARIO]);
     expect(Object.values(r.perSlot).every((s) => s === 'known')).toBe(true);
     expect(r.coverage).toBe(100);

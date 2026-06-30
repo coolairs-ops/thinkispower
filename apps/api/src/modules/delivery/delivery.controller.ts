@@ -8,6 +8,7 @@ import { DeliveryEvaluationService } from './delivery-evaluation.service';
 import { DeliveryIterationService } from './delivery-iteration.service';
 import { AcceptanceVerificationService, ScenarioStatus } from './acceptance-verification.service';
 import { DeliveryCheckMode, DeliveryPackageCheckService } from './delivery-package-check.service';
+import { UnresolvedRequirementsService } from './unresolved-requirements.service';
 
 @Controller('api/projects/:projectId/delivery')
 @UseGuards(JwtAuthGuard)
@@ -18,6 +19,7 @@ export class DeliveryController {
     private iterationService: DeliveryIterationService,
     private acceptanceService: AcceptanceVerificationService,
     private packageCheckService: DeliveryPackageCheckService,
+    private unresolvedRequirementsService: UnresolvedRequirementsService,
   ) {}
 
   // ── 验收报告（P15-Y 可验收/可追溯）──
@@ -52,6 +54,11 @@ export class DeliveryController {
       throw new BadRequestException('mode 只能是 inspect 或 package');
     }
     return this.packageCheckService.runForUser(req.user.id, req.user.orgId ?? null, projectId, { mode });
+  }
+
+  @Get('unresolved-requirements')
+  async getUnresolvedRequirements(@Req() req: any, @Param('projectId') projectId: string) {
+    return this.unresolvedRequirementsService.getForUser(req.user.id, req.user.orgId ?? null, projectId);
   }
 
   // ── 交付页面数据 ──

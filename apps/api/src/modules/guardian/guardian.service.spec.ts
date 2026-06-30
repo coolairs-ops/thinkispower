@@ -113,8 +113,8 @@ describe('GuardianService', () => {
     });
 
     it('若依控制台项目 → 深探(代理 login+list)，登录通+list 200 → 不被判挂', async () => {
-      const old = { b: process.env.RUOYI_BASE_URL, s: process.env.RUOYI_SRC_ROOT };
-      process.env.RUOYI_BASE_URL = 'http://ruoyi:8080'; process.env.RUOYI_SRC_ROOT = '/src';
+      const old = { b: process.env.RUOYI_BASE_URL, s: process.env.RUOYI_SRC_ROOT, c: process.env.RUOYI_CONSOLE_URL };
+      process.env.RUOYI_BASE_URL = 'http://ruoyi:8080'; process.env.RUOYI_SRC_ROOT = '/src'; process.env.RUOYI_CONSOLE_URL = 'http://console:8089';
       prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: null, productionUrl: 'http://console:8089',
         backendRuntime: { kind: 'ruoyi', status: 'ready', resources: ['equipment'], initialUsers: [{ userName: 'u1', password: '123456' }] } });
       acceptance.verify.mockResolvedValue(report({ passRate: 1, overallScore: 95 }));
@@ -135,12 +135,13 @@ describe('GuardianService', () => {
         global.fetch = origFetch;
         if (old.b === undefined) delete process.env.RUOYI_BASE_URL; else process.env.RUOYI_BASE_URL = old.b;
         if (old.s === undefined) delete process.env.RUOYI_SRC_ROOT; else process.env.RUOYI_SRC_ROOT = old.s;
+        if (old.c === undefined) delete process.env.RUOYI_CONSOLE_URL; else process.env.RUOYI_CONSOLE_URL = old.c;
       }
     });
 
     it('若依控制台项目 → 深探登录失败(首页 200 也骗不过) → critical', async () => {
-      const old = { b: process.env.RUOYI_BASE_URL, s: process.env.RUOYI_SRC_ROOT };
-      process.env.RUOYI_BASE_URL = 'http://ruoyi:8080'; process.env.RUOYI_SRC_ROOT = '/src';
+      const old = { b: process.env.RUOYI_BASE_URL, s: process.env.RUOYI_SRC_ROOT, c: process.env.RUOYI_CONSOLE_URL };
+      process.env.RUOYI_BASE_URL = 'http://ruoyi:8080'; process.env.RUOYI_SRC_ROOT = '/src'; process.env.RUOYI_CONSOLE_URL = 'http://console:8089';
       prisma.project.findUnique.mockResolvedValue({ id: 'p1', userId: 'owner', orgId: null, productionUrl: 'http://console:8089',
         backendRuntime: { kind: 'ruoyi', status: 'ready', resources: ['equipment'], initialUsers: [] } });
       acceptance.verify.mockResolvedValue(report({ passRate: 1, overallScore: 95 }));
@@ -154,6 +155,7 @@ describe('GuardianService', () => {
         global.fetch = origFetch;
         if (old.b === undefined) delete process.env.RUOYI_BASE_URL; else process.env.RUOYI_BASE_URL = old.b;
         if (old.s === undefined) delete process.env.RUOYI_SRC_ROOT; else process.env.RUOYI_SRC_ROOT = old.s;
+        if (old.c === undefined) delete process.env.RUOYI_CONSOLE_URL; else process.env.RUOYI_CONSOLE_URL = old.c;
       }
     });
 

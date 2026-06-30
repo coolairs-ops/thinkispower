@@ -176,8 +176,8 @@ export class DecisionEngineService {
         return this.result('pause', '建议先调整范围和预算',
           `检测到 ${highRisks} 个高风险项，预算 ¥${cost} 可能不足`,
           [`${highRisks} 个高风险项`, `预算 ¥${cost} 可能偏低`],
-          ['缩小第一版功能范围', '重新评估预算'], 85, 'danger', completeness, breakdown,
-          { '缩小范围': `/projects/${projectId}/spec` });
+          ['把第一版功能压到 3-5 个必须项', '把报表、复杂权限、外部接口移到第二版', '在方案页重新填写预计周期与费用'], 85, 'danger', completeness, breakdown,
+          { '调整范围和预算': `/projects/${projectId}/plan?edit=scope` });
       }
     }
 
@@ -203,9 +203,9 @@ export class DecisionEngineService {
         '建议缩小第一版范围',
         `当前 ${mustHaveCount} 个必须功能，第一版建议 5-8 个`,
         [`${mustHaveCount} 个必须功能超出建议范围`],
-        ['标记哪些功能可以第二版再做', '查看功能清单'],
+        ['保留最关键的 5-8 个功能', '把非核心功能移到后续版本'],
         80, 'warning', completeness, breakdown,
-        { '功能清单': `/projects/${projectId}/plan` });
+        { '编辑功能清单': `/projects/${projectId}/plan?edit=scope` });
     }
 
     if (status === 'plan_ready' && (!spec || spec.status !== 'frozen')) {

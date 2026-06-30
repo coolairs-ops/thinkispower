@@ -4,6 +4,11 @@ import { StatusMapperService } from '../../services/status-mapper.service';
 import { DeepseekService } from '../../services/deepseek.service';
 import { CreateSpecDto, UpdateSpecDto, FreezeSpecDto } from './dto/spec.dto';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
+import {
+  buildRequirementUplift,
+  mergeRequirementUplift,
+} from './requirement-uplift.service';
+import { evaluateSpecificationGate } from './specification-gate';
 
 @Injectable()
 export class SpecificationService {
@@ -39,7 +44,16 @@ export class SpecificationService {
 
     // 基于现有 plan 和 discovery 数据组装规格草案
     const plan = project.planSummary as any;
-    const sr = project.structuredRequirement as any;
+    let sr = project.structuredRequirement as any;
+    const answers = Array.isArray(sr?.ideaInterview?.answers) ? sr.ideaInterview.answers : [];
+    if (answers.length > 0) {
+      const uplift = buildRequirementUplift(answers, { projectName: project.name });
+      sr = mergeRequirementUplift(sr, uplift, { projectName: project.name });
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { structuredRequirement: sr as any },
+      });
+    }
 
     // 如果数据不足，调用 AI 补全
     let specData: any;
@@ -71,37 +85,48 @@ export class SpecificationService {
       data: { status: 'spec_ready', publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('spec_ready') },
     });
 
-    return { ...spec, message: '规格草案已生成，请确认各项内容' };
+    return this.withFreezeGate({ ...spec, message: '规格草案已生成，请确认各项内容' });
   }
 
   /** 从已有数据组装规格 */
   private assembleFromExisting(name: string, description: string | null, plan: any, sr: any) {
+    const prd = sr?.prd && typeof sr.prd === 'object' ? sr.prd : {};
+    const roleSource = firstNonEmptyArray(plan?.roles, sr?.roles, prd?.roles, sr?.targetUsers, prd?.targetUsers);
+    const functionSource = firstNonEmptyArray(plan?.features, sr?.coreFunctions, prd?.features, prd?.mvpScope);
+    const pageSource = firstNonEmptyArray(plan?.pages, sr?.pages, prd?.pages);
+    const dataModelSource = firstNonEmptyArray(plan?.dataObjects, sr?.dataModels, sr?.dataObjects, prd?.dataObjects);
+    const businessRuleSource = firstNonEmptyArray(plan?.businessRules, sr?.businessRules);
+    const acceptanceSource = firstNonEmptyArray(plan?.acceptanceScenarios, sr?.acceptanceScenarios, plan?.acceptanceChecklist, prd?.successCriteria);
     return {
-      targetUsers: plan?.roles?.map((r: any) => ({ role: r.name || r, description: r.description || '' })) ||
-                   sr?.targetUsers || [{ role: '管理员', description: '系统管理员' }],
-      coreFunctions: plan?.features?.map((f: any) => ({
-        name: f.name || f,
-        description: f.description || '',
-        priority: f.priority || 'must',
-      })) || sr?.coreFunctions || [],
+      targetUsers: roleSource.map((r: any) => ({ role: fieldOf(r, 'role', 'name'), description: fieldOf(r, 'description') })),
+      coreFunctions: functionSource.map((f: any) => ({
+        name: fieldOf(f, 'name'),
+        description: fieldOf(f, 'description'),
+        priority: fieldOf(f, 'priority') || 'must',
+      })),
       outOfScope: plan?.outOfScope || sr?.outOfScope || [],
-      pages: plan?.pages?.map((p: any) => ({
-        name: p.name || p,
-        route: p.route || `/${(p.name || p).toLowerCase()}`,
-        description: p.description || '',
-      })) || sr?.pages || [],
-      roles: plan?.roles?.map((r: any) => ({
-        name: r.name || r,
-        permissions: r.permissions || ['view'],
-      })) || sr?.roles || [{ name: '管理员', permissions: ['view', 'edit', 'delete'] }],
-      dataModels: plan?.dataObjects?.map((d: any) => ({
-        name: d.name || d,
-        fields: d.fields || [{ name: 'id', type: 'string', required: true }],
-      })) || sr?.dataModels || [],
-      businessRules: plan?.businessRules || sr?.businessRules || [],
-      acceptanceScenarios: plan?.acceptanceScenarios || sr?.acceptanceScenarios || [
-        { name: '基本功能验收', given: '用户登录系统', when: '执行核心操作', then: '操作成功完成', priority: 'must' },
-      ],
+      pages: pageSource.map((p: any) => ({
+        name: fieldOf(p, 'name'),
+        route: fieldOf(p, 'route', 'path') || `/${slug(fieldOf(p, 'name'))}`,
+        description: fieldOf(p, 'description'),
+      })),
+      roles: roleSource.map((r: any) => ({
+        name: fieldOf(r, 'name', 'role'),
+        permissions: arrayFieldOf(r, 'permissions', ['view']),
+      })),
+      dataModels: dataModelSource.map((d: any) => ({
+        name: fieldOf(d, 'name'),
+        fields: Array.isArray(d?.fields) && d.fields.length > 0
+          ? d.fields
+          : [{ name: 'id', type: 'string', required: true }],
+      })),
+      businessRules: businessRuleSource.map((r: any) => ({
+        name: fieldOf(r, 'name'),
+        description: fieldOf(r, 'description') || fieldOf(r, 'name'),
+        trigger: fieldOf(r, 'trigger') || '业务操作发生时',
+        outcome: fieldOf(r, 'outcome') || '系统按规则处理并记录结果',
+      })),
+      acceptanceScenarios: acceptanceSource.map((s: any) => toAcceptanceScenario(s)),
       estimatedCostRmb: plan?.estimatedCostRmb || plan?.estimatedCost || sr?.estimatedCostRmb || null,
       estimatedDays: plan?.estimatedDays || plan?.estimatedDuration || sr?.estimatedDays || null,
       primaryRisks: plan?.risks || sr?.primaryRisks || [],
@@ -157,9 +182,15 @@ export class SpecificationService {
 
     const spec = await this.prisma.specification.findUnique({ where: { projectId } });
     if (!spec) {
-      return { exists: false, projectName: project.name, status: project.status, message: '尚未生成规格草案' };
+      return {
+        exists: false,
+        projectName: project.name,
+        status: project.status,
+        message: '尚未生成规格草案',
+        freezeGate: evaluateSpecificationGate(null),
+      };
     }
-    return { exists: true, ...spec };
+    return this.withFreezeGate({ exists: true, projectName: project.name, ...spec });
   }
 
   /** 更新规格内容（draft 状态可编辑） */
@@ -191,7 +222,7 @@ export class SpecificationService {
       data: { ...dto, changeLog },
     });
 
-    return spec;
+    return this.withFreezeGate(spec);
   }
 
   /** 冻结/解冻规格 */
@@ -207,13 +238,18 @@ export class SpecificationService {
     if (!spec) throw new NotFoundException('规格不存在，请先生成');
 
     if (dto.action === 'confirm') {
+      const gate = evaluateSpecificationGate(spec);
+      if (!gate.readyToFreeze) {
+        throw new BadRequestException(gate.freezeMessage);
+      }
+
       if (spec.status === 'frozen') {
         // 已确认 → 幂等返回成功，让前端可以继续进入开发
-        return { success: true, frozen: true, version: spec.version, message: '规格已确认，可以进入产品开发' };
+        return { success: true, frozen: true, version: spec.version, message: '规格已确认，可以进入产品开发', freezeGate: gate };
       }
 
       // 冻结规格
-      await this.prisma.specification.update({
+      const frozenSpec = await this.prisma.specification.update({
         where: { projectId },
         data: { status: 'frozen', frozenAt: new Date() },
       });
@@ -231,11 +267,17 @@ export class SpecificationService {
       });
 
       this.logger.log(`规格已确认: 项目 ${projectId} v${spec.version}`);
-      return { success: true, frozen: true, version: spec.version, message: '规格已确认，可以进入产品开发' };
+      return {
+        success: true,
+        frozen: true,
+        version: spec.version,
+        message: '规格已确认，可以进入产品开发',
+        freezeGate: evaluateSpecificationGate(frozenSpec),
+      };
     }
 
     // revise — 退回修改
-    await this.prisma.specification.update({
+    const revisedSpec = await this.prisma.specification.update({
       where: { projectId },
       data: {
         status: 'draft',
@@ -255,7 +297,17 @@ export class SpecificationService {
       data: { status: 'spec_ready', publicStatusLabel: this.statusMapper.mapProjectStatusToPublicLabel('spec_ready') },
     });
 
-    return { success: true, frozen: false, version: spec.version + 1, message: '规格已解冻，可以修改' };
+    return {
+      success: true,
+      frozen: false,
+      version: spec.version + 1,
+      message: '规格已解冻，可以修改',
+      freezeGate: evaluateSpecificationGate(revisedSpec),
+    };
+  }
+
+  private withFreezeGate<T extends Record<string, unknown>>(spec: T) {
+    return { ...spec, freezeGate: evaluateSpecificationGate(spec) };
   }
 
   /** 规格确认后创建的新反馈，自动判定是 bug 还是变更请求 */
@@ -292,4 +344,40 @@ export class SpecificationService {
 
     return true; // 默认视为 bug
   }
+}
+
+function firstNonEmptyArray(...values: unknown[]): any[] {
+  for (const value of values) {
+    if (Array.isArray(value) && value.length > 0) return value;
+  }
+  return [];
+}
+
+function fieldOf(value: any, key: string, altKey?: string): string {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  return String(value[key] ?? (altKey ? value[altKey] : '') ?? '').trim();
+}
+
+function arrayFieldOf(value: any, key: string, fallback: string[]): string[] {
+  if (value && typeof value === 'object' && Array.isArray(value[key]) && value[key].length > 0) return value[key];
+  return fallback;
+}
+
+function slug(value: string): string {
+  return (value || 'page').trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function toAcceptanceScenario(value: any) {
+  if (typeof value === 'string') {
+    const name = value.split(/[:：]/u)[0] || '验收场景';
+    return { name, given: '用户已登录系统', when: value, then: '系统按预期完成并可验证', priority: 'must' };
+  }
+  return {
+    name: fieldOf(value, 'name') || '验收场景',
+    given: fieldOf(value, 'given') || '用户已登录系统',
+    when: fieldOf(value, 'when') || '执行核心操作',
+    then: fieldOf(value, 'then') || '系统按预期完成并可验证',
+    priority: fieldOf(value, 'priority') || 'must',
+  };
 }

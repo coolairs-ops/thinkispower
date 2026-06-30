@@ -77,8 +77,8 @@ export class DemoService {
     // 注入主题覆盖层（皮肤），令预览与已保存的外观一致；demoHtml 本身不变
     const themeConfig = this.theme.normalize(project.themeConfig as never);
     let html = ready.includes(status) && project.demoHtml ? this.theme.applyTheme(project.demoHtml, themeConfig) : null;
-    // 项目后端是若依时，预览也用若依真数据（serve 时换 appData 实现，demoHtml 不变）
-    html = (await this.ruoyiAppData.transform(html, project.backendRuntime, project.name)) ?? html;
+    // Demo 阶段展示的是当前生成的业务应用，不强制弹若依业务登录门；终稿部署才按需登录。
+    html = (await this.ruoyiAppData.transform(html, project.backendRuntime, project.name, project.id, { injectLoginGate: false })) ?? html;
     return { status, publicStatusLabel, progress, demoUrl: project.demoUrl, html, themeConfig, shotLayouts: (project.shotLayouts as unknown) ?? null };
   }
 

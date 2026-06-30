@@ -20,6 +20,7 @@ import { FollowUpQuestionController } from './followup-question.controller';
 import { FollowUpQuestionService } from './followup-question.service';
 import { RequirementCoverageController } from './requirement-coverage.controller';
 import { RequirementCoverageService } from './requirement-coverage.service';
+import { RequirementAssetRebuildService } from './requirement-asset-rebuild.service';
 import { SharedCoreModule } from '../../shared/shared-core.module';
 import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
 
@@ -49,6 +50,7 @@ import { AppRuntimeModule } from '../app-runtime/app-runtime.module';
     BusinessRuleCompletionService,
     FollowUpQuestionService,
     RequirementCoverageService,
+    RequirementAssetRebuildService,
   ],
   exports: [SpecificationService],
 })

@@ -36,6 +36,33 @@ interface RiskItem {
   name: string; severity: string; description: string;
 }
 
+type GateStatus = 'pass' | 'warn' | 'fail';
+
+interface FreezeGateSlot {
+  key: string;
+  label: string;
+  count: number;
+  ok: boolean;
+  required: boolean;
+}
+
+interface FreezeGate {
+  status: GateStatus;
+  contentStatus: GateStatus;
+  deliveryStatus: GateStatus;
+  readyToFreeze: boolean;
+  frozen: boolean;
+  summary: string;
+  deliverySummary: string;
+  freezeMessage: string;
+  counts: Record<string, number>;
+  requiredGaps: string[];
+  advisoryGaps: string[];
+  gaps: string[];
+  requiredSlots: FreezeGateSlot[];
+  advisorySlots: FreezeGateSlot[];
+}
+
 interface SpecData {
   exists: boolean;
   id?: string;
@@ -54,6 +81,7 @@ interface SpecData {
   primaryRisks?: RiskItem[];
   message?: string;
   projectName?: string;
+  freezeGate?: FreezeGate;
 }
 
 type TabKey = 'overview' | 'functions' | 'pages' | 'roles' | 'data' | 'rules' | 'acceptance';
@@ -77,6 +105,7 @@ export default function SpecPage() {
   const [spec, setSpec] = useState<SpecData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [message, setMessage] = useState('');
 
@@ -113,11 +142,15 @@ export default function SpecPage() {
   };
 
   const handleConfirm = async () => {
+    if (spec?.freezeGate && !spec.freezeGate.readyToFreeze) {
+      setMessage('确认失败: ' + spec.freezeGate.freezeMessage);
+      return;
+    }
     setSaving(true);
     setMessage('');
     try {
       const data = await api.post(`/api/projects/${projectId}/specification/freeze`, { action: 'confirm' });
-      setSpec((prev) => prev ? { ...prev, status: 'frozen', version: data.version } : prev);
+      setSpec((prev) => prev ? { ...prev, status: 'frozen', version: data.version, freezeGate: data.freezeGate || prev.freezeGate } : prev);
       setMessage('✅ 规格已确认！下一步：生成预览 → 查看效果 → 终稿交付（无需自迭代）');
     } catch (e: any) {
       setMessage('确认失败: ' + (e?.message || '未知错误'));
@@ -131,12 +164,32 @@ export default function SpecPage() {
     setMessage('');
     try {
       const data = await api.post(`/api/projects/${projectId}/specification/freeze`, { action: 'revise' });
-      setSpec((prev) => prev ? { ...prev, status: 'draft', version: data.version } : prev);
+      setSpec((prev) => prev ? { ...prev, status: 'draft', version: data.version, freezeGate: data.freezeGate || prev.freezeGate } : prev);
       setMessage('规格已退回，可以修改后再确认');
     } catch (e: any) {
       setMessage('退回失败: ' + (e?.message || '未知错误'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRepairSpec = async () => {
+    setRepairing(true);
+    setMessage('');
+    try {
+      if (spec?.status === 'frozen') {
+        await api.post(`/api/projects/${projectId}/specification/freeze`, {
+          action: 'revise',
+          reviseNote: '规格冻结门未通过，解冻后按当前需求重新生成规格',
+        });
+      }
+      const data = await api.post(`/api/projects/${projectId}/specification/generate`);
+      setSpec(data);
+      setMessage('规格已解冻并重新生成，请检查缺口后再次确认');
+    } catch (e: any) {
+      setMessage('修复规格失败: ' + (e?.message || '未知错误'));
+    } finally {
+      setRepairing(false);
     }
   };
 
@@ -153,6 +206,9 @@ export default function SpecPage() {
 
   const isFrozen = spec?.status === 'frozen';
   const hasSpec = spec?.exists !== false;
+  const freezeGate = spec?.freezeGate;
+  const canConfirm = hasSpec && !isFrozen && (freezeGate ? freezeGate.readyToFreeze : true);
+  const devBlocked = hasSpec && isFrozen && freezeGate?.deliveryStatus === 'fail';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -187,7 +243,7 @@ export default function SpecPage() {
               <>
                 <button
                   onClick={handleConfirm}
-                  disabled={saving}
+                  disabled={saving || !canConfirm}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
                 >
                   确认规格，进入开发
@@ -205,7 +261,8 @@ export default function SpecPage() {
               <>
                 <button
                   onClick={() => router.push(`/projects/${projectId}/demo`)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium"
+                  disabled={devBlocked}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
                 >
                   进入开发
                 </button>
@@ -236,6 +293,14 @@ export default function SpecPage() {
         {/* 下一步建议 */}
         {hasSpec && (
           <div className="mb-6 space-y-3">
+            {freezeGate && (
+              <SpecFreezeGateCard
+                gate={freezeGate}
+                isFrozen={isFrozen}
+                repairing={repairing}
+                onRepair={handleRepairSpec}
+              />
+            )}
             <WarningCard projectId={projectId} refreshKey={spec?.status} />
             <NextStepCard projectId={projectId} refreshKey={spec?.status} />
           </div>
@@ -283,7 +348,7 @@ export default function SpecPage() {
                   </div>
                   <button
                     onClick={handleConfirm}
-                    disabled={saving}
+                    disabled={saving || !canConfirm}
                     className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium shadow-sm"
                   >
                     确认规格
@@ -302,7 +367,8 @@ export default function SpecPage() {
                   </div>
                   <button
                     onClick={() => router.push(`/projects/${projectId}/demo`)}
-                    className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium shadow-sm"
+                    disabled={devBlocked}
+                    className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium shadow-sm"
                   >
                     进入开发
                   </button>
@@ -312,6 +378,97 @@ export default function SpecPage() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function SpecFreezeGateCard({
+  gate,
+  isFrozen,
+  repairing,
+  onRepair,
+}: {
+  gate: FreezeGate;
+  isFrozen: boolean;
+  repairing: boolean;
+  onRepair: () => void;
+}) {
+  const displayStatus = isFrozen ? gate.deliveryStatus : gate.contentStatus;
+  const blocked = displayStatus === 'fail';
+  const tone = blocked ? 'red' : displayStatus === 'warn' ? 'amber' : 'green';
+  const toneClass: Record<string, string> = {
+    red: 'bg-red-50 border-red-200 text-red-800',
+    amber: 'bg-amber-50 border-amber-200 text-amber-800',
+    green: 'bg-green-50 border-green-200 text-green-800',
+  };
+  const badgeClass: Record<string, string> = {
+    red: 'bg-red-100 text-red-700',
+    amber: 'bg-amber-100 text-amber-700',
+    green: 'bg-green-100 text-green-700',
+  };
+  const title = blocked
+    ? isFrozen ? '规格已冻结，但冻结门未通过' : '规格冻结门未通过'
+    : displayStatus === 'warn'
+      ? '已满足冻结条件，仍有建议项'
+      : isFrozen ? '规格冻结门已通过' : '规格内容已满足冻结条件';
+
+  return (
+    <div className={`rounded-xl border p-4 ${toneClass[tone]}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeClass[tone]}`}>
+              {displayStatus === 'pass' ? 'PASS' : displayStatus === 'warn' ? 'WARN' : 'FAIL'}
+            </span>
+            <p className="text-sm font-semibold">{title}</p>
+          </div>
+          <p className="text-xs mt-2 opacity-90">{isFrozen ? gate.deliverySummary : gate.freezeMessage}</p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs shrink-0">
+          <GateCount label="角色" value={gate.counts.roles || 0} />
+          <GateCount label="功能" value={gate.counts.coreFunctions || 0} />
+          <GateCount label="验收" value={gate.counts.acceptanceScenarios || 0} />
+        </div>
+      </div>
+
+      {(gate.requiredGaps.length > 0 || gate.advisoryGaps.length > 0) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {gate.requiredGaps.map((gap) => (
+            <span key={gap} className="px-2 py-1 rounded bg-white/70 text-xs font-medium border border-current/10">
+              必补：{gap}
+            </span>
+          ))}
+          {gate.advisoryGaps.map((gap) => (
+            <span key={gap} className="px-2 py-1 rounded bg-white/50 text-xs border border-current/10">
+              建议：{gap}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {blocked && (
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-current/10 pt-3">
+          <p className="text-xs opacity-80">
+            先把旧规格退回草稿，再用当前需求、方案和补齐结果重新生成规格。
+          </p>
+          <button
+            onClick={onRepair}
+            disabled={repairing}
+            className="shrink-0 rounded-lg bg-red-600 px-4 py-2 text-xs font-medium text-white hover:bg-red-700 disabled:bg-gray-300"
+          >
+            {repairing ? '修复中...' : isFrozen ? '解冻并重建规格' : '重新生成规格'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GateCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="min-w-[52px] rounded-lg bg-white/70 px-2 py-1 border border-current/10">
+      <div className="font-semibold">{value}</div>
+      <div className="opacity-70">{label}</div>
     </div>
   );
 }

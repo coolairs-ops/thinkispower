@@ -619,7 +619,18 @@ window.addEventListener('message', function(e) {
 (function(){
   var BASE='/api/app/${safeId}/';
   var SKEY='tip_app_sess_${safeId}';
-  function sess(){try{return (typeof localStorage!=='undefined'&&localStorage.getItem(SKEY))||'';}catch(e){return '';}}
+  var NKEY='__tip_app_sessions__';
+  function store(n){try{return (typeof window!=='undefined'&&window[n])?window[n]:null;}catch(e){return null;}}
+  function storeGet(n){try{var s=store(n);return s?(s.getItem(SKEY)||''):'';}catch(e){return '';}}
+  function storeSet(n,v){try{var s=store(n);if(!s)return;if(v)s.setItem(SKEY,v);else s.removeItem(SKEY);}catch(e){}}
+  function nameBag(){try{var raw=window.name||'';return raw.indexOf(NKEY)===0?JSON.parse(raw.slice(NKEY.length)||'{}'):{};}catch(e){return {};}}
+  function nameGet(){try{var b=nameBag();return b[SKEY]||'';}catch(e){return '';}}
+  function nameSet(v){try{var b=nameBag();if(v)b[SKEY]=v;else delete b[SKEY];window.name=NKEY+JSON.stringify(b);}catch(e){}}
+  function parentBag(){try{var p=window.parent;if(!p||p===window)return null;p.__tipAppSessions=p.__tipAppSessions||{};return p.__tipAppSessions;}catch(e){return null;}}
+  function parentGet(){try{var b=parentBag();return b?b[SKEY]||'':'';}catch(e){return '';}}
+  function parentSet(v){try{var b=parentBag();if(!b)return;if(v)b[SKEY]=v;else delete b[SKEY];}catch(e){}}
+  function saveSess(v){storeSet('localStorage',v);storeSet('sessionStorage',v);nameSet(v);parentSet(v);}
+  function sess(){return storeGet('localStorage')||storeGet('sessionStorage')||nameGet()||parentGet();}
   function headers(){var h={'Content-Type':'application/json'};var s=sess();if(s)h['x-app-session']=s;return h;}
   function toQuery(o){o=o||{};var p=[];if(o.page)p.push('page='+encodeURIComponent(o.page));if(o.pageSize)p.push('pageSize='+encodeURIComponent(o.pageSize));if(o.sort)p.push('sort='+encodeURIComponent(o.sort));var f=o.filters||{};for(var k in f){if(Object.prototype.hasOwnProperty.call(f,k))p.push(encodeURIComponent(k)+'='+encodeURIComponent(f[k]));}return p.length?('?'+p.join('&')):'';}
   async function req(method,path,body){var res=await fetch(BASE+path,{method:method,headers:headers(),body:body!=null?JSON.stringify(body):undefined});var json=await res.json().catch(function(){return {};});if(res.status===401){try{window.dispatchEvent(new CustomEvent('tip:auth-required'));}catch(e){}var er=new Error((json&&json.message)||'需要登录');er.code=401;throw er;}if(!res.ok){throw new Error((json&&json.error&&json.error.message)||res.statusText||('HTTP '+res.status));}return json;}
@@ -632,8 +643,8 @@ window.addEventListener('message', function(e) {
     /* 形态B 运行态：对一个对象跑规则评分→{ruleEngineEnabled,finalConclusions,formulas,evidenceChain,status,...}。未启用规则引擎返 null。 */
     evaluate:function(resource,id){return req('GET','_evaluate/'+encodeURIComponent(resource)+'/'+encodeURIComponent(id)).then(function(r){return r&&r.ruleEngineEnabled?r:null;}).catch(function(){return null;});},
     /* 终端用户鉴权（若依后端需要；路B 公开不调即可）：login 后存 session，之后请求自动带 x-app-session 头 → 后端以本人身份调若依（data_scope 生效）。 */
-    login:function(username,password){return req('POST','_login',{username:username,password:password}).then(function(r){try{localStorage.setItem(SKEY,r.session);}catch(e){}return r;});},
-    logout:function(){return req('POST','_logout').catch(function(){return null;}).then(function(){try{localStorage.removeItem(SKEY);}catch(e){}return true;});},
+    login:function(username,password){return req('POST','_login',{username:username,password:password}).then(function(r){saveSess(r.session);return r;});},
+    logout:function(){return req('POST','_logout').catch(function(){return null;}).then(function(){saveSess('');return true;});},
     isLoggedIn:function(){return !!sess();}
   };
 })();

@@ -13,7 +13,6 @@ import { DeliveryService } from './delivery.service';
 import { QwenReviewerService } from '../../services/qwen-reviewer.service';
 import { AcceptanceVerificationService } from './acceptance-verification.service';
 import { RuoyiProvisionService } from '../app-runtime/ruoyi-provision.service';
-import { RuoyiConsoleDeployService } from './ruoyi-console-deploy.service';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
 import { decideDeliveryOutcome, DeployResultStatus } from './golive-gate';
 import { SchemaMigrationService } from '../app-runtime/schema-migration.service';
@@ -34,7 +33,6 @@ export class DeliveryEvaluationService {
     private qwenReviewer: QwenReviewerService,
     private acceptance: AcceptanceVerificationService,
     private ruoyiProvision: RuoyiProvisionService,
-    private consoleDeploy: RuoyiConsoleDeployService,
     @InjectQueue(DELIVERY_QUEUE) private deliveryQueue: Queue,
     @Optional() private schema?: SchemaMigrationService,
   ) {}
@@ -142,11 +140,11 @@ export class DeliveryEvaluationService {
   }
 
   async runProductionDelivery(deliveryId: string, projectId: string, payload: any) {
-    // ADR-0012 ②：ruoyi 底座项目 → 交付物=若依统一控制台(构建+验+冒烟+上线门量控制台)，不走 stepwise 自造前端。
+    // ruoyi 底座项目：若依作为数据/权限后端，终稿仍交付当前项目生成的业务应用，避免 Demo 与终稿错接成统一控制台。
     const be = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
     if ((be?.backendRuntime as any)?.kind === 'ruoyi') {
-      this.logger.log(`[生产交付] ${deliveryId} 走若依控制台交付路(ADR-0012 ②)`);
-      await this.consoleDeploy.deliver(projectId);
+      this.logger.log(`[生产交付] ${deliveryId} 走项目应用交付路(若依作数据后端)`);
+      await this.deliverRuoyiProjectApp(deliveryId, projectId);
       return;
     }
     try {
@@ -333,6 +331,61 @@ export class DeliveryEvaluationService {
       this.logger.log(`[上线门] ${outcome.status}: ${outcome.reason}${outcome.productionUrl ? ' → ' + outcome.productionUrl : ''}`);
     } catch (e) {
       this.logger.error(`全栈生成失败: ${e}`);
+    }
+  }
+
+  private async deliverRuoyiProjectApp(deliveryId: string, projectId: string): Promise<void> {
+    try {
+      const desc = await this.waitRuoyiBackendReady(projectId, Number(process.env.RUOYI_APP_READY_TIMEOUT_MS) || 30 * 60 * 1000);
+      if (desc.status !== 'ready') {
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: { goLiveStatus: 'deploy_failed', publicStatusLabel: desc.status === 'error' ? '若依后端置备失败' : '若依后端未就绪' },
+        });
+        this.logger.warn(`[项目应用上线门] deploy_failed: 若依后端未就绪 status=${desc.status ?? '无'}`);
+        return;
+      }
+
+      const latestBuild = await this.prisma.build.findFirst({ where: { projectId }, orderBy: { version: 'desc' }, select: { version: true } });
+      const build = await this.prisma.build.create({
+        data: {
+          projectId,
+          version: (latestBuild?.version || 0) + 1,
+          status: 'success',
+        },
+      });
+      const deployment = await this.deploymentService.deploy(projectId, build.id);
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: {
+          goLiveStatus: 'completed',
+          status: 'completed',
+          publicStatusLabel: '已上线',
+          productionUrl: deployment.productionUrl,
+          latestBuildId: build.id,
+        },
+      });
+      this.logger.log(`[项目应用上线门] completed: 前端交付 + 若依后端已就绪 → ${deployment.productionUrl}`);
+    } catch (e) {
+      await this.prisma.project.update({
+        where: { id: projectId },
+        data: { goLiveStatus: 'deploy_failed', publicStatusLabel: '项目应用交付失败' },
+      }).catch(() => undefined);
+      this.logger.error(`[项目应用上线门] 失败: ${e}`);
+    }
+  }
+
+  private async waitRuoyiBackendReady(projectId: string, timeoutMs: number): Promise<{ status?: string; resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> }> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
+      const desc = (proj?.backendRuntime ?? {}) as { status?: string; resources?: string[]; initialUsers?: Array<{ userName: string; password: string }> };
+      if (desc.status === 'ready' || desc.status === 'error') return desc;
+      if (Date.now() > deadline) {
+        this.logger.warn(`等若依后端就绪超时(${Math.round(timeoutMs / 1000)}s)，当前 status=${desc.status ?? '无'}`);
+        return desc;
+      }
+      await new Promise((r) => setTimeout(r, 10_000));
     }
   }
 

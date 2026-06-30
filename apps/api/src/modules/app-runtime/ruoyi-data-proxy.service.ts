@@ -37,7 +37,13 @@ export class RuoyiDataProxyService {
 
   /** 终端用户登录（若依账号）：换本人 token 存服务端，回不可逆 session。账密只在服务端用、不落浏览器。 */
   async login(username: string, password: string): Promise<{ session: string; user: string; expiresInMs: number }> {
-    const token = await this.client.login({ ...this.cfg.client, username, password });
+    let token: string;
+    try {
+      token = await this.client.login({ ...this.cfg.client, username, password });
+    } catch (e) {
+      this.logger.warn(`终端用户登录失败 user=${username}: ${e instanceof Error ? e.message : e}`);
+      throw new UnauthorizedException('业务账号不存在或密码不正确，请使用交付页提供的应用账号登录');
+    }
     const session = randomUUID();
     this.sessions.set(session, { token, user: username, exp: Date.now() + this.ttlMs });
     this.logger.log(`终端用户登录 user=${username} → 颁发 session`);

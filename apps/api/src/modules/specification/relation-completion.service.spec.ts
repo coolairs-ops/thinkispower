@@ -109,10 +109,10 @@ describe('RelationCompletionService（实体关系补全 · Phase 2a）', () => 
       expect(r.relations).toHaveLength(0);
     });
 
-    it('ask 无答案 → 用候选默认基数、级联兜底 restrict', async () => {
+    it('ask 无答案 → 不偷偷按默认值落库，留给追加问答', async () => {
       withCandidates([{ parent: '客户', child: '工单', cardinality: '1-N', disposition: 'ask' }]);
       const r = await svc.apply('u1', null, 'p1'); // 不传 answers
-      expect(r.relations[0]).toMatchObject({ cardinality: '1-N', onDelete: 'restrict' });
+      expect(r.relations).toEqual([]);
     });
 
     it('非法 onDelete 答案 → 兜底 restrict', async () => {

@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { DeepseekService } from '../../services/deepseek.service';
 import { StatusMapperService } from '../../services/status-mapper.service';
+import {
+  buildRequirementUplift,
+  mergeRequirementUplift,
+} from './requirement-uplift.service';
 
 export interface InterviewState {
   stage: string;
@@ -196,6 +200,20 @@ export class IdeaInterviewService {
     });
     const sr = (project?.structuredRequirement as any) || {};
     sr.ideaInterview = state;
+    const draft = buildRequirementUplift(state.answers);
+    sr.requirementUpliftDraft = {
+      source: 'deterministic_interview_uplift',
+      answerCount: state.answers.length,
+      signals: draft.signals,
+      missingSlots: draft.missingSlots,
+      counts: {
+        roles: draft.roles.length,
+        coreFunctions: draft.coreFunctions.length,
+        dataModels: draft.dataModels.length,
+        businessRules: draft.businessRules.length,
+        acceptanceScenarios: draft.acceptanceScenarios.length,
+      },
+    };
     await this.prisma.project.update({
       where: { id: projectId },
       data: { structuredRequirement: sr as any },
@@ -225,6 +243,14 @@ ${qa}
   "completeness": {"overall": 评估百分比数字}
 }`;
 
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { structuredRequirement: true, name: true },
+    });
+    const uplift = buildRequirementUplift(answers, { projectName: project?.name });
+    const sr = (project?.structuredRequirement as any) || {};
+    let parsed: any = null;
+
     try {
       const response = await this.deepseek.chat(
         [{ role: 'user', content: prompt }],
@@ -232,76 +258,28 @@ ${qa}
       );
       const match = response.match(/\{[\s\S]*\}/);
       if (match) {
-        const parsed = JSON.parse(match[0]);
-        const project = await this.prisma.project.findUnique({
-          where: { id: projectId },
-          select: { structuredRequirement: true, name: true },
-        });
-        const sr = (project?.structuredRequirement as any) || {};
-
-        // 保留深度格式（供规格生成用）
-        Object.assign(sr, parsed);
-
-        // 转换为 PRD 页面可展示的扁平格式
-        const targetUserStrs = (parsed.targetUsers || []).map((u: any) =>
-          typeof u === 'string' ? u : `${u.role} — ${u.description}`);
-
-        const featureStrs = (parsed.coreFunctions || []).map((f: any) =>
-          typeof f === 'string' ? f : `${f.name}${f.priority === 'must' ? '' : '（可选）'}`);
-
-        const mvpStrs = (parsed.coreFunctions || [])
-          .filter((f: any) => f.priority === 'must')
-          .map((f: any) => f.name);
-
-        const pageStrs = (parsed.pages || []).map((p: any) =>
-          typeof p === 'string' ? p : `${p.name} — ${p.description || ''}`);
-
-        const roleStrs = (parsed.roles || []).map((r: any) =>
-          typeof r === 'string' ? r : `${r.name}: ${(r.permissions || []).join('、')}`);
-
-        const acceptanceStrs = (parsed.acceptanceScenarios || []).map((s: any) =>
-          typeof s === 'string' ? s : `${s.name}: ${s.then || ''}`);
-
-        const riskStrs = (parsed.acceptanceScenarios || [])
-          .filter((s: any) => (s.priority || 'must') === 'must')
-          .map((s: any) => `必须验证: ${s.name}`);
-
-        // 提取用户痛点（从 philosophy 和 user 阶段的回答）
-        const painPoints = answers
-          .filter(a => a.question.includes('痛点') || a.question.includes('让人受不了'))
-          .map(a => a.answer);
-
-        const scenarioAnswers = answers
-          .filter(a => a.question.includes('场景') || a.question.includes('打开') || a.question.includes('怎么用'))
-          .map(a => a.answer);
-
-        // PRD 兼容格式
-        sr.prd = {
-          productName: project?.name || parsed.productName || '未命名项目',
-          summary: typeof parsed.prd === 'string' ? parsed.prd : '',
-          background: answers.find(a => a.question.includes('什么让你想'))?.answer || '',
-          targetUsers: targetUserStrs,
-          userPainPoints: painPoints.length > 0 ? painPoints : ['待补充'],
-          useScenarios: scenarioAnswers.length > 0 ? scenarioAnswers : ['待补充'],
-          coreValue: answers.find(a => a.question.includes('完美'))?.answer || '',
-          productForm: answers.find(a => a.question.includes('电脑') || a.question.includes('手机'))?.answer || 'Web 应用',
-          mvpScope: mvpStrs,
-          successCriteria: acceptanceStrs,
-          pages: pageStrs,
-          features: featureStrs,
-          roles: roleStrs,
-          dataObjects: [],
-          riskPoints: riskStrs,
-        };
-
-        await this.prisma.project.update({
-          where: { id: projectId },
-          data: { structuredRequirement: sr as any },
-        });
-        this.logger.log(`结构化需求已生成(含PRD格式): project ${projectId}`);
+        parsed = JSON.parse(match[0]);
       }
     } catch (e) {
-      this.logger.warn(`AI生成结构化需求失败: ${e}`);
+      this.logger.warn(`AI生成结构化需求失败，使用确定性需求提升结果: ${e}`);
     }
+
+    if (parsed && typeof parsed === 'object') {
+      Object.assign(sr, parsed);
+    }
+    sr.ideaInterview = {
+      ...(sr.ideaInterview || {}),
+      done: true,
+      answers,
+      completedAt: new Date().toISOString(),
+    };
+    const merged = mergeRequirementUplift(sr, uplift, { projectName: project?.name });
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { structuredRequirement: merged as any },
+    });
+    this.logger.log(
+      `结构化需求已生成(需求提升门): project ${projectId} roles=${uplift.roles.length} functions=${uplift.coreFunctions.length} dataModels=${uplift.dataModels.length} rules=${uplift.businessRules.length} acceptance=${uplift.acceptanceScenarios.length}`,
+    );
   }
 }

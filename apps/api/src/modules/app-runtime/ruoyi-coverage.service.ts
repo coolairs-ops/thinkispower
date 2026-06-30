@@ -25,6 +25,7 @@ export interface RuoyiCoverageReport {
     roles: SlotState; // 使用角色
     dataScope: SlotState; // 数据权限范围
     menus: SlotState; // 菜单/功能入口
+    businessRules: SlotState; // 业务规则
     acceptanceScenarios: SlotState; // 验收场景
   };
   /** 业务可读的缺口清单（一屏选择题/进度条用，切片2） */
@@ -49,12 +50,13 @@ const NON_BUSINESS_FIELDS = new Set(
 export class RuoyiCoverageService {
   /** 各槽权重（按交付必填度：实体/字段重，菜单/关系/数据范围/验收轻）。和 = 100。 */
   private readonly WEIGHTS = {
-    entities: 25,
-    fields: 20,
+    entities: 20,
+    fields: 15,
     roles: 15,
     relations: 10,
     dataScope: 10,
     menus: 10,
+    businessRules: 10,
     acceptanceScenarios: 10,
   };
 
@@ -64,6 +66,7 @@ export class RuoyiCoverageService {
     const relations = spec?.relations ?? [];
     const roles = spec?.roles ?? [];
     const menus = spec?.menus ?? [];
+    const businessRules = spec?.businessRules ?? [];
     const gaps: string[] = [];
 
     // ① 实体：有没有业务对象
@@ -118,7 +121,11 @@ export class RuoyiCoverageService {
     const menusState: SlotState = menus.length > 0 ? 'known' : 'missing';
     if (menusState === 'missing') gaps.push('菜单/功能入口（系统里有哪些可点的功能页）');
 
-    // ⑦ 验收场景：有没有可判定的 Given-When-Then
+    // ⑦ 业务规则：审批、计算、状态流转、校验等生成/验收约束
+    const businessRulesState: SlotState = businessRules.length > 0 ? 'known' : 'missing';
+    if (businessRulesState === 'missing') gaps.push('业务规则（什么情况下要审批/校验/计算/预警）');
+
+    // ⑧ 验收场景：有没有可判定的 Given-When-Then
     const completeScenarios = scenarios.filter((s) => s && s.given && s.when && s.then).length;
     let acceptanceState: SlotState;
     if (scenarios.length === 0) {
@@ -138,6 +145,7 @@ export class RuoyiCoverageService {
       roles: rolesState,
       dataScope: dataScopeState,
       menus: menusState,
+      businessRules: businessRulesState,
       acceptanceScenarios: acceptanceState,
     };
 
