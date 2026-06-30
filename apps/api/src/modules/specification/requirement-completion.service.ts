@@ -112,7 +112,7 @@ export class RequirementCompletionService {
     const gaps = (sr.completenessGaps as CompletenessGap[]) ?? [];
     if (gaps.length === 0) return { gaps: [] };
 
-    let classified = gaps;
+    let classified: CompletenessGap[];
     try {
       const resp = await this.deepseek.chat([{ role: 'user', content: this.buildDispositionPrompt(gaps) }], {
         temperature: 0.3,

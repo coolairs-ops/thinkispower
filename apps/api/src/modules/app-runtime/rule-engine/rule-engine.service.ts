@@ -55,7 +55,7 @@ export class RuleEngineService {
     const hits: ConclusionResult[] = [];
     for (const rule of pack.rules) {
       if (!this.ruleActive(rule, asOf)) continue;
-      let when = false;
+      let when: boolean;
       try { when = evaluateBool(rule.when, scope); }
       catch (e) { this.logger.warn(`规则 ${rule.id} 条件求值失败（视为不命中）: ${e instanceof EvalError ? e.message : e}`); continue; }
       if (!when) continue;

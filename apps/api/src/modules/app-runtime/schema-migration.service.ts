@@ -127,7 +127,7 @@ export class SchemaMigrationService {
   private parseField(line: string, modelName: string, modelNames: Set<string>): ModelField | null {
     const tokens = line.split(/\s+/);
     const fieldName = tokens[0];
-    let typeToken = tokens[1];
+    const typeToken = tokens[1];
     if (!fieldName || !typeToken) throw new BadRequestException(`模型 ${modelName} 字段定义不完整: "${line}"`);
 
     if (!SchemaMigrationService.IDENT.test(fieldName) || fieldName.length > SchemaMigrationService.PG_IDENT_MAX) {
@@ -137,7 +137,7 @@ export class SchemaMigrationService {
     const attrs = line.slice(line.indexOf(typeToken) + typeToken.length);
     const isList = typeToken.endsWith('[]');
     const optional = typeToken.endsWith('?');
-    const baseType = typeToken.replace(/[\[\]?]+$/g, '');
+    const baseType = typeToken.replace(/\[\]|\?/g, '');
 
     // 关系字段（对象关系 / 列表 / 带 @relation）→ 跳过，不物化为列
     if (isList || /@relation\b/.test(attrs) || modelNames.has(baseType)) {
@@ -169,7 +169,7 @@ export class SchemaMigrationService {
   /** 把 @default(...) 归一为安全的 SQL 默认值表达式；无法识别的默认值忽略（不报错、不注入）。 */
   private parseDefault(attrs: string, prismaType: string): string | undefined {
     // 默认值形态限定为：函数调用 func() / 带引号字符串 / 裸词或数字——三者都不含可注入的括号歧义
-    const m = attrs.match(/@default\(\s*([A-Za-z]+\(\)|"[^"]*"|[\w.\-]+)\s*\)/);
+    const m = attrs.match(/@default\(\s*([A-Za-z]+\(\)|"[^"]*"|[\w.-]+)\s*\)/);
     if (!m) return undefined;
     const raw = m[1].trim();
 

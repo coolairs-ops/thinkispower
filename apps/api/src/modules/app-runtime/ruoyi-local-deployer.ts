@@ -218,7 +218,7 @@ export class RuoyiLocalDeployer {
       this.logger.log(`${label}成功：${cmd}${stdout ? ` (${stdout.trim().slice(-120)})` : ''}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`${label}失败（${cmd}）：${msg.slice(0, 300)}`);
+      throw new Error(`${label}失败（${cmd}）：${msg.slice(0, 300)}`, { cause: e });
     }
   }
 }

@@ -32,7 +32,7 @@ export class RealBuildStepRunner implements BuildStepRunner {
     // 让每次重建都朝契约收敛、不靠后验门事后纠（与分段生成同一接法）。
     const contractNotes = this.cloudecode.buildContractNotes(project?.dataModel, (project?.backendRuntime as { kind?: string } | null)?.kind);
 
-    let html = '';
+    let html: string;
     try {
       html = await this.cloudecode.generatePageContent(appName, brief, project?.dataModel ?? null, false, designNotes, contractNotes);
     } catch (e) {
