@@ -8,6 +8,7 @@ import { ParsedModel } from './data-model.types';
 import { RuoyiClient, RuoyiClientConfig } from './ruoyi-client.service';
 import { loadRuoyiInstanceConfig } from './ruoyi-provision.config';
 import type { ConsoleLabels } from './ruoyi-label-gen';
+import { DEFAULT_APP_LOGIN_PASSWORD } from './app-login-defaults';
 
 /**
  * provision 的两个基础设施驱动端口（M3c-remaining 端到端已手工证通的步骤的代码化）。
@@ -135,7 +136,7 @@ export class RuoyiRuntime implements BackendRuntime {
     // ③ RBAC 运行时配：角色 + data_scope + 接口权限点 + 初始用户。roleKeys/initialUsers 确定性派生(放相位门外，
     //    断点续跑时 descriptor 仍带账号；种入操作幂等放门内)。
     const roleKeys = (spec.roles ?? []).map((r, i) => roleKey(r.name, i, scopeKey));
-    const defaultPwd = process.env.RUOYI_DEFAULT_USER_PWD || '123456';
+    const defaultPwd = process.env.RUOYI_DEFAULT_USER_PWD || DEFAULT_APP_LOGIN_PASSWORD;
     const initialUsers = (spec.roles ?? []).map((r, i) => ({ userName: `${scopeKey}_u${i + 1}`, password: defaultPwd, role: r.name }));
     if (!phaseReached(from, 'seeded')) {
       if (spec.roles?.length) {

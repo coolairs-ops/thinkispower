@@ -360,12 +360,12 @@ export class DeliveryEvaluationService {
         data: {
           goLiveStatus: 'completed',
           status: 'completed',
-          publicStatusLabel: '已上线',
+          publicStatusLabel: '快速发布完成（复用若依后端）',
           productionUrl: deployment.productionUrl,
           latestBuildId: build.id,
         },
       });
-      this.logger.log(`[项目应用上线门] completed: 前端交付 + 若依后端已就绪 → ${deployment.productionUrl}`);
+      this.logger.log(`[项目应用上线门] completed: 快速发布应用壳，复用已就绪若依后端 → ${deployment.productionUrl}`);
     } catch (e) {
       await this.prisma.project.update({
         where: { id: projectId },

@@ -179,6 +179,7 @@ export default function DeliveryPage() {
             elapsed={elapsed}
             currentStep={currentStep}
             steps={DELIVERY_STEPS}
+            publicStatusLabel={delivery?.publicStatusLabel}
           />
 
           {/* ═══ 操作按钮 ═══ */}

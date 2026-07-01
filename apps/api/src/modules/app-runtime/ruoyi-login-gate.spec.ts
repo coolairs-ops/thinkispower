@@ -40,6 +40,8 @@ describe('ruoyi-login-gate（终端用户登录门 P1b）', () => {
     expect(s).toContain('location.reload()');
     expect(s).toContain('isLoggedIn');
     expect(s).toContain('tip-login-ov');
+    expect(s).toContain('value="ceshi"');
+    expect(s).toContain('value="ceshi123"');
     expect(s).toContain('登录 '); // 标题用 appName
     expect(s).toContain('"客户系统"'); // appName 经 JSON.stringify 转义注入
   });

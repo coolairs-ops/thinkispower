@@ -23,6 +23,7 @@ export default function DeliveryStatusCard({
   elapsed,
   currentStep,
   steps,
+  publicStatusLabel,
 }: {
   isGenerating: boolean;
   status?: string;
@@ -30,6 +31,7 @@ export default function DeliveryStatusCard({
   elapsed: number;
   currentStep: number;
   steps: Array<{ id: string; label: string; icon: string }>;
+  publicStatusLabel?: string;
 }) {
   if (isGenerating) {
     return (
@@ -67,11 +69,14 @@ export default function DeliveryStatusCard({
   }
 
   if (status === 'completed') {
+    const isFastRuoyiPublish = publicStatusLabel?.includes('复用若依后端') || publicStatusLabel?.includes('快速发布');
     return (
       <section className="mb-6 rounded-xl bg-green-50 p-5 border border-green-200">
-        <h2 className="text-base font-semibold text-green-800">已上线</h2>
+        <h2 className="text-base font-semibold text-green-800">{publicStatusLabel || '已上线'}</h2>
         <p className="text-sm text-green-600 mt-1">
-          通过全部上线门（编译 + 部署健康/后端就绪 + 契约一致 + 冒烟）。{hasFiles ? '可下载源码或在线访问。' : '产物如下。'}
+          {isFastRuoyiPublish
+            ? '已通过上线门。此次交付复用已置备的若依后端，只发布当前项目应用壳和上线记录，所以耗时会明显短于全量代码生成和重编译。'
+            : <>通过全部上线门（编译 + 部署健康/后端就绪 + 契约一致 + 冒烟）。{hasFiles ? '可下载源码或在线访问。' : '产物如下。'}</>}
         </p>
       </section>
     );

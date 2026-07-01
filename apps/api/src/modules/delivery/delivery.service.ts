@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { BuildService } from '../../services/build.service';
 import { assertResourceAccess } from '../../common/utils/tenant-scope';
+import { DEFAULT_APP_LOGIN_PASSWORD, DEFAULT_APP_LOGIN_USERNAME } from '../app-runtime/app-login-defaults';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -32,11 +33,12 @@ export class DeliveryService {
     const initialUser = be?.kind === 'ruoyi' ? be?.initialUsers?.[0] : undefined;
     const consoleLogin = be?.kind === 'ruoyi'
       ? {
-          username: initialUser?.userName ?? null,
-          password: initialUser?.password ?? null,
+          username: initialUser?.userName ? DEFAULT_APP_LOGIN_USERNAME : null,
+          password: initialUser?.userName ? DEFAULT_APP_LOGIN_PASSWORD : null,
           hasScopedAccount: !!initialUser?.userName,
+          actualUsername: initialUser?.userName ?? null,
           note: initialUser?.userName
-            ? '请用此应用账号登录交付后的业务系统；它用于本项目的数据权限和操作审计。'
+            ? '请用此测试账号登录交付后的业务系统；平台会自动映射到本项目专属账号，数据权限和操作审计仍按项目隔离。'
             : '此项目较早置备、暂无应用账号；重新交付即可自动生成业务账号。',
         }
       : null;

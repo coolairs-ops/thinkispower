@@ -51,7 +51,12 @@ describe('DeliveryService', () => {
         backendRuntime: { kind: 'ruoyi', initialUsers: [{ userName: 'proj_u1', password: '123456', role: '管理员' }] },
       });
       const result = await service.getDelivery(mockUserId, null, mockProjectId);
-      expect(result.consoleLogin).toMatchObject({ username: 'proj_u1', password: '123456', hasScopedAccount: true });
+      expect(result.consoleLogin).toMatchObject({
+        username: 'ceshi',
+        password: 'ceshi123',
+        actualUsername: 'proj_u1',
+        hasScopedAccount: true,
+      });
       expect(result.consoleLogin!.note).toContain('业务系统');
     });
 

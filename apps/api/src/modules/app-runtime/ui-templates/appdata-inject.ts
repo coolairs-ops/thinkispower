@@ -2,13 +2,17 @@
  * appData 客户端注入（模板产物用）。与 cloudecode.injectAppDataClient 同契约，
  * 独立一份避免 app-runtime ↔ cloudecode 循环依赖。指向 /api/app/<pid>/，含 evaluate(形态B)。
  */
+import { DEFAULT_APP_LOGIN_PASSWORD, DEFAULT_APP_LOGIN_USERNAME } from '../app-login-defaults';
+
 export function injectAppData(html: string, projectId: string, options: { authGate?: boolean } = {}): string {
   const safeId = projectId.replace(/[^a-zA-Z0-9-]/g, '');
+  const defaultUser = escapeHtmlAttr(DEFAULT_APP_LOGIN_USERNAME);
+  const defaultPassword = escapeHtmlAttr(DEFAULT_APP_LOGIN_PASSWORD);
   const authGate = options.authGate === false ? '' : `var GATE='<div id="tip-auth" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:100000;font-family:system-ui">'
 +'<div style="background:#fff;border-radius:12px;padding:24px;width:300px;box-shadow:0 12px 40px rgba(0,0,0,.2);color:#111">'
 +'<div style="font-weight:600;font-size:16px;margin-bottom:14px">登录</div>'
-+'<input id="tip-au-u" placeholder="用户名" autocomplete="username" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px;border:1px solid #d1d5db;border-radius:8px">'
-+'<input id="tip-au-p" type="password" placeholder="密码" autocomplete="current-password" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px;border:1px solid #d1d5db;border-radius:8px">'
++'<input id="tip-au-u" placeholder="用户名" autocomplete="username" value="${defaultUser}" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px;border:1px solid #d1d5db;border-radius:8px">'
++'<input id="tip-au-p" type="password" placeholder="密码" autocomplete="current-password" value="${defaultPassword}" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px;border:1px solid #d1d5db;border-radius:8px">'
 +'<button id="tip-au-btn" style="width:100%;padding:9px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer">登录</button>'
 +'<div id="tip-au-msg" style="margin-top:8px;font-size:12px;color:#ef4444;min-height:14px"></div></div></div>';
 function mountGate(){
@@ -56,4 +60,12 @@ ${authGate}
 })();</script>`;
   if (html.includes('</head>')) return html.replace('</head>', js + '</head>');
   return html.replace('<body>', '<body>' + js);
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

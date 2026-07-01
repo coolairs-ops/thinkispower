@@ -54,4 +54,16 @@ describe('AppRuntimeController · /api/app 按 backendRuntime 分流', () => {
     const pathB = make(null);
     await expect(pathB.ctrl.login('p1', { username: 'a', password: 'b' })).rejects.toThrow(BadRequestException);
   });
+
+  it('_login：固定测试账号 ceshi/ceshi123 → 映射为当前项目专属账号', async () => {
+    const ruoyi = make({
+      kind: 'ruoyi',
+      status: 'ready',
+      initialUsers: [{ userName: 'proj_u1', password: 'real-pwd' }],
+    });
+
+    await ruoyi.ctrl.login('p1', { username: 'ceshi', password: 'ceshi123' });
+
+    expect(ruoyi.proxy.login).toHaveBeenCalledWith('proj_u1', 'real-pwd');
+  });
 });

@@ -5,6 +5,7 @@ import { RuoyiDataProxyService } from './ruoyi-data-proxy.service';
 import { RuleEvaluationService } from './rule-engine/rule-evaluation.service';
 import { KnowledgeSourceService } from './knowledge/knowledge-source.service';
 import { QaService } from './qa/qa.service';
+import { isDefaultAppLogin } from './app-login-defaults';
 
 /**
  * 已部署应用的数据接口（ADR-0001 / 路 B，REST 约定见 app-runtime-rest-contract.md）。
@@ -25,19 +26,28 @@ export class AppRuntimeController {
   ) {}
 
   /** 该项目是否以若依为后端且已就绪（决定 /api/app CRUD 走代理还是路B）。未配若依则快速否决，不打 DB。 */
-  private async isRuoyi(projectId: string): Promise<boolean> {
-    if (!this.ruoyiProxy.enabled) return false;
+  private async getRuoyiRuntime(projectId: string): Promise<{ kind?: string; status?: string; initialUsers?: Array<{ userName?: string; password?: string }> } | null> {
+    if (!this.ruoyiProxy.enabled) return null;
     const p = await this.prisma.project.findUnique({ where: { id: projectId }, select: { backendRuntime: true } });
-    const be = p?.backendRuntime as { kind?: string; status?: string } | null;
+    return p?.backendRuntime as { kind?: string; status?: string; initialUsers?: Array<{ userName?: string; password?: string }> } | null;
+  }
+
+  private async isRuoyi(projectId: string): Promise<boolean> {
+    const be = await this.getRuoyiRuntime(projectId);
     return be?.kind === 'ruoyi' && be?.status === 'ready';
   }
 
   /** 终端用户登录（仅若依后端需要）：换本人 token，回 session（浏览器不见若依 token）。 */
   @Post(':projectId/_login')
   async login(@Param('projectId') projectId: string, @Body() body: { username?: string; password?: string }) {
-    if (!(await this.isRuoyi(projectId))) throw new BadRequestException('该应用无需登录（非若依后端）');
+    const be = await this.getRuoyiRuntime(projectId);
+    if (be?.kind !== 'ruoyi' || be?.status !== 'ready') throw new BadRequestException('该应用无需登录（非若依后端）');
     if (!body?.username || !body?.password) throw new BadRequestException('需要 username/password');
-    return this.ruoyiProxy.login(body.username, body.password);
+    const firstUser = be.initialUsers?.[0];
+    const mapped = isDefaultAppLogin(body.username, body.password) && firstUser?.userName && firstUser?.password
+      ? { username: firstUser.userName, password: firstUser.password }
+      : { username: body.username, password: body.password };
+    return this.ruoyiProxy.login(mapped.username, mapped.password);
   }
 
   /** 终端用户登出：作废服务端 session。 */

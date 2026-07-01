@@ -9,6 +9,12 @@ describe('injectAppData', () => {
     expect(html).not.toContain('mountGate');
   });
 
+  it('默认登录弹层预填测试账号', () => {
+    const html = injectAppData('<html><head></head><body></body></html>', 'proj-1');
+    expect(html).toContain('value="ceshi"');
+    expect(html).toContain('value="ceshi123"');
+  });
+
   it('localStorage 不可用时，用 window.name 兜底保存 session（适配 srcDoc iframe 预览）', async () => {
     const html = injectAppData('<html><head></head><body></body></html>', 'proj-1');
     const iife = html.match(/\(function\(\)\{[\s\S]*\}\)\(\);/)![0];

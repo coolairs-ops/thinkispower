@@ -10,7 +10,11 @@
  * 只对若依后端的应用注入（serve 层按 backendRuntime 决定）；路 B 公开应用不注入、行为不变。
  * 无框架、内联样式，避免依赖业务页的 CSS/JS。
  */
+import { DEFAULT_APP_LOGIN_PASSWORD, DEFAULT_APP_LOGIN_USERNAME } from './app-login-defaults';
+
 export function buildLoginGateScript(appName = '应用'): string {
+  const defaultUser = escapeHtmlAttr(DEFAULT_APP_LOGIN_USERNAME);
+  const defaultPassword = escapeHtmlAttr(DEFAULT_APP_LOGIN_PASSWORD);
   return `<script>/* tip-login-gate: 终端用户登录门（若依后端·A 架构） */
 (function(){
   if(window.__tipLoginGate)return; window.__tipLoginGate=1;
@@ -24,8 +28,8 @@ export function buildLoginGateScript(appName = '应用'): string {
     ov.innerHTML='<div id="tip-login-card" style="background:#fff;padding:28px 26px;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.25);width:320px;max-width:90vw">'
       +'<div style="font-size:18px;font-weight:600;color:#0f172a;margin-bottom:4px">登录 '+APP+'</div>'
       +'<div style="font-size:13px;color:#64748b;margin-bottom:18px">请用业务账号登录后查看数据</div>'
-      +'<input id="tip-u" placeholder="用户名" autocomplete="username" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:10px;font-size:14px">'
-      +'<input id="tip-p" type="password" placeholder="密码" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:6px;font-size:14px">'
+      +'<input id="tip-u" placeholder="用户名" autocomplete="username" value="${defaultUser}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:10px;font-size:14px">'
+      +'<input id="tip-p" type="password" placeholder="密码" autocomplete="current-password" value="${defaultPassword}" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:6px;font-size:14px">'
       +'<div id="tip-err" style="color:#dc2626;font-size:12px;min-height:16px;margin-bottom:8px"></div>'
       +'<button type="button" id="tip-sub" style="width:100%;padding:10px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:15px;cursor:pointer">登录</button>'
       +'</div>';
@@ -54,4 +58,12 @@ export function injectLoginGate(html: string, appName = '应用'): string {
   const js = buildLoginGateScript(appName);
   if (html.includes('</body>')) return html.replace('</body>', js + '\n</body>');
   return html + js;
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
